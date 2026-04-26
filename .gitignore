@@ -54,4 +54,3 @@ ENV/
 
 # Sphinx
 docs/stubs/
-docs/_build/

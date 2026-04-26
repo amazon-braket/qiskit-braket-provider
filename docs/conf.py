@@ -17,6 +17,8 @@ Sphinx documentation builder
 import datetime
 from pathlib import Path
 
+from pygments.formatters import LatexFormatter
+
 project = "Qiskit-Braket provider"
 copyright = f"{datetime.datetime.now(tz=datetime.UTC).year}, Amazon.com"  # noqa: A001
 author = "Amazon Web Services"
@@ -35,12 +37,11 @@ extensions = [
     "sphinx.ext.mathjax",
     "sphinx.ext.viewcode",
     "sphinx.ext.extlinks",
-    "jupyter_sphinx",
     "sphinx_autodoc_typehints",
     "IPython.sphinxext.ipython_console_highlighting",
-    "reno.sphinxext",
     "nbsphinx",
     "qiskit_sphinx_theme",
+    "sphinxcontrib.rsvgconverter",
 ]
 templates_path = ["_templates"]
 numfig = True
@@ -67,3 +68,12 @@ exclude_patterns = ["_build", "**.ipynb_checkpoints"]
 
 html_theme = "qiskit-ecosystem"
 html_title = f"{project} {release}"
+
+# LaTeX options (for PDF builds on Read the Docs)
+latex_engine = "lualatex"
+latex_elements = {
+    "preamble": rf"""
+\providecommand{{\mathbfit}}[1]{{\boldsymbol{{#1}}}}
+{LatexFormatter().get_style_defs()}
+""",
+}
