@@ -1,0 +1,6 @@
+sphinx>7
+qiskit_sphinx_theme~=1.16.0
+sphinx-autodoc-typehints
+sphinxcontrib-svg2pdfconverter
+nbsphinx
+ipython
