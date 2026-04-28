@@ -1,7 +1,7 @@
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeAlias
 
 import numpy as np
 from qiskit.primitives import BaseEstimatorV2, DataBin, EstimatorPubLike, PrimitiveResult, PubResult
@@ -22,11 +22,15 @@ from qiskit_braket_provider.providers.braket_primitive_task import BraketPrimiti
 
 _DEFAULT_PRECISION = 0.015625  # Same value as BackendEstimatorV2
 
+# (broadcast_position, observable_index_or_None_for_Sum, parameter_set_index)
+_ResultMapEntry: TypeAlias = tuple[int, int | None, int]
+_ResultMap: TypeAlias = dict[int, list[_ResultMapEntry]]
+
 
 @dataclass
 class _PubMetadata:
     num_bindings: int
-    binding_to_result_map: dict[int, tuple[tuple[int, ...], int, int]]
+    binding_to_result_map: _ResultMap
     sum_binding_indices: set[int]
 
 
@@ -131,7 +135,7 @@ class BraketEstimator(BaseEstimatorV2):
 
     def _translate_pub(
         self, pub: EstimatorPub
-    ) -> tuple[list[CircuitBinding], dict[int, tuple[tuple[int, ...], int, int]], set[int]]:
+    ) -> tuple[list[CircuitBinding], _ResultMap, set[int]]:
         """
         Convert an EstimatorPub to a list of CircuitBindings.
 
@@ -145,7 +149,7 @@ class BraketEstimator(BaseEstimatorV2):
             pub (EstimatorPub): The EstimatorPub to convert.
 
         Returns:
-            tuple[list[CircuitBinding], dict[int, tuple[tuple[int, ...], int, int]], set[int]]:
+            tuple[list[CircuitBinding], _ResultMap, set[int]]:
             The circuit bindings, pub shape, a map of binding index to array positions,
             and the indices of bindings with Pauli sum observables.
         """
@@ -177,8 +181,8 @@ class BraketEstimator(BaseEstimatorV2):
         ):
             obs_groups[BraketEstimator._make_obs_key(obs)].append((position, param_indices))
 
-        bindings = []
-        binding_to_result_map = {}
+        bindings: list[CircuitBinding] = []
+        binding_to_result_map: _ResultMap = {}
         sum_binding_indices = set()
         processed_obs_keys = set()
 
