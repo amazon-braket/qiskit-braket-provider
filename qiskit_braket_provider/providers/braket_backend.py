@@ -92,7 +92,10 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
         return gateset_from_properties(action) if action else None
 
     def _run_program_set(
-        self, braket_circuits: list[Circuit], shots: int | None, **options: Any  # noqa: ANN401
+        self,
+        braket_circuits: list[Circuit],
+        shots: int | None,
+        **options: Any,  # noqa: ANN401
     ) -> BraketQuantumTask:
         program_set = ProgramSet(braket_circuits, shots_per_executable=shots)
         task = self._device.run(program_set, **options)
@@ -434,7 +437,10 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         return None, self._gateset
 
     def _run_batch(
-        self, braket_circuits: list[Circuit], shots: int, **options: Any  # noqa: ANN401
+        self,
+        braket_circuits: list[Circuit],
+        shots: int,
+        **options: Any,  # noqa: ANN401
     ) -> BraketQuantumTask:
         batch_task = self._device.run_batch(braket_circuits, shots=shots, **options)
         tasks: list[AwsQuantumTask] = batch_task.tasks

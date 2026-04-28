@@ -311,7 +311,6 @@ _ParameterRestrictions: TypeAlias = dict[str, dict[_ParamKey, _QubitSet]]
 _T = TypeVar("_T")
 
 
-
 class _SubstitutedTarget(Target):
     def __new__(cls, *args: Any, **kwargs: Any) -> Self:  # noqa: ANN401
         out = super().__new__(cls, *args, **kwargs)
@@ -357,6 +356,8 @@ class _QiskitProgramContext(AbstractProgramContext):
     configurable label name.
     """
 
+    num_qubits: int
+
     def __init__(self, verbatim_box_name: str = _BRAKET_VERBATIM_BOX_NAME) -> None:
         """Initialize the Qiskit program context.
 
@@ -365,7 +366,6 @@ class _QiskitProgramContext(AbstractProgramContext):
                 Default: "verbatim"
         """
         super().__init__()
-        self.num_qubits: int = 0
         self._circuit_stack: list[QuantumCircuit] = [QuantumCircuit()]
         self._param_map: dict[str, Parameter] = {}
         self._in_verbatim_box = False
@@ -1039,7 +1039,9 @@ def _qpu_target(device: AwsDevice, description: str) -> Target:
         )
 
     default_props_1q: dict[tuple[int, ...], None] = {(i,): None for i in indices.values()}
-    default_props_2q: dict[tuple[int, ...], None] = {(indices[u], indices[v]): None for u, v in topology.edges}
+    default_props_2q: dict[tuple[int, ...], None] = {
+        (indices[u], indices[v]): None for u, v in topology.edges
+    }
     if not instruction_props_measurement:
         instruction_props_measurement.update(default_props_1q)
     if not instruction_props_1q:
@@ -1082,7 +1084,9 @@ def _build_instruction_props_2q(
     indices: Mapping[int, int],
     default_properties: InstructionProperties,
 ) -> dict[str, dict[tuple[int, ...], InstructionProperties]]:
-    instruction_props_2q: dict[str, dict[tuple[int, ...], InstructionProperties]] = defaultdict(dict)
+    instruction_props_2q: dict[str, dict[tuple[int, ...], InstructionProperties]] = defaultdict(
+        dict
+    )
     for k, props in standardized.twoQubitProperties.items():
         qubits = [int(q) for q in k.split("-")]
         # Check if all qubits in the edge exist in topology
@@ -1535,7 +1539,7 @@ def to_braket(
             if basis_gates is ``None``. Default: ``None``.
         verbatim (bool): Whether to translate the circuit without any modification, in other
             words without transpiling it. Default: ``False``.
-        basis_gates (Sequence[str] | None): The gateset to transpile to. Can only be provided
+        basis_gates (Collection[str] | None): The gateset to transpile to. Can only be provided
             if target is ``None``. If ``None`` and target is ``None``, the transpiler will use
             all gates defined in the Braket SDK. Default: ``None``.
         coupling_map (list[list[int]] | None): If provided, will transpile to a circuit

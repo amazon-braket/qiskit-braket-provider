@@ -51,7 +51,9 @@ class BraketProvider:
         return backends[0]
 
     def backends(
-        self, name: str | None = None, **kwargs: Any  # noqa: ANN401
+        self,
+        name: str | None = None,
+        **kwargs: Any,  # noqa: ANN401
     ) -> list[BraketAwsBackend | BraketLocalBackend]:
         """Return a list of backends matching the specified filters.
 
