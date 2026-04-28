@@ -1745,8 +1745,14 @@ def _translate_to_braket(
                 clbit = circuit.find_bit(circuit_instruction.clbits[0]).index
                 measured_qubits[clbit] = qubit_index
             case "barrier":
-                qubit_indices = [qubit_labels[circuit.find_bit(qubit).index] for qubit in qubits]
-                braket_circuit.barrier(target=qubit_indices or None)
+                if target and "barrier" in target.operation_names:
+                    qubit_indices = [qubit_labels[circuit.find_bit(qubit).index] for qubit in qubits]
+                    braket_circuit.barrier(target=qubit_indices or None)
+                else:
+                    warnings.warn(
+                        "Barrier is not included in the current Target and will be ignored.",
+                        stacklevel=2,
+                    )
             case "reset":
                 raise NotImplementedError(
                     "reset operation not supported by qiskit to braket adapter"
@@ -1756,7 +1762,6 @@ def _translate_to_braket(
                 qubit_indices = [qubit_labels[circuit.find_bit(qubit).index] for qubit in qubits][
                     ::-1
                 ]  # reversal for little to big endian notation
-
                 for gate in _QISKIT_GATE_NAME_TO_BRAKET_GATE[gate_name](params):
                     braket_circuit += Instruction(
                         operator=gate,
