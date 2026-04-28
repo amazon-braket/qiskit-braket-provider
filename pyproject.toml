@@ -52,3 +52,11 @@ extend-ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["braket"]
+
+[tool.mypy]
+warn_unused_configs = true
+ignore_missing_imports = true
+strict_optional = false
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
