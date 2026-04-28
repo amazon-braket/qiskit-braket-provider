@@ -701,7 +701,7 @@ class TestAdapter(TestCase):
         self.assertEqual(braket_circuit, expected_braket_circuit)
 
     def test_measure_all_barrier_removed(self):
-        """test that a terminal barrier is removed when not supported in the target"""
+        """ test that a terminal barrier is removed when not supported in the target """
         target = Target(num_qubits=3)
         target.add_instruction(qiskit_gates.HGate())
         target.add_instruction(qiskit_gates.CXGate())
