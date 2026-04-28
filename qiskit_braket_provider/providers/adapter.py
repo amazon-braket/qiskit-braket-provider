@@ -1746,7 +1746,9 @@ def _translate_to_braket(
                 measured_qubits[clbit] = qubit_index
             case "barrier":
                 if target and "barrier" in target.operation_names:
-                    qubit_indices = [qubit_labels[circuit.find_bit(qubit).index] for qubit in qubits]
+                    qubit_indices = [
+                        qubit_labels[circuit.find_bit(qubit).index] for qubit in qubits
+                    ]
                     braket_circuit.barrier(target=qubit_indices or None)
                 else:
                     warnings.warn(
