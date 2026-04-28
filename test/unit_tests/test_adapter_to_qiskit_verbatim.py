@@ -1,7 +1,10 @@
 """Tests for verbatim pragma support in Qiskit to Braket adapter."""
 
+from typing import Any
+
 import pytest
-from qiskit.circuit import BoxOp
+from qiskit import QuantumCircuit
+from qiskit.circuit import BoxOp, CircuitInstruction
 
 from braket.circuits import Circuit
 from braket.default_simulator.openqasm.interpreter import VerbatimBoxDelimiter
@@ -11,11 +14,11 @@ from qiskit_braket_provider import to_qiskit
 from qiskit_braket_provider.providers.adapter import _QiskitProgramContext
 
 
-def _get_box_ops(qiskit_circuit):
+def _get_box_ops(qiskit_circuit: QuantumCircuit) -> list[CircuitInstruction]:
     return [instr for instr in qiskit_circuit.data if isinstance(instr.operation, BoxOp)]
 
 
-def _get_non_box_gates(qiskit_circuit):
+def _get_non_box_gates(qiskit_circuit: QuantumCircuit) -> list[CircuitInstruction]:
     return [instr for instr in qiskit_circuit.data if not isinstance(instr.operation, BoxOp)]
 
 
@@ -61,7 +64,9 @@ box {
     ],
     ids=["single_box_with_gates", "empty_box", "custom_label"],
 )
-def test_single_verbatim_box(qasm, num_qubits, label, expected_body_gates):
+def test_single_verbatim_box(
+    qasm: str, num_qubits: int, label: str, expected_body_gates: list[str]
+) -> None:
     kwargs = {"verbatim_box_name": label} if label != "verbatim" else {}
     qc = to_qiskit(qasm, **kwargs)
 
@@ -75,7 +80,7 @@ def test_single_verbatim_box(qasm, num_qubits, label, expected_body_gates):
     assert body_gates == expected_body_gates
 
 
-def test_multiple_verbatim_boxes():
+def test_multiple_verbatim_boxes() -> None:
     qasm = """
 OPENQASM 3.0;
 #pragma braket verbatim
@@ -101,7 +106,7 @@ box {
     assert non_box[0].operation.name == "x"
 
 
-def test_gates_outside_verbatim_box():
+def test_gates_outside_verbatim_box() -> None:
     qasm = """
 OPENQASM 3.0;
 h $0;
@@ -121,7 +126,7 @@ x $1;
     assert box_ops[0].operation.body.data[0].operation.name == "cx"
 
 
-def test_explicit_qubit_register_no_duplicate_classical_bits():
+def test_explicit_qubit_register_no_duplicate_classical_bits() -> None:
     qasm = """
 OPENQASM 3.0;
 bit[2] c;
@@ -139,7 +144,7 @@ c[1] = measure q[1];
     assert len(measurements) == 2
 
 
-def test_verbatim_box_with_measurements():
+def test_verbatim_box_with_measurements() -> None:
     qasm = """
 OPENQASM 3.0;
 bit[2] c;
@@ -158,7 +163,7 @@ c[1] = measure $1;
     assert len(measurements) == 2
 
 
-def test_verbatim_box_qubit_mapping():
+def test_verbatim_box_qubit_mapping() -> None:
     qasm = """
 OPENQASM 3.0;
 #pragma braket verbatim
@@ -178,7 +183,7 @@ box {
     assert (h_idx, cnot_q0, cnot_q1) == (0, 1, 2)
 
 
-def test_non_contiguous_physical_qubits():
+def test_non_contiguous_physical_qubits() -> None:
     qasm = """
 OPENQASM 3.0;
 #pragma braket verbatim
@@ -200,7 +205,7 @@ box {
     assert (h_idx, cnot_q0, cnot_q1) == (2, 2, 5)
 
 
-def test_verbatim_box_adds_qubits_to_main_circuit():
+def test_verbatim_box_adds_qubits_to_main_circuit() -> None:
     qasm = """
 OPENQASM 3.0;
 x $0;
@@ -247,7 +252,9 @@ cnot $0, $1;
     ],
     ids=["openqasm_str", "braket_circuit", "braket_program"],
 )
-def test_no_verbatim_pragma(source, to_qiskit_kwargs):
+def test_no_verbatim_pragma(
+    source: str | Circuit | Program, to_qiskit_kwargs: dict[str, Any]
+) -> None:
     qc = to_qiskit(source, **to_qiskit_kwargs)
     assert len(_get_box_ops(qc)) == 0
     gate_names = [d.operation.name for d in qc.data]
@@ -273,7 +280,7 @@ def test_no_verbatim_pragma(source, to_qiskit_kwargs):
     ],
     ids=["nested_start", "end_without_start", "invalid_marker"],
 )
-def test_context_marker_errors(markers, error_match):
+def test_context_marker_errors(markers: list[VerbatimBoxDelimiter | str], error_match: str) -> None:
     context = _QiskitProgramContext()
     context.add_qubits("q", 2)
 
@@ -282,7 +289,7 @@ def test_context_marker_errors(markers, error_match):
             context.add_verbatim_marker(m)
 
 
-def test_unclosed_verbatim_box_circuit_property_error():
+def test_unclosed_verbatim_box_circuit_property_error() -> None:
     context = _QiskitProgramContext()
     context.add_qubits("q", 2)
     context.add_verbatim_marker(VerbatimBoxDelimiter.START_VERBATIM)
@@ -291,7 +298,7 @@ def test_unclosed_verbatim_box_circuit_property_error():
         _ = context.circuit
 
 
-def test_unclosed_verbatim_box_syntax_error():
+def test_unclosed_verbatim_box_syntax_error() -> None:
     qasm = """
 OPENQASM 3.0;
 #pragma braket verbatim
@@ -302,7 +309,7 @@ box {
         to_qiskit(qasm)
 
 
-def test_bit_declaration_with_identifier_size():
+def test_bit_declaration_with_identifier_size() -> None:
     qasm = """
 OPENQASM 3.0;
 input bit[n] alpha;
@@ -314,7 +321,7 @@ h $0;
     assert qc.num_clbits == 0
 
 
-def test_bit_declaration_without_size():
+def test_bit_declaration_without_size() -> None:
     qasm = """
 OPENQASM 3.0;
 bit c;
@@ -325,7 +332,7 @@ h $0;
     assert qc.num_qubits == 1
 
 
-def test_bit_declaration_without_size_in_verbatim():
+def test_bit_declaration_without_size_in_verbatim() -> None:
     qasm = """
 OPENQASM 3.0;
 bit c;
@@ -340,7 +347,7 @@ box {
     assert len(box_ops) == 1
 
 
-def test_bit_declaration_with_identifier_size_in_verbatim():
+def test_bit_declaration_with_identifier_size_in_verbatim() -> None:
     ctx = _QiskitProgramContext()
     ctx.declare_variable("c", BitType(size=Identifier(name="n")))
     assert ctx.circuit.num_clbits == 0

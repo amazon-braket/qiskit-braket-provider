@@ -3,7 +3,7 @@
 import copy
 import unittest
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
 from botocore import errorfactory
@@ -68,7 +68,7 @@ def combine_dicts(dict1: dict[str, float], dict2: dict[str, float]) -> dict[str,
 class TestBraketBackend(TestCase):
     """Test class for BraketBackend."""
 
-    def test_repr(self):
+    def test_repr(self) -> None:
         """Test the repr method of BraketBackend."""
         backend = BraketLocalBackend(name="default")
         self.assertEqual(repr(backend), "BraketBackend[default]")
@@ -77,7 +77,7 @@ class TestBraketBackend(TestCase):
 class TestBraketLocalBackend(TestCase):
     """Tests class for BraketLocalBackend."""
 
-    def test_local_backend(self):
+    def test_local_backend(self) -> None:
         """Tests local backend."""
         backend = BraketLocalBackend(name="default")
         self.assertTrue(backend)
@@ -98,12 +98,12 @@ class TestBraketLocalBackend(TestCase):
         with self.assertRaises(NotImplementedError):
             backend.control_channel([0, 1])
 
-    def test_local_backend_output(self):
+    def test_local_backend_output(self) -> None:
         """Test local backend output"""
         first_backend = BraketLocalBackend(name="braket_dm")
         self.assertEqual(first_backend.name, "braket_dm")
 
-    def test_local_backend_circuit(self):
+    def test_local_backend_circuit(self) -> None:
         """Tests local backend with circuit."""
         backend = BraketLocalBackend(name="default")
         circuits = []
@@ -129,7 +129,7 @@ class TestBraketLocalBackend(TestCase):
         count_11 = results[1].get_counts()["11"]
         self.assertEqual(count_00 + count_11, 1024)
 
-    def test_local_backend_circuit_shots0(self):
+    def test_local_backend_circuit_shots0(self) -> None:
         """Tests local backend with circuit with shots=0."""
         backend = BraketLocalBackend(name="default")
 
@@ -151,7 +151,7 @@ class TestBraketLocalBackend(TestCase):
             Exception("Mock exception"),
         ],
     )
-    def test_local_backend_run_exception(self, braket_devices_run):
+    def test_local_backend_run_exception(self, braket_devices_run: MagicMock) -> None:
         """Tests local backend with exception thrown during second run"""
         backend = BraketLocalBackend(name="default")
 
@@ -162,7 +162,7 @@ class TestBraketLocalBackend(TestCase):
             backend.run([circuit, circuit], shots=0)  # First run should pass
         braket_devices_run.assert_called()
 
-    def test_meas_level_enum(self):
+    def test_meas_level_enum(self) -> None:
         """Check that enum meas level can be successfully accessed without error"""
         backend = BraketLocalBackend(name="default")
         circuit = QuantumCircuit(1, 1)
@@ -170,7 +170,7 @@ class TestBraketLocalBackend(TestCase):
         circuit.measure(0, 0)
         backend.run(circuit, shots=10, meas_level=MockMeasLevelEnum.LEVEL_TWO)
 
-    def test_meas_level_2(self):
+    def test_meas_level_2(self) -> None:
         """Check that there's no error for asking for classified measurement results."""
         backend = BraketLocalBackend(name="default")
         circuit = QuantumCircuit(1, 1)
@@ -178,7 +178,7 @@ class TestBraketLocalBackend(TestCase):
         circuit.measure(0, 0)
         backend.run(circuit, shots=10, meas_level=2)
 
-    def test_meas_level_1(self):
+    def test_meas_level_1(self) -> None:
         """Check that there's an exception for asking for raw measurement results."""
         backend = BraketLocalBackend(name="default")
         circuit = QuantumCircuit(1, 1)
@@ -187,7 +187,7 @@ class TestBraketLocalBackend(TestCase):
         with self.assertRaises(exception.QiskitBraketException):
             backend.run(circuit, shots=10, meas_level=1)
 
-    def test_vqe(self):
+    def test_vqe(self) -> None:
         """Tests VQE."""
         local_simulator = BraketLocalBackend(name="default")
         h2_op = SparsePauliOp(
@@ -214,7 +214,7 @@ class TestBraketLocalBackend(TestCase):
         self.assertEqual(len(result.optimal_parameters), 8)
         self.assertEqual(len(list(result.optimal_point)), 8)
 
-    def test_random_circuits(self):
+    def test_random_circuits(self) -> None:
         """Tests with random circuits."""
         backend = BraketLocalBackend(name="braket_sv")
 
@@ -256,7 +256,7 @@ class TestBraketLocalBackend(TestCase):
 class TestBraketAwsBackend(TestCase):
     """Tests class for BraketAwsBackend."""
 
-    def test_device_backend(self):
+    def test_device_backend(self) -> None:
         """Tests device backend."""
         device = Mock()
         device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
@@ -284,7 +284,7 @@ class TestBraketAwsBackend(TestCase):
         with self.assertRaises(NotImplementedError):
             backend.control_channel([0, 1])
 
-    def test_invalid_identifiers(self):
+    def test_invalid_identifiers(self) -> None:
         """Test the invalid identifiers of BraketAwsBackend."""
         with self.assertRaises(ValueError):
             BraketAwsBackend()
@@ -292,7 +292,7 @@ class TestBraketAwsBackend(TestCase):
         with self.assertRaises(ValueError):
             BraketAwsBackend(arn="some_arn", device="some_device")
 
-    def test_deprecation_warning_on_init(self):
+    def test_deprecation_warning_on_init(self) -> None:
         """Test that a deprecation warning is raised when initializing AWSBraketBackend"""
         mock_aws_device = Mock(spec=AwsDevice)
         mock_aws_device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
@@ -303,7 +303,7 @@ class TestBraketAwsBackend(TestCase):
         with self.assertWarns(DeprecationWarning):
             AWSBraketBackend(device=mock_aws_device)
 
-    def test_deprecation_warning_on_subclass(self):
+    def test_deprecation_warning_on_subclass(self) -> None:
         """Test that a deprecation warning is raised when subclassing AWSBraketBackend"""
 
         with self.assertWarns(DeprecationWarning):
@@ -311,7 +311,7 @@ class TestBraketAwsBackend(TestCase):
             class SubclassAWSBraketBackend(AWSBraketBackend):
                 """A subclass of AWSBraketBackend for testing purposes"""
 
-    def test_run_multiple_circuits(self):
+    def test_run_multiple_circuits(self) -> None:
         """Tests run with multiple circuits"""
         device = Mock()
         device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES.copy()
@@ -341,7 +341,7 @@ class TestBraketAwsBackend(TestCase):
         device.run_batch.assert_called_with([native_circuit, native_circuit], shots=0)
         self.assertEqual(device.run_batch.call_count, 2)
 
-    def test_run_multiple_circuits_program_set(self):
+    def test_run_multiple_circuits_program_set(self) -> None:
         """Tests run with multiple circuits for a device that supports program sets"""
         device = Mock()
         device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES.copy()
@@ -375,7 +375,7 @@ class TestBraketAwsBackend(TestCase):
         )
         self.assertEqual(device.run.call_count, 2)
 
-    def test_run_with_pass_manager(self):
+    def test_run_with_pass_manager(self) -> None:
         """Tests run with pass_manager"""
         device = Mock()
         device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
@@ -400,7 +400,7 @@ class TestBraketAwsBackend(TestCase):
         )
         device.run_batch.assert_called_once_with([native_circuit], shots=0)
 
-    def test_run_invalid_run_input(self):
+    def test_run_invalid_run_input(self) -> None:
         """Tests run with invalid input to run"""
         device = Mock()
         device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
@@ -413,7 +413,9 @@ class TestBraketAwsBackend(TestCase):
 
     @patch("qiskit_braket_provider.providers.braket_backend.AwsQuantumTask")
     @patch("qiskit_braket_provider.providers.braket_backend.BraketQuantumTask")
-    def test_retrieve_job_task_ids(self, mock_braket_quantum_task, mock_aws_quantum_task):
+    def test_retrieve_job_task_ids(
+        self, mock_braket_quantum_task: MagicMock, mock_aws_quantum_task: MagicMock
+    ) -> None:
         """Test method for retrieving job task IDs."""
         device = Mock()
         device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
@@ -437,7 +439,7 @@ class TestBraketAwsBackend(TestCase):
         )
 
     @unittest.skip("Call to external resources.")
-    def test_retrieve_job(self):
+    def test_retrieve_job(self) -> None:
         """Tests retrieve task by id."""
         backend = BraketProvider().get_backend("SV1")
         circuits = [
@@ -457,7 +459,7 @@ class TestBraketAwsBackend(TestCase):
         self.assertEqual(job_result.backend_name, retrieved_job_result.backend_name)
 
     @unittest.skip("Call to external resources.")
-    def test_running_incompatible_verbatim_circuit_on_aspen_raises_error(self):
+    def test_running_incompatible_verbatim_circuit_on_aspen_raises_error(self) -> None:
         """Tests working of verbatim=True and disable_qubit_rewiring=True.
 
         Note that in case of Rigetti devices, both of those parameters are
@@ -471,7 +473,7 @@ class TestBraketAwsBackend(TestCase):
             device.run(circuit, verbatim=True, disable_qubit_rewiring=True)
 
     @unittest.skip("Call to external resources.")
-    def test_running_circuit_with_disabled_rewiring_requires_matching_topolog(self):
+    def test_running_circuit_with_disabled_rewiring_requires_matching_topolog(self) -> None:
         """Tests working of disable_qubit_rewiring=True."""
         device = BraketProvider().get_backend("Aspen-M-2")
         circuit = QuantumCircuit(4)
@@ -481,7 +483,7 @@ class TestBraketAwsBackend(TestCase):
             device.run(circuit, disable_qubit_rewiring=True)
 
     @unittest.skip("Call to external resources.")
-    def test_native_circuits_with_measurements_can_be_run_in_verbatim_mode(self):
+    def test_native_circuits_with_measurements_can_be_run_in_verbatim_mode(self) -> None:
         """Tests running circuit with measurement in verbatim mode."""
         backend = BraketProvider().get_backend("Aspen-M-2")
         circuit = QuantumCircuit(2)
@@ -493,7 +495,7 @@ class TestBraketAwsBackend(TestCase):
         self.assertEqual(sum(result.get_counts().values()), 10)
 
     @patch("qiskit_braket_provider.providers.braket_backend.to_braket")
-    def test_native_transpilation(self, mock_to_braket):
+    def test_native_transpilation(self, mock_to_braket: MagicMock) -> None:
         """Tests running circuit with native mode"""
         mock_device = Mock()
         mock_device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
@@ -519,7 +521,7 @@ class TestBraketAwsBackend(TestCase):
         assert mock_to_braket.call_args.kwargs["verbatim"] is True
 
     @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice")
-    def test_queue_depth(self, mocked_device):
+    def test_queue_depth(self, mocked_device: MagicMock) -> None:
         """Tests queue depth."""
 
         mock_return_value = QueueDepthInfo(
@@ -536,7 +538,7 @@ class TestBraketAwsBackend(TestCase):
         assert isinstance(result, QueueDepthInfo)
         self.assertEqual(result, mock_return_value)
 
-    def test_fully_connected(self):
+    def test_fully_connected(self) -> None:
         """Tests if instruction_props is correctly populated for fully connected topology."""
         mock_device = Mock()
         mock_device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES.copy(deep=True)
@@ -579,7 +581,7 @@ class TestBraketAwsBackend(TestCase):
 
             self.assertEqual(instruction[1], expected_instruction_props[index][1])
 
-    def test_backend_deepcopy(self):
+    def test_backend_deepcopy(self) -> None:
         """Tests deepcopy of device."""
         device = Mock()
         device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES

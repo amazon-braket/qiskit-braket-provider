@@ -1,7 +1,7 @@
 """Tests for Amazon Braket task."""
 
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from qiskit.providers import JobStatus
@@ -22,11 +22,11 @@ from test.unit_tests.mocks import MOCK_LOCAL_QUANTUM_TASK, MOCK_PROGRAM_SET_QUAN
 class TestBraketQuantumTask(TestCase):
     """Tests BraketTask."""
 
-    def test_retry_if_result_none(self):
+    def test_retry_if_result_none(self) -> None:
         """Test when result is None"""
         assert retry_if_result_none(None) is True
 
-    def _get_task(self):
+    def _get_task(self) -> BraketQuantumTask:
         return BraketQuantumTask(
             backend=BraketLocalBackend(name="default"),
             task_id="AwesomeId",
@@ -34,7 +34,7 @@ class TestBraketQuantumTask(TestCase):
             shots=10,
         )
 
-    def test_task(self):
+    def test_task(self) -> None:
         """Tests task."""
         task = self._get_task()
         self.assertTrue(isinstance(task, BraketQuantumTask))
@@ -43,7 +43,7 @@ class TestBraketQuantumTask(TestCase):
 
         self.assertEqual(task.status(), JobStatus.DONE)
 
-    def test_result(self):
+    def test_result(self) -> None:
         """Tests result."""
         task = self._get_task()
 
@@ -56,7 +56,7 @@ class TestBraketQuantumTask(TestCase):
         self.assertEqual(task.result().results[0].status, "COMPLETED")
         self.assertEqual(task.result().results[0].shots, 3)
 
-    def test_program_set(self):
+    def test_program_set(self) -> None:
         """Tests program set."""
         task = BraketQuantumTask(
             backend=BraketLocalBackend(name="default"),
@@ -102,7 +102,7 @@ class TestBraketQuantumTask(TestCase):
     @patch(
         "qiskit_braket_provider.providers.braket_quantum_task.AwsQuantumTaskBatch._retrieve_results"
     )
-    def test_task_result_is_none(self, mock_retrieve_results):
+    def test_task_result_is_none(self, mock_retrieve_results: MagicMock) -> None:
         """Tests result when result is None"""
         mock_retrieve_results.return_value = [None, None]
 
@@ -120,7 +120,7 @@ class TestBraketQuantumTask(TestCase):
         "qiskit_braket_provider.providers.braket_quantum_task.AwsQuantumTask",
         spec=AwsQuantumTask,
     )
-    def test_queue_position(self, mock_aws_quantum_task):
+    def test_queue_position(self, mock_aws_quantum_task: MagicMock) -> None:
         """Tests queue position retrival"""
         task = BraketQuantumTask(
             backend=Mock(spec=BraketAwsBackend),
@@ -141,7 +141,7 @@ class TestBraketQuantumTask(TestCase):
         "qiskit_braket_provider.providers.braket_quantum_task.AwsQuantumTask",
         spec=AwsQuantumTask,
     )
-    def test_queue_position_program_set(self, mock_aws_quantum_task):
+    def test_queue_position_program_set(self, mock_aws_quantum_task: MagicMock) -> None:
         """Tests queue position retrival for program set tasks"""
         task = BraketQuantumTask(
             backend=Mock(spec=BraketAwsBackend),
@@ -161,7 +161,7 @@ class TestBraketQuantumTask(TestCase):
         "qiskit_braket_provider.providers.braket_quantum_task.AwsQuantumTask",
         spec=AwsQuantumTask,
     )
-    def test_task_cancellation(self, mock_aws_quantum_task):
+    def test_task_cancellation(self, mock_aws_quantum_task: MagicMock) -> None:
         """Tests task cancellation"""
         task = BraketQuantumTask(
             backend=Mock(spec=BraketAwsBackend),
@@ -176,7 +176,7 @@ class TestBraketQuantumTask(TestCase):
         "qiskit_braket_provider.providers.braket_quantum_task.AwsQuantumTask",
         spec=AwsQuantumTask,
     )
-    def test_task_cancellation_program_set(self, mock_aws_quantum_task):
+    def test_task_cancellation_program_set(self, mock_aws_quantum_task: MagicMock) -> None:
         """Tests task cancellation for program set tasks"""
         task = BraketQuantumTask(
             backend=Mock(spec=BraketAwsBackend),
@@ -187,7 +187,7 @@ class TestBraketQuantumTask(TestCase):
         task.cancel()
         mock_aws_quantum_task.cancel.assert_called_once()
 
-    def test_queue_position_for_local_quantum_task(self):
+    def test_queue_position_for_local_quantum_task(self) -> None:
         """Tests job status when multiple task status is present."""
         task = BraketQuantumTask(
             backend=BraketLocalBackend(name="default"),
@@ -199,7 +199,7 @@ class TestBraketQuantumTask(TestCase):
         with pytest.raises(NotImplementedError, match=message):
             task.queue_position()
 
-    def test_queue_position_empty_tasks(self):
+    def test_queue_position_empty_tasks(self) -> None:
         """Tests queue position returns None for empty tasks list."""
         task = BraketQuantumTask(
             backend=BraketLocalBackend(name="default"),
@@ -213,7 +213,7 @@ class TestBraketQuantumTask(TestCase):
 class TestAmazonBraketTask(TestCase):
     """Tests AmazonBraketTask."""
 
-    def _get_task(self):
+    def _get_task(self) -> AmazonBraketTask:
         return AmazonBraketTask(
             backend=BraketLocalBackend(name="default"),
             task_id="AwesomeId",
@@ -221,7 +221,7 @@ class TestAmazonBraketTask(TestCase):
             shots=10,
         )
 
-    def test_task(self):
+    def test_task(self) -> None:
         """Tests task."""
         task = self._get_task()
 
@@ -230,7 +230,7 @@ class TestAmazonBraketTask(TestCase):
 
         self.assertEqual(task.status(), JobStatus.DONE)
 
-    def test_result(self):
+    def test_result(self) -> None:
         """Tests result."""
         task = self._get_task()
 
@@ -245,7 +245,7 @@ class TestAmazonBraketTask(TestCase):
 class TestAWSBraketJob(TestCase):
     """Tests AWSBraketJob"""
 
-    def _get_job(self):
+    def _get_job(self) -> AWSBraketJob:
         return AWSBraketJob(
             backend=BraketLocalBackend(name="default"),
             job_id="AwesomeId",
@@ -253,7 +253,7 @@ class TestAWSBraketJob(TestCase):
             shots=10,
         )
 
-    def test_aws_job(self):
+    def test_aws_job(self) -> None:
         """Tests job."""
         job = self._get_job()
 
@@ -263,7 +263,7 @@ class TestAWSBraketJob(TestCase):
         self.assertEqual(job.result().job_id, "AwesomeId")
         self.assertEqual(job.status(), JobStatus.DONE)
 
-    def test_aws_result(self):
+    def test_aws_result(self) -> None:
         """Tests result."""
         job = self._get_job()
 
@@ -298,7 +298,7 @@ class TestBraketJobStatus:
             (["QUEUED", "QUEUED"], JobStatus.QUEUED),
         ],
     )
-    def test_status(self, task_states, expected_status):
+    def test_status(self, task_states: list[str], expected_status: JobStatus) -> None:
         """Tests job status when multiple task status is present."""
         job = AWSBraketJob(
             backend=BraketLocalBackend(name="default"),

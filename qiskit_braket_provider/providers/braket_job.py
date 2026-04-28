@@ -1,5 +1,6 @@
 """Deprecated Amazon Braket Qiskit Job classes"""
 
+from typing import Any
 from warnings import warn
 
 from qiskit.providers import BackendV2
@@ -13,7 +14,7 @@ from .braket_quantum_task import BraketQuantumTask
 class AmazonBraketTask(BraketQuantumTask):
     """AmazonBraketTask."""
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, **kwargs: Any) -> None:  # noqa: ANN401
         """This throws a deprecation warning on subclassing."""
         warn(f"{cls.__name__} is deprecated.", DeprecationWarning, stacklevel=2)
         super().__init_subclass__(**kwargs)
@@ -24,7 +25,7 @@ class AmazonBraketTask(BraketQuantumTask):
         backend: BackendV2,
         tasks: list[LocalQuantumTask] | list[AwsQuantumTask],
         **metadata: dict | None,
-    ):
+    ) -> None:
         """This throws a deprecation warning on initialization."""
         warn(
             f"{self.__class__.__name__} is deprecated.",
@@ -37,7 +38,7 @@ class AmazonBraketTask(BraketQuantumTask):
 class AWSBraketJob(BraketQuantumTask):
     """AWSBraketJob."""
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, **kwargs: Any) -> None:  # noqa: ANN401
         """This throws a deprecation warning on subclassing."""
         warn(f"{cls.__name__} is deprecated.", DeprecationWarning, stacklevel=2)
         super().__init_subclass__(**kwargs)
@@ -48,7 +49,7 @@ class AWSBraketJob(BraketQuantumTask):
         backend: BackendV2,
         tasks: list[LocalQuantumTask] | list[AwsQuantumTask],
         **metadata: dict | None,
-    ):
+    ) -> None:
         """This throws a deprecation warning on initialization."""
         warn(
             f"{self.__class__.__name__} is deprecated.",

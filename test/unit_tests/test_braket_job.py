@@ -8,7 +8,7 @@ from qiskit_braket_provider import AmazonBraketTask, AWSBraketJob
 class TestAmazonBraketTask(TestCase):
     """Tests Amazon Braket Task"""
 
-    def test_deprecation_warning_on_init(self):
+    def test_deprecation_warning_on_init(self) -> None:
         """Test to check if a deprecation warning is raised when initializing AmazonBraketTask"""
         with self.assertWarns(DeprecationWarning):
 
@@ -19,7 +19,7 @@ class TestAmazonBraketTask(TestCase):
 class TestAWSBraketJob(TestCase):
     """Tests Amazon Braket Job"""
 
-    def test_deprecation_warning_on_init(self):
+    def test_deprecation_warning_on_init(self) -> None:
         """Test to check if a deprecation warning is raised when initializing AWSBraketJob"""
         with self.assertWarns(DeprecationWarning):
 

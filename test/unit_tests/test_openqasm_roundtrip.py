@@ -1,3 +1,5 @@
+from typing import Any
+
 import numpy as np
 import pytest
 from qiskit.circuit.library import standard_gates as qiskit_gates
@@ -7,7 +9,7 @@ from braket.circuits import Circuit
 from qiskit_braket_provider.providers.adapter import to_braket
 
 
-def _make_target(num_qubits):
+def _make_target(num_qubits: int) -> Target:
     target = Target(num_qubits=num_qubits)
     one_q = {(i,): None for i in range(num_qubits)}
     two_q = {(i, j): None for i in range(num_qubits) for j in range(num_qubits) if i != j}
@@ -37,13 +39,13 @@ def _make_target(num_qubits):
     return target
 
 
-def _unitaries_equal(u1, u2):
+def _unitaries_equal(u1: np.ndarray, u2: np.ndarray) -> bool:
     product = u1 @ np.conj(u2.T)
     phase = product[0, 0]
     return np.allclose(product, phase * np.eye(product.shape[0]))
 
 
-def _extract_gate_lines(qasm):
+def _extract_gate_lines(qasm: str) -> list[str]:
     skip = {"OPENQASM", "bit", "qubit", "//", "#pragma", "box", "}"}
     return [
         line.strip()
@@ -55,7 +57,7 @@ def _extract_gate_lines(qasm):
     ]
 
 
-def _get_braket_gate_names(braket_circuit):
+def _get_braket_gate_names(braket_circuit: Circuit) -> list[str]:
     directives = {"StartVerbatimBox", "EndVerbatimBox"}
     return [
         instr.operator.name
@@ -64,7 +66,7 @@ def _get_braket_gate_names(braket_circuit):
     ]
 
 
-def _assert_verbatim_roundtrip(qasm, **kwargs):
+def _assert_verbatim_roundtrip(qasm: str, **kwargs: Any) -> str:  # noqa: ANN401
     bc = to_braket(qasm, **kwargs)
     ir_source = bc.to_ir(ir_type="OPENQASM").source
 
@@ -78,38 +80,38 @@ def _assert_verbatim_roundtrip(qasm, **kwargs):
     return ir_source
 
 
-def test_single_h_with_target():
+def test_single_h_with_target() -> None:
     _assert_verbatim_roundtrip("OPENQASM 3.0;\nh $0;\n", target=_make_target(1))
 
 
-def test_bell_state_with_target():
+def test_bell_state_with_target() -> None:
     _assert_verbatim_roundtrip("OPENQASM 3.0;\nh $0;\ncnot $0, $1;\n", target=_make_target(2))
 
 
-def test_three_qubit_toffoli_with_target():
+def test_three_qubit_toffoli_with_target() -> None:
     _assert_verbatim_roundtrip(
         "OPENQASM 3.0;\nh $0;\nh $1;\nccnot $0, $1, $2;\n", target=_make_target(3)
     )
 
 
-def test_rotation_gates_with_target():
+def test_rotation_gates_with_target() -> None:
     _assert_verbatim_roundtrip(
         "OPENQASM 3.0;\nrx(1.5707963267948966) $0;\nry(0.7853981633974483) $1;\ncnot $0, $1;\n",
         target=_make_target(2),
     )
 
 
-def test_swap_gate_with_target():
+def test_swap_gate_with_target() -> None:
     _assert_verbatim_roundtrip("OPENQASM 3.0;\nswap $0, $1;\n", target=_make_target(2))
 
 
-def test_multi_gate_sequence_with_target():
+def test_multi_gate_sequence_with_target() -> None:
     _assert_verbatim_roundtrip(
         "OPENQASM 3.0;\nx $0;\nh $0;\ncnot $0, $1;\ny $1;\n", target=_make_target(2)
     )
 
 
-def test_has_measurements_with_target():
+def test_has_measurements_with_target() -> None:
     result = _assert_verbatim_roundtrip(
         "OPENQASM 3.0;\nh $0;\ncnot $0, $1;\n", target=_make_target(2)
     )
@@ -125,43 +127,43 @@ def test_has_measurements_with_target():
     ],
     ids=["1_qubit", "2_qubits", "3_qubits"],
 )
-def test_qubit_count_preserved(qasm, num_qubits):
+def test_qubit_count_preserved(qasm: str, num_qubits: int) -> None:
     bc = to_braket(qasm, target=_make_target(num_qubits))
     assert bc.qubit_count == num_qubits
 
 
-def test_simple_circuit_verbatim():
+def test_simple_circuit_verbatim() -> None:
     qasm = "OPENQASM 3.0;\nh $0;\ncnot $0, $1;\n"
     result = _assert_verbatim_roundtrip(qasm, verbatim=True)
     assert _extract_gate_lines(result) == _extract_gate_lines(qasm)
 
 
-def test_preserves_gate_order_verbatim():
+def test_preserves_gate_order_verbatim() -> None:
     qasm = "OPENQASM 3.0;\nx $0;\nh $0;\ncnot $0, $1;\ny $1;\n"
     result = _assert_verbatim_roundtrip(qasm, verbatim=True)
     assert _extract_gate_lines(result) == _extract_gate_lines(qasm)
 
 
-def test_three_qubits_verbatim():
+def test_three_qubits_verbatim() -> None:
     qasm = "OPENQASM 3.0;\nh $0;\nh $1;\nccnot $0, $1, $2;\n"
     result = _assert_verbatim_roundtrip(qasm, verbatim=True)
     assert _extract_gate_lines(result) == _extract_gate_lines(qasm)
 
 
-def test_rotation_gates_verbatim():
+def test_rotation_gates_verbatim() -> None:
     qasm = "OPENQASM 3.0;\nrx(1.5707963267948966) $0;\ncnot $0, $1;\n"
     result = _assert_verbatim_roundtrip(qasm, verbatim=True)
     assert _extract_gate_lines(result) == _extract_gate_lines(qasm)
 
 
-def test_single_verbatim_box_with_target():
+def test_single_verbatim_box_with_target() -> None:
     _assert_verbatim_roundtrip(
         "OPENQASM 3.0;\n#pragma braket verbatim\nbox {\n    h $0;\n    cnot $0, $1;\n}\n",
         target=_make_target(2),
     )
 
 
-def test_mixed_verbatim_and_regular_with_target():
+def test_mixed_verbatim_and_regular_with_target() -> None:
     _assert_verbatim_roundtrip(
         "OPENQASM 3.0;\n"
         "x $0;\n"
@@ -175,7 +177,7 @@ def test_mixed_verbatim_and_regular_with_target():
     )
 
 
-def test_multiple_verbatim_boxes_with_target():
+def test_multiple_verbatim_boxes_with_target() -> None:
     _assert_verbatim_roundtrip(
         "OPENQASM 3.0;\n"
         "#pragma braket verbatim\n"
@@ -191,7 +193,7 @@ def test_multiple_verbatim_boxes_with_target():
     )
 
 
-def test_verbatim_box_with_verbatim_true():
+def test_verbatim_box_with_verbatim_true() -> None:
     _assert_verbatim_roundtrip(
         "OPENQASM 3.0;\n"
         "x $0;\n"
@@ -205,7 +207,7 @@ def test_verbatim_box_with_verbatim_true():
     )
 
 
-def test_h_decomposed_to_rx_rz():
+def test_h_decomposed_to_rx_rz() -> None:
     target = Target(num_qubits=1)
     one_q = {(0,): None}
     target.add_instruction(qiskit_gates.RXGate(0.0), one_q)
@@ -215,7 +217,7 @@ def test_h_decomposed_to_rx_rz():
     assert set(_get_braket_gate_names(bc)).issubset({"Rx", "Rz"})
 
 
-def test_bell_state_decomposed_to_rx_rz_cx():
+def test_bell_state_decomposed_to_rx_rz_cx() -> None:
     target = Target(num_qubits=2)
     one_q = {(0,): None, (1,): None}
     two_q = {(0, 1): None, (1, 0): None}
@@ -228,7 +230,7 @@ def test_bell_state_decomposed_to_rx_rz_cx():
     assert set(_get_braket_gate_names(bc)).issubset({"Rx", "Rz", "CNot"})
 
 
-def test_swap_decomposed():
+def test_swap_decomposed() -> None:
     target = Target(num_qubits=2)
     one_q = {(0,): None, (1,): None}
     two_q = {(0, 1): None, (1, 0): None}
@@ -241,7 +243,7 @@ def test_swap_decomposed():
     assert set(_get_braket_gate_names(bc)).issubset({"Rx", "Rz", "CNot"})
 
 
-def test_toffoli_decomposed():
+def test_toffoli_decomposed() -> None:
     target = Target(num_qubits=3)
     one_q = {(i,): None for i in range(3)}
     two_q = {(i, j): None for i in range(3) for j in range(3) if i != j}

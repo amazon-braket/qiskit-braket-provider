@@ -6,6 +6,7 @@ import numpy as np
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
 from qiskit.circuit import Parameter
 from qiskit.primitives import BackendSamplerV2
+from qiskit.primitives.containers import BitArray
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 
 from braket.circuits import Circuit
@@ -17,13 +18,13 @@ from qiskit_braket_provider.providers.braket_sampler import BraketSampler
 class TestBraketSampler(TestCase):
     """Tests for BraketSampler."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         """Set up test fixtures."""
         backend = BraketLocalBackend()
         self.sampler = BraketSampler(backend)
         self.sampler_backend = BackendSamplerV2(backend=backend)
 
-    def assert_correct_results(self, actual, expected):
+    def assert_correct_results(self, actual: BitArray, expected: BitArray) -> None:
         """Compares the results from BraketSampler and BackendSamplerV2"""
         counts = actual.get_int_counts()
         shots = actual.num_shots
@@ -37,14 +38,14 @@ class TestBraketSampler(TestCase):
                 np.isclose(v / shots, counts_backend[k] / shots_backend, rtol=0.3, atol=0.2)
             )
 
-    def test_program_sets_unsupported(self):
+    def test_program_sets_unsupported(self) -> None:
         """Tests that initialization raises a ValueError if program sets aren't supported"""
         backend = BraketLocalBackend()
         backend._supports_program_sets = False
         with self.assertRaises(ValueError):
             BraketSampler(backend)
 
-    def test_different_shots_raises_error(self):
+    def test_different_shots_raises_error(self) -> None:
         """Test that pubs with different shots raise an error."""
         theta = Parameter("θ")
         qc = QuantumCircuit(1)
@@ -55,7 +56,7 @@ class TestBraketSampler(TestCase):
 
         self.assertIn("same shots", str(context.exception))
 
-    def test_run_local_multiple_registers(self):
+    def test_run_local_multiple_registers(self) -> None:
         """Tests that correct results are returned for circuits with multiple registers"""
         circuit = QuantumCircuit(
             QuantumRegister(3, "qreg_a"),
@@ -95,7 +96,7 @@ class TestBraketSampler(TestCase):
             for index in np.ndindex(coerced.shape):
                 self.assert_correct_results(reg[index], reg_backend[index])
 
-    def test_run_local_shapeless_parameters(self):
+    def test_run_local_shapeless_parameters(self) -> None:
         """Tests that correct results are returned for circuits with no or shapeless parameters"""
         qc1 = QuantumCircuit(2)
         qc1.id(0)

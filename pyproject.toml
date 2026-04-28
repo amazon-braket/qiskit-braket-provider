@@ -6,7 +6,7 @@ preview = true
 [tool.ruff.lint]
 extend-select = [
     "A",      # flake8-builtins
-    # "ANN",  # flake8-annotations (~496 errors)
+    "ANN",    # flake8-annotations
     "ARG",    # flake8-unused-arguments
     "ASYNC",  # flake8-async
     "B",      # flake8-bugbear

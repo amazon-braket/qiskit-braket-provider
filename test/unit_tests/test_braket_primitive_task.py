@@ -12,7 +12,7 @@ from qiskit_braket_provider.providers.braket_primitive_task import BraketPrimiti
 class TestBraketPrimitiveTask(TestCase):
     """Tests for BraketPrimitiveTask."""
 
-    def test_status(self):
+    def test_status(self) -> None:
         """Test task status methods."""
         mock_task = Mock()
         mock_task.id = "test-task-id"

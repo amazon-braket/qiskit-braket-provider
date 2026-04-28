@@ -2,7 +2,7 @@
 
 import uuid
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
 from networkx import DiGraph, from_dict_of_lists, relabel_nodes
@@ -35,7 +35,7 @@ from test.unit_tests.mocks import (
 class TestBraketProvider(TestCase):
     """Tests BraketProvider."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.mock_session = Mock()
         simulators = [MOCK_GATE_MODEL_SIMULATOR_SV, MOCK_GATE_MODEL_SIMULATOR_TN]
         self.mock_session.get_device.side_effect = simulators
@@ -49,7 +49,7 @@ class TestBraketProvider(TestCase):
         self.empty_mock_session.boto_session.region_name = SIMULATOR_REGION
         self.empty_mock_session.search_devices.return_value = []
 
-    def test_provider_backend(self):
+    def test_provider_backend(self) -> None:
         """Test QiskitBackendNotFoundError is raised"""
         provider = BraketProvider()
 
@@ -65,7 +65,7 @@ class TestBraketProvider(TestCase):
             )
         self.assertIsInstance(err2.exception, QiskitBackendNotFoundError)
 
-    def test_provider_backends(self):
+    def test_provider_backends(self) -> None:
         """Tests provider."""
         provider = BraketProvider()
         backends = provider.backends(aws_session=self.mock_session, types=[AwsDeviceType.SIMULATOR])
@@ -75,25 +75,25 @@ class TestBraketProvider(TestCase):
             with self.subTest(f"{backend.name}"):
                 self.assertIsInstance(backend, BraketBackend)
 
-    def test_deprecation_warning_on_init(self):
+    def test_deprecation_warning_on_init(self) -> None:
         """Check if a DeprecationWarning is raised when AWSBraketProvider is initialized"""
         with self.assertWarns(DeprecationWarning):
             AWSBraketProvider()
 
-    def test_deprecation_warning_on_subclass(self):
+    def test_deprecation_warning_on_subclass(self) -> None:
         """Check if a DeprecationWarning is raised when a subclass of AWSBraketProvider is created"""
         with self.assertWarns(DeprecationWarning):
 
             class SubclassAWSBraketProvider(AWSBraketProvider):
                 """This is a subclass of AWSBraketProvider for testing purposes."""
 
-    def test_provider_backends_kwargs_local(self):
+    def test_provider_backends_kwargs_local(self) -> None:
         """Tests getting local backends using kwargs"""
         provider = BraketProvider()
 
         self.assertIsInstance(provider.backends(name=None, local="sv1")[0], BraketLocalBackend)
 
-    def test_real_devices(self):
+    def test_real_devices(self) -> None:
         """Tests real devices."""
         with patch(
             "qiskit_braket_provider.providers.braket_provider.AwsDevice"
@@ -116,7 +116,9 @@ class TestBraketProvider(TestCase):
 
     @patch("qiskit_braket_provider.providers.braket_backend.BraketAwsBackend")
     @patch("qiskit_braket_provider.providers.braket_backend.AwsDevice.get_devices")
-    def test_qiskit_circuit_transpilation_run(self, mock_get_devices, mock_aws_braket_backend):
+    def test_qiskit_circuit_transpilation_run(
+        self, mock_get_devices: MagicMock, mock_aws_braket_backend: MagicMock
+    ) -> None:
         """Tests qiskit circuit transpilation."""
         mock_get_devices.return_value = [
             AwsDevice(MOCK_GATE_MODEL_SIMULATOR_SV["deviceArn"], self.mock_session)
@@ -152,7 +154,9 @@ class TestBraketProvider(TestCase):
         self.assertTrue(result)
 
     @patch("braket.aws.aws_device.AwsDevice.get_devices")
-    def test_noncontigous_qubit_indices_qiskit_transpilation(self, mock_get_devices):
+    def test_noncontigous_qubit_indices_qiskit_transpilation(
+        self, mock_get_devices: MagicMock
+    ) -> None:
         """Tests circuit transpilation with noncontiguous qubit indices."""
 
         mock_m_3_device = Mock()
@@ -194,7 +198,9 @@ class TestBraketProvider(TestCase):
     @patch("qiskit_braket_provider.providers.braket_backend.BraketAwsBackend.run")
     @patch("qiskit_braket_provider.providers.braket_job.AmazonBraketTask.queue_position")
     @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice")
-    def test_queue_position_for_quantum_tasks(self, mocked_device, mock_queue_position, mock_run):
+    def test_queue_position_for_quantum_tasks(
+        self, mocked_device: MagicMock, mock_queue_position: MagicMock, mock_run: MagicMock
+    ) -> None:
         """Tests queue position for quantum tasks."""
 
         mock_return_value = QuantumTaskQueueInfo(
@@ -220,7 +226,7 @@ class TestBraketProvider(TestCase):
         assert isinstance(result, QuantumTaskQueueInfo)
         self.assertEqual(result, mock_return_value)
 
-    def test_kraus_target_simulator(self):
+    def test_kraus_target_simulator(self) -> None:
         """test Kraus target works for multi-qubit kraus and we find multi-qubit Kraus operators"""
 
         k1 = [np.diag([0, 1]), np.diag([1, 0])]

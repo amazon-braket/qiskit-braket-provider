@@ -4,9 +4,13 @@ import copy
 import enum
 import uuid
 from collections import Counter
+from typing import Any
 
 import numpy as np
 from networkx import DiGraph, from_dict_of_lists, relabel_nodes
+from qiskit import QuantumCircuit
+from qiskit.providers import Options
+from qiskit.transpiler import Target
 
 from braket.device_schema import StandardizedGateModelQpuDeviceProperties
 from braket.device_schema.rigetti import RigettiDeviceCapabilities
@@ -360,18 +364,18 @@ class MockBraketBackend(BraketBackend):
     """
 
     @property
-    def target(self):
+    def target(self) -> Target | None:
         pass
 
     @property
-    def max_circuits(self):
+    def max_circuits(self) -> int | None:
         pass
 
     @classmethod
-    def _default_options(cls):
+    def _default_options(cls) -> Options | None:
         pass
 
-    def run(self, run_input, **kwargs):
+    def run(self, run_input: QuantumCircuit | list[QuantumCircuit], **kwargs: Any) -> None:  # noqa: ANN401
         """
         Mock method for run.
         """
