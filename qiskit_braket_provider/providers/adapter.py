@@ -1459,7 +1459,6 @@ def _compile(
                 routing_method=effective_routing_method,
                 seed_transpiler=seed_transpiler,
             )
-
     if isinstance(target, _SubstitutedTarget):
         circuits = target._substitute(circuits)
 
