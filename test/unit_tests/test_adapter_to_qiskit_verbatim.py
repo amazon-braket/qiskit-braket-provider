@@ -67,7 +67,7 @@ box {
 def test_single_verbatim_box(
     qasm: str, num_qubits: int, label: str, expected_body_gates: list[str]
 ) -> None:
-    kwargs = {"verbatim_box_name": label} if label != "verbatim" else {}
+    kwargs: dict[str, Any] = {"verbatim_box_name": label} if label != "verbatim" else {}
     qc = to_qiskit(qasm, **kwargs)
 
     if num_qubits:

@@ -84,9 +84,9 @@ class TestBraketLocalBackend(TestCase):
         self.assertIsInstance(backend.target, Target)
         self.assertIsNone(backend.max_circuits)
         with self.assertRaises(NotImplementedError):
-            backend.dtm()
+            backend.dtm()  # type: ignore[operator]
         with self.assertRaises(NotImplementedError):
-            backend.meas_map()
+            backend.meas_map()  # type: ignore[operator]
         with self.assertRaises(NotImplementedError):
             backend.qubit_properties(0)
         with self.assertRaises(NotImplementedError):
@@ -270,9 +270,9 @@ class TestBraketAwsBackend(TestCase):
         user_agent = f"QiskitBraketProvider/{__version__}"
         device.aws_session.add_braket_user_agent.assert_called_with(user_agent)
         with self.assertRaises(NotImplementedError):
-            backend.dtm()
+            backend.dtm()  # type: ignore[operator]
         with self.assertRaises(NotImplementedError):
-            backend.meas_map()
+            backend.meas_map()  # type: ignore[operator]
         with self.assertRaises(NotImplementedError):
             backend.qubit_properties(0)
         with self.assertRaises(NotImplementedError):

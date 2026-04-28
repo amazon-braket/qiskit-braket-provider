@@ -38,7 +38,7 @@ class TestBraketQuantumTask(TestCase):
         """Tests task."""
         task = self._get_task()
         self.assertTrue(isinstance(task, BraketQuantumTask))
-        self.assertEqual(None, task.submit())
+        self.assertEqual(None, task.submit())  # type: ignore[func-returns-value]
         self.assertEqual(task.shots, 10)
 
         self.assertEqual(task.status(), JobStatus.DONE)

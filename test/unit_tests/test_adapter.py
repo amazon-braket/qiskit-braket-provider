@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, Mock, patch
 import numpy as np
 import pytest
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister, generate_preset_pass_manager
+from qiskit.circuit import Gate as QiskitGate
 from qiskit.circuit import Instruction as QiskitInstruction
 from qiskit.circuit import Parameter, ParameterVector
 from qiskit.circuit.library import GlobalPhaseGate, PauliEvolutionGate
@@ -53,7 +54,7 @@ from test.unit_tests.mocks import (
 
 _EPS = 1e-10  # global variable used to chop very small numbers to zero
 
-qiskit_ionq_gates = [
+qiskit_ionq_gates: list[QiskitGate] = [
     ionq_gates.GPIGate(Parameter("φ")),
     ionq_gates.GPI2Gate(Parameter("φ")),
     ionq_gates.MSGate(Parameter("φ0"), Parameter("φ1"), Parameter("ϴ")),
@@ -78,8 +79,10 @@ def check_to_braket_unitary_correct(
     qiskit_circuit: QuantumCircuit, optimization_level: int | None = None
 ) -> bool:
     """Checks if endianness-reversed Qiskit circuit matrix matches Braket counterpart"""
+    result = to_braket(qiskit_circuit, optimization_level=optimization_level)
+    assert isinstance(result, Circuit)
     return np.allclose(
-        to_braket(qiskit_circuit, optimization_level=optimization_level).to_unitary(),
+        result.to_unitary(),
         Operator(qiskit_circuit.decompose()).reverse_qargs().to_matrix(),
     )
 

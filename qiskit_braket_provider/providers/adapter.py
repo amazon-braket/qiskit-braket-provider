@@ -12,7 +12,7 @@ from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, S
 from dataclasses import dataclass
 from math import inf, pi, prod
 from numbers import Number
-from typing import Any, NoReturn, Self, TypeAlias, TypeVar
+from typing import Any, NoReturn, Self, TypeAlias, TypeVar, overload
 
 import numpy as np
 import qiskit.circuit.library as qiskit_gates
@@ -1499,9 +1499,25 @@ def _compile(
     )
 
 
+@overload
+def to_braket(
+    circuits: _Translatable = ...,
+    *args: Any,  # noqa: ANN401
+    **kwargs: Any,  # noqa: ANN401
+) -> Circuit: ...
+
+
+@overload
+def to_braket(
+    circuits: Iterable[_Translatable],
+    *args: Any,  # noqa: ANN401
+    **kwargs: Any,  # noqa: ANN401
+) -> list[Circuit]: ...
+
+
 def to_braket(
     circuits: _Translatable | Iterable[_Translatable] = None,
-    *args: Any,  # noqa: ANN401
+    *args: Any,
     qubit_labels: Sequence[int] | None = None,
     target: Target | None = None,
     verbatim: bool | None = None,

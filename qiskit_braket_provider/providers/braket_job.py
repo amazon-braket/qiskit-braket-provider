@@ -24,7 +24,7 @@ class AmazonBraketTask(BraketQuantumTask):
         task_id: str,
         backend: BackendV2,
         tasks: list[LocalQuantumTask] | list[AwsQuantumTask],
-        **metadata: dict | None,
+        **metadata: Any,  # noqa: ANN401
     ) -> None:
         """This throws a deprecation warning on initialization."""
         warn(
@@ -48,7 +48,7 @@ class AWSBraketJob(BraketQuantumTask):
         job_id: str,
         backend: BackendV2,
         tasks: list[LocalQuantumTask] | list[AwsQuantumTask],
-        **metadata: dict | None,
+        **metadata: Any,  # noqa: ANN401
     ) -> None:
         """This throws a deprecation warning on initialization."""
         warn(

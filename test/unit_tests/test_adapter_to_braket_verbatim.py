@@ -1,5 +1,7 @@
 """Tests for verbatim box support in to_braket() function."""
 
+from typing import Any
+
 import pytest
 from qiskit import QuantumCircuit
 from qiskit.circuit import Barrier, BoxOp
@@ -318,7 +320,7 @@ def test_to_braket_verbatim_and_layout_options(
     qc = QuantumCircuit(NUM_QUBITS)
     qc.append(BoxOp(h_cx_circuit, label=VERBATIM_LABEL), QUBIT_PAIR)
 
-    kwargs = {"verbatim": verbatim}
+    kwargs: dict[str, Any] = {"verbatim": verbatim}
     if layout_method:
         kwargs["layout_method"] = layout_method
     bc = to_braket(qc, **kwargs)
