@@ -1761,3 +1761,25 @@ class TestThereAndBackAgain(TestCase):
         with self.assertRaises(ValueError) as context:
             to_braket(circuit)
         self.assertIn("Cannot add global barrier to empty circuit", str(context.exception))
+
+    def test_compile_preserves_layout_with_verbatim_boxes(self):
+        """Layout from transpilation should be preserved after restoring verbatim boxes."""
+        from qiskit.circuit.library import CXGate, HGate
+        from qiskit.transpiler import InstructionProperties, Target
+
+        from qiskit_braket_provider.providers.adapter import _compile
+
+        t = Target(num_qubits=2)
+        t.add_instruction(HGate(), {(0,): InstructionProperties(), (1,): InstructionProperties()})
+        t.add_instruction(
+            CXGate(), {(0, 1): InstructionProperties(), (1, 0): InstructionProperties()}
+        )
+
+        qc = QuantumCircuit(2)
+        qc.h(0)
+        qc.cx(0, 1)
+        qc.h(1)
+
+        result = _compile(qc, target=t)
+        compiled = result.circuits[0]
+        assert compiled.layout is not None

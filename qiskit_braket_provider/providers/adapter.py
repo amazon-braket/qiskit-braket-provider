@@ -1275,6 +1275,7 @@ def _restore_verbatim_boxes(
         transpiled_circuit.num_qubits, transpiled_circuit.num_clbits
     )
     reconstructed_circuit.global_phase = transpiled_circuit.global_phase
+    reconstructed_circuit._layout = transpiled_circuit._layout
 
     verbatim_box_iter = iter(verbatim_boxes)
     barrier_count = 0
