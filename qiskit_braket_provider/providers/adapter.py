@@ -1322,28 +1322,6 @@ def _restore_verbatim_boxes(
     return reconstructed_circuit
 
 
-def _remove_terminal_barrier(
-    circ: QuantumCircuit, verbatim_box_name: str = _BRAKET_VERBATIM_BOX_NAME
-):
-    """If the instruction before a final measurements is a non-verbatim barrier, remove it.
-
-    Main application is to help remove the terminal barrier added by (1) measure_all, or
-    (2) measure_active in cases where the device does not support barrier
-    [TODO: refactor as a TransformationPass]
-    """
-    n_i = len(circ.data)
-    for n, instr in enumerate(circ.data[::-1]):
-        if isinstance(instr.operation, Measure):
-            continue
-        if isinstance(instr.operation, Barrier):
-            label = getattr(instr.operation, "label", None)
-            if label != verbatim_box_name:
-                del circ.data[n_i - 1 - n]
-            break
-        break
-    return circ
-
-
 @dataclass(frozen=True)
 class _CompilationContext:
     """Internal result from _compile containing compiled circuits and resolved state."""
@@ -1492,8 +1470,6 @@ def _compile(
             else circ
             for circ, verbatim_boxes in zip(circuits, all_verbatim_boxes, strict=False)
         ]
-    if target and "barrier" not in target.operation_names:
-        circuits = [_remove_terminal_barrier(c, verbatim_box_name) for c in circuits]
 
     return _CompilationContext(
         circuits=circuits,
@@ -1764,6 +1740,7 @@ def _translate_to_braket(
                 qubit_indices = [qubit_labels[circuit.find_bit(qubit).index] for qubit in qubits][
                     ::-1
                 ]  # reversal for little to big endian notation
+
                 for gate in _QISKIT_GATE_NAME_TO_BRAKET_GATE[gate_name](params):
                     braket_circuit += Instruction(
                         operator=gate,
