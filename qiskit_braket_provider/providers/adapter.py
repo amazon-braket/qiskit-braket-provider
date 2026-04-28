@@ -972,6 +972,7 @@ def _simulator_target(device: Device, description: str):
             if gate in _STANDARD_GATE_NAME_MAPPING:
                 target.add_instruction(_STANDARD_GATE_NAME_MAPPING[gate])
     target.add_instruction(Measure())
+    target.add_instruction(Barrier(1))
     return target
 
 
@@ -1719,8 +1720,16 @@ def _translate_to_braket(
                 clbit = circuit.find_bit(circuit_instruction.clbits[0]).index
                 measured_qubits[clbit] = qubit_index
             case "barrier":
-                qubit_indices = [qubit_labels[circuit.find_bit(qubit).index] for qubit in qubits]
-                braket_circuit.barrier(target=qubit_indices or None)
+                if target and "barrier" in target.operation_names:
+                    qubit_indices = [
+                        qubit_labels[circuit.find_bit(qubit).index] for qubit in qubits
+                    ]
+                    braket_circuit.barrier(target=qubit_indices or None)
+                else:
+                    warnings.warn(
+                        "Barrier is not included in the current Target and will be ignored.",
+                        stacklevel=2,
+                    )
             case "reset":
                 raise NotImplementedError(
                     "reset operation not supported by qiskit to braket adapter"
@@ -1799,6 +1808,7 @@ def _default_target(circuits: Iterable[QuantumCircuit]) -> Target:
         if name := _BRAKET_TO_QISKIT_NAMES.get(braket_name.lower()):
             target.add_instruction(instruction, name=name)
     target.add_instruction(Measure())
+    target.add_instruction(Barrier(1))
     return target
 
 
