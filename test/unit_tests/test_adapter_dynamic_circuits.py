@@ -10,8 +10,10 @@ from braket.default_simulator.openqasm.parser.openqasm_ast import (
     BooleanLiteral,
     BoolType,
     Cast,
+    DiscreteSet,
     FunctionCall,
     IntegerLiteral,
+    RangeDefinition,
     UnaryExpression,
     UnaryOperator,
 )
@@ -786,6 +788,28 @@ def test_unsupported_condition_type():
         next(gen)
 
 
+def test_evaluate_condition_static_yields_value_directly():
+    """A static condition yields its boolean value and terminates."""
+    ctx = _QiskitProgramContext()
+    gen = ctx.evaluate_condition(BooleanLiteral(value=True))
+    assert next(gen) is True
+    with pytest.raises(StopIteration):
+        next(gen)
+
+
+def test_is_mcm_dependent_for_loop_set_declarations():
+    """For-loop set_declaration nodes (``RangeDefinition`` / ``DiscreteSet``)
+    are always treated as MCM-dependent so the interpreter routes them
+    through ``evaluate_for_range`` (to produce a ``ForLoopOp``) even when
+    the range is static.
+    """
+    ctx = _QiskitProgramContext()
+    assert ctx.is_mcm_dependent(
+        RangeDefinition(start=IntegerLiteral(0), end=IntegerLiteral(1), step=None)
+    )
+    assert ctx.is_mcm_dependent(DiscreteSet(values=[IntegerLiteral(0), IntegerLiteral(1)]))
+
+
 def test_evaluate_expression_unary():
     """UnaryExpression should be handled by _evaluate_expression."""
     ctx = _QiskitProgramContext()
@@ -1056,6 +1080,22 @@ def test_while_loop_unsupported_condition_type():
     gen = ctx.evaluate_while_condition(ArrayLiteral(values=[BooleanLiteral(value=True)]))
     with pytest.raises(TypeError, match="Unsupported condition in while loop"):
         next(gen)
+
+
+def test_evaluate_while_condition_static_terminates_on_false():
+    """A static false while condition yields nothing and terminates."""
+    ctx = _QiskitProgramContext()
+    gen = ctx.evaluate_while_condition(BooleanLiteral(value=False))
+    with pytest.raises(StopIteration):
+        next(gen)
+
+
+def test_evaluate_while_condition_static_true_yields_true():
+    """A static true while condition yields True on each iteration."""
+    ctx = _QiskitProgramContext()
+    gen = ctx.evaluate_while_condition(BooleanLiteral(value=True))
+    assert next(gen) is True
+    gen.close()
 
 
 def test_for_loop_body_expands_circuit():
