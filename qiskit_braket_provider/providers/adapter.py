@@ -12,7 +12,7 @@ from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, S
 from dataclasses import dataclass
 from math import inf, pi, prod
 from numbers import Number
-from typing import Any, NoReturn, Self, TypeAlias, TypeVar, overload
+from typing import Any, Self, TypeAlias, TypeVar, overload
 
 import numpy as np
 import qiskit.circuit.library as qiskit_gates
@@ -689,11 +689,11 @@ class _QiskitProgramContext(AbstractProgramContext):
             main.add_bits([Clbit() for _ in range(max_clbits - main.num_clbits)])
         main.append(for_op, list(range(max_qubits)), list(range(max_clbits)))
 
-    def handle_loop_break(self) -> NoReturn:
+    def handle_loop_break(self):
         """Reject break statements since Qiskit's ForLoopOp/WhileLoopOp do not support them."""
         raise NotImplementedError("break statements are not supported in loops.")
 
-    def handle_loop_continue(self) -> NoReturn:
+    def handle_loop_continue(self):
         """Reject continue statements since Qiskit's ForLoopOp/WhileLoopOp do not support them."""
         raise NotImplementedError("continue statements are not supported in loops.")
 
