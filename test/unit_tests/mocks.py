@@ -374,7 +374,7 @@ class MockBraketBackend(BraketBackend):
     def _default_options(cls) -> Options | None:
         pass
 
-    def run(self, run_input: QuantumCircuit | list[QuantumCircuit], **kwargs) -> None:
+    def run(self, run_input: QuantumCircuit | list[QuantumCircuit], **kwargs):
         """
         Mock method for run.
         """

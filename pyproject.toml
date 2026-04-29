@@ -55,8 +55,8 @@ extend-ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["braket"]
 
-[tool.ruff.lint.per-file-ignores]
-"*.ipynb" = ["ANN"]  # Don't enforce type annotations in tutorial notebooks
+[tool.ruff.lint.flake8-annotations]
+suppress-none-returning = true
 
 [tool.mypy]
 warn_unused_configs = true

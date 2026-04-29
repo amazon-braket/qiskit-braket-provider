@@ -102,7 +102,7 @@ def test_if_else_branch_bodies(
     qasm: str,
     expected_true_ops: list[tuple[str, list[int]]],
     expected_false_ops: list[tuple[str, list[int]]],
-) -> None:
+):
     qc = to_qiskit(qasm)
     if_else_ops = _get_if_else_ops(qc)
     assert len(if_else_ops) == 1
@@ -114,7 +114,7 @@ def test_if_else_branch_bodies(
     assert _get_ops_with_qubits(false_body) == expected_false_ops
 
 
-def test_if_only_no_else() -> None:
+def test_if_only_no_else():
     qasm = """
 OPENQASM 3.0;
 qubit[2] q;
@@ -135,7 +135,7 @@ if (c[0] == 1) {
     assert false_body is None
 
 
-def test_mcm_branch_empty_bodies() -> None:
+def test_mcm_branch_empty_bodies():
     """A branching statement conditioned on MCM with no quantum ops raises ValueError."""
     qasm = """
 OPENQASM 3.0;
@@ -158,7 +158,7 @@ if (c == 1) {
     ],
     ids=["condition_1", "condition_0"],
 )
-def test_condition_value(condition_value: str, expected_value: int) -> None:
+def test_condition_value(condition_value: str, expected_value: int):
     qasm = f"""
 OPENQASM 3.0;
 qubit[2] q;
@@ -176,7 +176,7 @@ if (c[0] == {condition_value}) {{
     assert value == expected_value
 
 
-def test_condition_references_correct_clbit() -> None:
+def test_condition_references_correct_clbit():
     """When multiple bit variables are declared, the condition should reference the right clbit."""
     qasm = """
 OPENQASM 3.0;
@@ -207,7 +207,7 @@ if (b[1] == 1) {
     assert _get_ops_with_qubits(true_body) == [("h", [2])]
 
 
-def test_if_else_circuit_dimensions() -> None:
+def test_if_else_circuit_dimensions():
     """Branch body circuits should have the same qubit/clbit counts as the main circuit."""
     qasm = """
 OPENQASM 3.0;
@@ -238,7 +238,7 @@ if (c[0] == 1) {
     assert [qc.find_bit(c).index for c in instr.clbits] == [0, 1]
 
 
-def test_gates_before_and_after_branch() -> None:
+def test_gates_before_and_after_branch():
     """Gates outside the branch should appear on the main circuit, not inside the branch."""
     qasm = """
 OPENQASM 3.0;
@@ -263,7 +263,7 @@ y q[1];
     assert main_ops[3] == ("y", [1])
 
 
-def test_multiple_branches() -> None:
+def test_multiple_branches():
     """Multiple sequential if/else blocks should each produce their own IfElseOp."""
     qasm = """
 OPENQASM 3.0;
@@ -293,7 +293,7 @@ if (c[1] == 1) {
     assert _get_ops_with_qubits(op1.params[0]) == [("x", [0])]
 
 
-def test_for_loop_before_measurement_works() -> None:
+def test_for_loop_before_measurement_works():
     """For loops that appear before any measurement produce a ForLoopOp."""
     qasm = """
 OPENQASM 3.0;
@@ -313,7 +313,7 @@ c[0] = measure q[0];
     assert body.data[0].operation.name == "h"
 
 
-def test_for_loop_after_unrelated_measurement_works() -> None:
+def test_for_loop_after_unrelated_measurement_works():
     """A for loop after a measurement produces a ForLoopOp."""
     qasm = """
 OPENQASM 3.0;
@@ -334,7 +334,7 @@ for int[8] i in [0:1] {
     assert body.data[0].operation.name == "h"
 
 
-def test_for_loop_body_references_loop_var() -> None:
+def test_for_loop_body_references_loop_var():
     """ForLoopOp body should reference the loop parameter symbolically."""
     qasm = """
 OPENQASM 3.0;
@@ -349,7 +349,7 @@ for int[8] i in [0:2] {
     assert loop_param in body.parameters
 
 
-def test_for_loop_var_as_qubit_index() -> None:
+def test_for_loop_var_as_qubit_index():
     """Using the loop variable as a qubit index should raise an error."""
     qasm = """
 OPENQASM 3.0;
@@ -362,7 +362,7 @@ for int[8] i in [0:3] {
         to_qiskit(qasm)
 
 
-def test_for_loop_var_as_qubit_index_program() -> None:
+def test_for_loop_var_as_qubit_index_program():
     """Using the loop variable as a qubit index via Program should raise an error."""
     from braket.ir.openqasm import Program
 
@@ -377,7 +377,7 @@ for int[8] i in [0:3] {
         to_qiskit(Program(source=qasm))
 
 
-def test_for_loop_mixed_classical_quantum_body() -> None:
+def test_for_loop_mixed_classical_quantum_body():
     """A for loop with both quantum ops and classical side effects should raise."""
     qasm = """
 OPENQASM 3.0;
@@ -392,7 +392,7 @@ for int[8] i in [0:3] {
         to_qiskit(qasm)
 
 
-def test_for_loop_empty_range() -> None:
+def test_for_loop_empty_range():
     """A for loop with an empty range should produce no operations."""
     qasm = """
 OPENQASM 3.0;
@@ -405,7 +405,7 @@ for int[8] i in [0:-1] {
     assert len(qc.data) == 0
 
 
-def test_mcm_branch_inside_for_loop() -> None:
+def test_mcm_branch_inside_for_loop():
     """An MCM branching statement inside a for loop should produce a ForLoopOp."""
     qasm = """
 OPENQASM 3.0;
@@ -500,9 +500,7 @@ if (c[0] == 1) {
         ),
     ],
 )
-def test_compile_preserves_if_else_ops(
-    qasm: str, expected_if_else_count: int, mcm_target: Target
-) -> None:
+def test_compile_preserves_if_else_ops(qasm: str, expected_if_else_count: int, mcm_target: Target):
     """IfElseOps should survive compilation through _compile."""
     result = _compile(qasm, target=mcm_target)
     compiled_circuit = result.circuits[0]
@@ -512,7 +510,7 @@ def test_compile_preserves_if_else_ops(
     assert len(if_else_ops) == expected_if_else_count
 
 
-def test_compile_if_else_branch_bodies_intact(mcm_target: Target) -> None:
+def test_compile_if_else_branch_bodies_intact(mcm_target: Target):
     """Branch body gate content and qubit targets should be preserved after compilation."""
     qasm = """
 OPENQASM 3.0;
@@ -536,7 +534,7 @@ if (c[0] == 1) {
     assert _get_ops_with_qubits(false_body) == [("x", [1])]
 
 
-def test_compile_if_else_condition_preserved(mcm_target: Target) -> None:
+def test_compile_if_else_condition_preserved(mcm_target: Target):
     """The condition clbit and value should be preserved after compilation."""
     qasm = """
 OPENQASM 3.0;
@@ -562,7 +560,7 @@ if (c[0] == 1) {
     assert 1 in qubit_indices
 
 
-def test_static_true_condition_takes_if_branch() -> None:
+def test_static_true_condition_takes_if_branch():
     """A static true condition should execute only the if block."""
     qasm = """
 OPENQASM 3.0;
@@ -581,7 +579,7 @@ c[0] = measure q[0];
     assert ("x", [0]) not in ops
 
 
-def test_static_false_condition_takes_else_branch() -> None:
+def test_static_false_condition_takes_else_branch():
     """A static false condition should execute only the else block."""
     qasm = """
 OPENQASM 3.0;
@@ -600,7 +598,7 @@ c[0] = measure q[0];
     assert ("h", [0]) not in ops
 
 
-def test_while_loop_before_measurement() -> None:
+def test_while_loop_before_measurement():
     """A while loop with a static condition should execute normally."""
     qasm = """
 OPENQASM 3.0;
@@ -618,7 +616,7 @@ c[0] = measure q[0];
     assert h_count == 2
 
 
-def test_for_loop_with_break() -> None:
+def test_for_loop_with_break():
     """break statements in for loops are not supported."""
     qasm = """
 OPENQASM 3.0;
@@ -634,7 +632,7 @@ c[0] = measure q[0];
         to_qiskit(qasm)
 
 
-def test_for_loop_with_continue() -> None:
+def test_for_loop_with_continue():
     """continue statements in for loops are not supported."""
     qasm = """
 OPENQASM 3.0;
@@ -650,7 +648,7 @@ c[0] = measure q[0];
         to_qiskit(qasm)
 
 
-def test_condition_literal_on_lhs() -> None:
+def test_condition_literal_on_lhs():
     """Condition with literal on the left side: if (1 == c[0])."""
     qasm = """
 OPENQASM 3.0;
@@ -668,7 +666,7 @@ if (1 == c[0]) {
     assert value == 1
 
 
-def test_condition_bare_identifier() -> None:
+def test_condition_bare_identifier():
     """Condition on a single-bit variable without indexing: if (c == 1)."""
     qasm = """
 OPENQASM 3.0;
@@ -687,7 +685,7 @@ if (c == 1) {
     assert _get_ops_with_qubits(op.params[0]) == [("h", [1])]
 
 
-def test_while_loop_with_break() -> None:
+def test_while_loop_with_break():
     """break statements in while loops are not supported."""
     qasm = """
 OPENQASM 3.0;
@@ -705,7 +703,7 @@ c[0] = measure q[0];
         to_qiskit(qasm)
 
 
-def test_while_loop_with_continue() -> None:
+def test_while_loop_with_continue():
     """continue statements in while loops are not supported."""
     qasm = """
 OPENQASM 3.0;
@@ -723,13 +721,13 @@ c[0] = measure q[0];
         to_qiskit(qasm)
 
 
-def test_resolve_clbit_index_unsupported_type() -> None:
+def test_resolve_clbit_index_unsupported_type():
     ctx = _QiskitProgramContext()
     with pytest.raises(TypeError, match="Unsupported condition operand type"):
         ctx._resolve_clbit_index(IntegerLiteral(value=0))
 
 
-def test_bare_indexed_identifier_condition() -> None:
+def test_bare_indexed_identifier_condition():
     """Condition `if (c[0])` should be treated as `if (c[0] == 1)`."""
     qasm = """
 OPENQASM 3.0;
@@ -756,7 +754,7 @@ if (c[0]) {
     assert _get_ops_with_qubits(false_body) == [("x", [1])]
 
 
-def test_bare_identifier_condition_mcm() -> None:
+def test_bare_identifier_condition_mcm():
     """Condition `if (c)` on a single-bit variable should be treated as `if (c == 1)`."""
     qasm = """
 OPENQASM 3.0;
@@ -778,7 +776,7 @@ if (c) {
     assert _get_ops_with_qubits(op.params[0]) == [("h", [1])]
 
 
-def test_unsupported_operator_in_condition() -> None:
+def test_unsupported_operator_in_condition():
     """Operators other than == should raise TypeError."""
     qasm = """
 OPENQASM 3.0;
@@ -793,7 +791,7 @@ if (c[0] != 1) {
         to_qiskit(qasm)
 
 
-def test_unsupported_condition_type() -> None:
+def test_unsupported_condition_type():
     """A non-boolean-castable static condition should raise an unsupported condition error."""
     ctx = _QiskitProgramContext()
     gen = ctx.evaluate_condition(ArrayLiteral(values=[BooleanLiteral(value=True)]))
@@ -801,7 +799,7 @@ def test_unsupported_condition_type() -> None:
         next(gen)
 
 
-def test_evaluate_expression_unary() -> None:
+def test_evaluate_expression_unary():
     """UnaryExpression should be handled by _evaluate_expression."""
     ctx = _QiskitProgramContext()
     result = ctx._evaluate_expression(
@@ -810,21 +808,21 @@ def test_evaluate_expression_unary() -> None:
     assert result.value is False
 
 
-def test_evaluate_expression_cast() -> None:
+def test_evaluate_expression_cast():
     """Cast should be handled by _evaluate_expression."""
     ctx = _QiskitProgramContext()
     result = ctx._evaluate_expression(Cast(type=BoolType(), argument=IntegerLiteral(value=1)))
     assert result.value is True
 
 
-def test_evaluate_expression_unsupported_type() -> None:
+def test_evaluate_expression_unsupported_type():
     """An unsupported expression type should raise TypeError."""
     ctx = _QiskitProgramContext()
     with pytest.raises(TypeError, match="Cannot evaluate expression of type"):
         ctx._evaluate_expression(FunctionCall(name=None, arguments=[]))
 
 
-def test_evaluate_expression_list() -> None:
+def test_evaluate_expression_list():
     """A list input should evaluate each element."""
     ctx = _QiskitProgramContext()
     result = ctx._evaluate_expression([IntegerLiteral(value=1), IntegerLiteral(value=2)])
@@ -833,7 +831,7 @@ def test_evaluate_expression_list() -> None:
     assert result[1].value == 2
 
 
-def test_multi_bit_register_condition_raises() -> None:
+def test_multi_bit_register_condition_raises():
     """Using a multi-bit register as a bare condition should raise TypeError."""
     qasm = """
 OPENQASM 3.0;
@@ -852,7 +850,7 @@ if (c == 3) {
         to_qiskit(qasm)
 
 
-def test_nested_if_else() -> None:
+def test_nested_if_else():
     """Nested if/else should produce an IfElseOp inside the outer IfElseOp's true body."""
     qasm = """
 OPENQASM 3.0;
@@ -886,7 +884,7 @@ if (c[0] == 1) {
     assert _get_ops_with_qubits(inner_false) == [("x", [2])]
 
 
-def test_physical_qubit_inside_branch_expands_circuit() -> None:
+def test_physical_qubit_inside_branch_expands_circuit():
     """A physical qubit reference inside a branch should expand the main circuit."""
     qasm = """
 OPENQASM 3.0;
@@ -904,7 +902,7 @@ if (c[0] == 1) {
     assert _get_ops_with_qubits(true_body) == [("h", [4])]
 
 
-def test_mcm_while_loop() -> None:
+def test_mcm_while_loop():
     """A while loop conditioned on a measurement result produces a WhileLoopOp."""
     qasm = """
 OPENQASM 3.0;
@@ -933,7 +931,7 @@ while (c == 0) {
     assert body_ops == [("x", [1]), ("measure", [0])]
 
 
-def test_mcm_while_loop_bare_identifier() -> None:
+def test_mcm_while_loop_bare_identifier():
     """A while loop with a bare identifier condition (no ==) produces a WhileLoopOp."""
     qasm = """
 OPENQASM 3.0;
@@ -955,7 +953,7 @@ while (c) {
     assert value == 1  # bare identifier implies == 1
 
 
-def test_mcm_while_loop_circuit_dimensions() -> None:
+def test_mcm_while_loop_circuit_dimensions():
     """WhileLoopOp body should have the same dimensions as the main circuit."""
     qasm = """
 OPENQASM 3.0;
@@ -976,7 +974,7 @@ while (c[0] == 1) {
     assert body.num_clbits == qc.num_clbits
 
 
-def test_mcm_while_loop_with_branch_inside() -> None:
+def test_mcm_while_loop_with_branch_inside():
     """A while loop containing an MCM branch should produce WhileLoopOp with IfElseOp body."""
     qasm = """
 OPENQASM 3.0;
@@ -1000,7 +998,7 @@ while (c == 1) {
     assert "measure" in body_op_names
 
 
-def test_static_while_loop_unchanged() -> None:
+def test_static_while_loop_unchanged():
     """A while loop with a static condition should still unroll normally."""
     qasm = """
 OPENQASM 3.0;
@@ -1018,7 +1016,7 @@ while (flag) {
     assert "h" in op_names
 
 
-def test_mcm_while_loop_empty_body() -> None:
+def test_mcm_while_loop_empty_body():
     """A while loop conditioned on MCM with no quantum ops in body raises ValueError."""
     qasm = """
 OPENQASM 3.0;
@@ -1033,7 +1031,7 @@ while (c == 1) {
         to_qiskit(qasm)
 
 
-def test_mcm_while_loop_break() -> None:
+def test_mcm_while_loop_break():
     """break in an MCM while loop raises NotImplementedError."""
     qasm = """
 OPENQASM 3.0;
@@ -1049,7 +1047,7 @@ while (c == 1) {
         to_qiskit(qasm)
 
 
-def test_mcm_while_loop_unsupported_operator() -> None:
+def test_mcm_while_loop_unsupported_operator():
     """A while loop with != operator raises NotImplementedError."""
     qasm = """
 OPENQASM 3.0;
@@ -1065,7 +1063,7 @@ while (c != 0) {
         to_qiskit(qasm)
 
 
-def test_while_loop_unsupported_condition_type() -> None:
+def test_while_loop_unsupported_condition_type():
     """A non-boolean-castable static while condition should raise an unsupported condition error."""
     ctx = _QiskitProgramContext()
     gen = ctx.evaluate_while_condition(ArrayLiteral(values=[BooleanLiteral(value=True)]))
@@ -1073,7 +1071,7 @@ def test_while_loop_unsupported_condition_type() -> None:
         next(gen)
 
 
-def test_for_loop_body_expands_circuit() -> None:
+def test_for_loop_body_expands_circuit():
     """A physical qubit reference inside a for-loop body expands the main circuit."""
     qasm = """
 OPENQASM 3.0;
@@ -1093,7 +1091,7 @@ for int[8] i in [0:1] {
     assert qc.num_clbits == 2
 
 
-def test_while_loop_body_expands_circuit() -> None:
+def test_while_loop_body_expands_circuit():
     """A physical qubit reference inside a while-loop body expands the main circuit."""
     qasm = """
 OPENQASM 3.0;
@@ -1112,7 +1110,7 @@ while (c[0] == 1) {
     assert qc.num_clbits == 2
 
 
-def test_classical_bit_declared_inside_branch_expands_circuit() -> None:
+def test_classical_bit_declared_inside_branch_expands_circuit():
     """A classical bit declared inside a branch should expand the main circuit."""
     qasm = """
 OPENQASM 3.0;

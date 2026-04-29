@@ -14,7 +14,7 @@ from qiskit_braket_provider.providers.braket_instructions import CCPRx, MeasureF
 class TestIqmExperimentalCapabilities(unittest.TestCase):
     """Tests for Braket instructions."""
 
-    def test_measureff_initialization(self) -> None:
+    def test_measureff_initialization(self):
         """Test MeasureFF initialization with valid parameters"""
         feedback_key = 1
         measure = MeasureFF(feedback_key)
@@ -24,7 +24,7 @@ class TestIqmExperimentalCapabilities(unittest.TestCase):
         self.assertEqual(measure.num_clbits, 0)
         self.assertEqual(measure.params, [feedback_key])
 
-    def test_measureff_equality(self) -> None:
+    def test_measureff_equality(self):
         """Test MeasureFF equality comparison"""
         measure1 = MeasureFF(1)
         measure2 = MeasureFF(1)
@@ -36,13 +36,13 @@ class TestIqmExperimentalCapabilities(unittest.TestCase):
         self.assertEqual(hash(measure1), hash(measure2))
         self.assertNotEqual(hash(measure1), hash(measure3))
 
-    def test_measureff_repr(self) -> None:
+    def test_measureff_repr(self):
         """Test MeasureFF string representation"""
         measure = MeasureFF(1)
         expected_repr = "MeasureFF(feedback_key=1)"
         self.assertEqual(repr(measure), expected_repr)
 
-    def test_ccprx_initialization(self) -> None:
+    def test_ccprx_initialization(self):
         """Test CCPRx initialization with valid parameters"""
         angle1 = 0.5
         angle2 = 0.7
@@ -54,7 +54,7 @@ class TestIqmExperimentalCapabilities(unittest.TestCase):
         self.assertEqual(ccprx.num_clbits, 0)
         self.assertEqual(ccprx.params, [angle1, angle2, feedback_key])
 
-    def test_ccprx_equality(self) -> None:
+    def test_ccprx_equality(self):
         """Test CCPRx equality comparison"""
         ccprx1 = CCPRx(0.5, 0.7, 1)
         ccprx2 = CCPRx(0.5, 0.7, 1)
@@ -68,13 +68,13 @@ class TestIqmExperimentalCapabilities(unittest.TestCase):
         self.assertEqual(hash(ccprx1), hash(ccprx2))
         self.assertNotEqual(hash(ccprx1), hash(ccprx3))
 
-    def test_ccprx_repr(self) -> None:
+    def test_ccprx_repr(self):
         """Test CCPRx string representation"""
         ccprx = CCPRx(0.5, 0.7, 1)
         expected_repr = "CCPRx(0.5, 0.7, feedback_key=1)"
         self.assertEqual(repr(ccprx), expected_repr)
 
-    def test_circuit_with_measureff_ccprx(self) -> None:
+    def test_circuit_with_measureff_ccprx(self):
         """Test circuit with MeasureFF instruction"""
         circuit = QuantumCircuit(1, 1)
         circuit.append(MeasureFF(feedback_key=0), qargs=[0])

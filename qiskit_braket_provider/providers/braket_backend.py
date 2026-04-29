@@ -7,7 +7,7 @@ import enum
 import logging
 import warnings
 from abc import ABC
-from typing import TYPE_CHECKING, Any, Generic, NoReturn, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from qiskit import QuantumCircuit
 from qiskit.providers import BackendV2, Options, QubitProperties
@@ -152,16 +152,16 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
     def qubit_properties(self, qubit: int | list[int]) -> QubitProperties | list[QubitProperties]:
         raise NotImplementedError
 
-    def drive_channel(self, qubit: int) -> NoReturn:
+    def drive_channel(self, qubit: int):
         raise NotImplementedError(f"Drive channel is not supported by {self.name}.")
 
-    def measure_channel(self, qubit: int) -> NoReturn:
+    def measure_channel(self, qubit: int):
         raise NotImplementedError(f"Measure channel is not supported by {self.name}.")
 
-    def acquire_channel(self, qubit: int) -> NoReturn:
+    def acquire_channel(self, qubit: int):
         raise NotImplementedError(f"Acquire channel is not supported by {self.name}.")
 
-    def control_channel(self, qubits: Iterable[int]) -> NoReturn:
+    def control_channel(self, qubits: Iterable[int]):
         raise NotImplementedError(f"Control channel is not supported by {self.name}.")
 
     def run(
@@ -345,16 +345,16 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
     def meas_map(self) -> list[list[int]]:
         raise NotImplementedError(f"Measurement map is not supported by {self.name}.")
 
-    def drive_channel(self, qubit: int) -> NoReturn:
+    def drive_channel(self, qubit: int):
         raise NotImplementedError(f"Drive channel is not supported by {self.name}.")
 
-    def measure_channel(self, qubit: int) -> NoReturn:
+    def measure_channel(self, qubit: int):
         raise NotImplementedError(f"Measure channel is not supported by {self.name}.")
 
-    def acquire_channel(self, qubit: int) -> NoReturn:
+    def acquire_channel(self, qubit: int):
         raise NotImplementedError(f"Acquire channel is not supported by {self.name}.")
 
-    def control_channel(self, qubits: Iterable[int]) -> NoReturn:
+    def control_channel(self, qubits: Iterable[int]):
         raise NotImplementedError(f"Control channel is not supported by {self.name}.")
 
     def run(
