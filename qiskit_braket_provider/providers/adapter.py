@@ -1273,10 +1273,7 @@ def _restore_verbatim_boxes(
         ValueError: If barrier count doesn't match verbatim box count
         ValueError: If qubit mapping fails
     """
-    reconstructed_circuit = QuantumCircuit(
-        transpiled_circuit.num_qubits, transpiled_circuit.num_clbits
-    )
-    reconstructed_circuit.global_phase = transpiled_circuit.global_phase
+    reconstructed_circuit = transpiled_circuit.copy_empty_like()
 
     verbatim_box_iter = iter(verbatim_boxes)
     barrier_count = 0
