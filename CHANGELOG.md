@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.14.2 (2026-04-29)
+
+### Bug Fixes and Other Changes
+
+ * unify MCM-dependency check in _QiskitProgramContext
+ * missing layout bug
+
 ## v0.14.1 (2026-04-29)
 
 ### Bug Fixes and Other Changes
