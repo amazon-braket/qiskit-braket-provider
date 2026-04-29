@@ -543,8 +543,8 @@ class _QiskitProgramContext(AbstractProgramContext):
     def supports_midcircuit_measurement(self) -> bool:
         return True
 
-    def _references_measurement(self, expression: Expression) -> bool:
-        """Check if condition references a variable that was measured into."""
+    def is_mcm_dependent(self, expression: Expression) -> bool:
+        """Check if expression references a variable that was measured into."""
         match expression:
             case Identifier(name=name):
                 return name in self._measured_bits
