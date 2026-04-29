@@ -543,15 +543,17 @@ class _QiskitProgramContext(AbstractProgramContext):
     def supports_midcircuit_measurement(self) -> bool:
         return True
 
-    def _references_measurement(self, condition: Expression) -> bool:
+    def _references_measurement(self, expression: Expression) -> bool:
         """Check if condition references a variable that was measured into."""
-        match condition:
+        match expression:
             case Identifier(name=name):
                 return name in self._measured_bits
             case IndexExpression(collection=Identifier(name=name)):
                 return name in self._measured_bits
             case BinaryExpression(lhs=lhs, rhs=rhs):
-                return self._references_measurement(lhs) or self._references_measurement(rhs)
+                return self.is_mcm_dependent(lhs) or self.is_mcm_dependent(rhs)
+            case RangeDefinition() | DiscreteSet():
+                return True
             case _:
                 return False
 
@@ -565,7 +567,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         For static conditions (no measurement dependency), evaluates directly
         and yields only the taken branch.
         """
-        if not self._references_measurement(condition):
+        if not self.is_mcm_dependent(condition):
             try:
                 result = cast_to(BooleanLiteral, self._evaluate_expression(condition))
             except (TypeError, ValueError, AttributeError) as e:
@@ -703,7 +705,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         For static conditions (no measurement dependency), evaluates directly.
         For MCM-dependent conditions, captures the body into a WhileLoopOp.
         """
-        if not self._references_measurement(condition):
+        if not self.is_mcm_dependent(condition):
             try:
                 while cast_to(BooleanLiteral, self._evaluate_expression(condition)).value:
                     yield True
