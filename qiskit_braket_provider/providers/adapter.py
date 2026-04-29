@@ -312,7 +312,7 @@ _T = TypeVar("_T")
 
 
 class _SubstitutedTarget(Target):
-    def __new__(cls, *args: Any, **kwargs: Any) -> Self:  # noqa: ANN401
+    def __new__(cls, *args, **kwargs) -> Self:
         out = super().__new__(cls, *args, **kwargs)
         gate_substitutes: dict[str, dict[tuple[int, ...], QiskitInstruction]] = {}
         out._gate_substitutes = gate_substitutes
@@ -1356,7 +1356,7 @@ class _CompilationContext:
 
 def _compile(
     circuits: _Translatable | Iterable[_Translatable] = None,
-    *args: Any,  # noqa: ANN401
+    *args,
     qubit_labels: Sequence[int] | None = None,
     target: Target | None = None,
     verbatim: bool | None = None,
@@ -1503,22 +1503,22 @@ def _compile(
 @overload
 def to_braket(
     circuits: _Translatable = ...,
-    *args: Any,  # noqa: ANN401
-    **kwargs: Any,  # noqa: ANN401
+    *args,
+    **kwargs,
 ) -> Circuit: ...
 
 
 @overload
 def to_braket(
     circuits: Iterable[_Translatable],
-    *args: Any,  # noqa: ANN401
-    **kwargs: Any,  # noqa: ANN401
+    *args,
+    **kwargs,
 ) -> list[Circuit]: ...
 
 
 def to_braket(
     circuits: _Translatable | Iterable[_Translatable] = None,
-    *args: Any,
+    *args,
     qubit_labels: Sequence[int] | None = None,
     target: Target | None = None,
     verbatim: bool | None = None,

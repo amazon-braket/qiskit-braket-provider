@@ -49,7 +49,7 @@ T = TypeVar("T", bound=Device, covariant=True)  # noqa: PLC0105
 class BraketBackend(BackendV2, ABC, Generic[T]):
     """Base Qiskit backend for Amazon Braket devices."""
 
-    def __init__(self, device: T, name: str, **fields: Any) -> None:  # noqa: ANN401
+    def __init__(self, device: T, name: str, **fields) -> None:
         super().__init__(name=name, **fields)
         self._device = device
         self._supports_program_sets = (
@@ -95,7 +95,7 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
         self,
         braket_circuits: list[Circuit],
         shots: int | None,
-        **options: Any,  # noqa: ANN401
+        **options,
     ) -> BraketQuantumTask:
         program_set = ProgramSet(braket_circuits, shots_per_executable=shots)
         task = self._device.run(program_set, **options)
@@ -107,7 +107,7 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
 class BraketLocalBackend(BraketBackend[LocalSimulator]):
     """Runs quantum circuits on the Braket local simulator."""
 
-    def __init__(self, name: str = "default", **fields: Any) -> None:  # noqa: ANN401
+    def __init__(self, name: str = "default", **fields) -> None:
         """Initialize the backend.
 
         Example:
@@ -169,7 +169,7 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
         run_input: QuantumCircuit | list[QuantumCircuit],
         *,
         shots: int = 1024,
-        **options: Any,  # noqa: ANN401
+        **options,
     ) -> BraketQuantumTask:
         convert_input = [run_input] if isinstance(run_input, QuantumCircuit) else list(run_input)
         verbatim = options.pop("verbatim", False)
@@ -221,7 +221,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         backend_version: str | None = None,
         *,
         device: AwsDevice | None = None,
-        **fields: Any,  # noqa: ANN401
+        **fields,
     ) -> None:
         """Initialize the backend.
 
@@ -368,7 +368,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         callback: Callable | None = None,
         num_processes: int | None = None,
         pass_manager: PassManager | None = None,
-        **options: Any,  # noqa: ANN401
+        **options,
     ) -> BraketQuantumTask:
         """Execute ``QuantumCircuit``s on a ``BraketAwsBackend``
 
@@ -440,7 +440,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         self,
         braket_circuits: list[Circuit],
         shots: int,
-        **options: Any,  # noqa: ANN401
+        **options,
     ) -> BraketQuantumTask:
         batch_task = self._device.run_batch(braket_circuits, shots=shots, **options)
         tasks: list[AwsQuantumTask] = batch_task.tasks
@@ -464,7 +464,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
 class AWSBraketBackend(BraketAwsBackend):
     """AWSBraketBackend."""
 
-    def __init_subclass__(cls, **kwargs: Any) -> None:  # noqa: ANN401
+    def __init_subclass__(cls, **kwargs) -> None:
         """This throws a deprecation warning on subclassing."""
         warnings.warn(f"{cls.__name__} is deprecated.", DeprecationWarning, stacklevel=2)
         super().__init_subclass__(**kwargs)
@@ -477,7 +477,7 @@ class AWSBraketBackend(BraketAwsBackend):
         description: str | None = None,
         online_date: datetime.datetime | None = None,
         backend_version: str | None = None,
-        **fields: Any,  # noqa: ANN401
+        **fields,
     ) -> None:
         """This throws a deprecation warning on initialization."""
         warnings.warn(

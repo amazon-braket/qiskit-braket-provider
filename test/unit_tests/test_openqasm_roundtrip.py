@@ -1,5 +1,3 @@
-from typing import Any
-
 import numpy as np
 import pytest
 from qiskit.circuit.library import standard_gates as qiskit_gates
@@ -66,7 +64,7 @@ def _get_braket_gate_names(braket_circuit: Circuit) -> list[str]:
     ]
 
 
-def _assert_verbatim_roundtrip(qasm: str, **kwargs: Any) -> str:  # noqa: ANN401
+def _assert_verbatim_roundtrip(qasm: str, **kwargs) -> str:
     bc = to_braket(qasm, **kwargs)
     ir_source = bc.to_ir(ir_type="OPENQASM").source
 

@@ -1,7 +1,7 @@
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, TypeAlias
+from typing import TypeAlias
 
 import numpy as np
 from qiskit.primitives import BaseEstimatorV2, DataBin, EstimatorPubLike, PrimitiveResult, PubResult
@@ -54,7 +54,7 @@ class BraketEstimator(BaseEstimatorV2):
         *,
         verbatim: bool = False,
         optimization_level: int = 0,
-        **options: Any,  # noqa: ANN401
+        **options,
     ) -> None:
         """
         Initialize the Braket estimator.

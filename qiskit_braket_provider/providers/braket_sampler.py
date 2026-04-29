@@ -1,7 +1,6 @@
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 from qiskit.primitives import (
@@ -52,7 +51,7 @@ class BraketSampler(BaseSamplerV2):
         *,
         verbatim: bool = False,
         optimization_level: int = 0,
-        **options: Any,  # noqa: ANN401
+        **options,
     ) -> None:
         """
         Initialize the Braket sampler.

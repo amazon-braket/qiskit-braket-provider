@@ -48,6 +48,8 @@ extend-ignore = [
     "N818",   # QiskitBraketException is public API
     "TC001",  # imports used at runtime
     "TC002",  # braket imports used at runtime in type annotations
+    "ANN002", # missing annotation on *args
+    "ANN003", # missing annotation on **kwargs
 ]
 
 [tool.ruff.lint.isort]

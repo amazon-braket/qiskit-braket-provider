@@ -2,7 +2,6 @@
 
 from datetime import UTC, datetime
 from itertools import starmap
-from typing import Any
 
 from qiskit.providers import BackendV2, JobStatus, JobV1
 from qiskit.quantum_info import Statevector
@@ -74,7 +73,7 @@ class BraketQuantumTask(JobV1):
         task_id: str,
         backend: BackendV2,
         tasks: list[LocalQuantumTask] | list[AwsQuantumTask] | AwsQuantumTask,
-        **metadata: Any,  # noqa: ANN401
+        **metadata,
     ) -> None:
         """BraketQuantumTask for execution of circuits on Amazon Braket or locally.
 

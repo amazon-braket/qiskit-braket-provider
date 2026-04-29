@@ -4,7 +4,6 @@ import copy
 import enum
 import uuid
 from collections import Counter
-from typing import Any
 
 import numpy as np
 from networkx import DiGraph, from_dict_of_lists, relabel_nodes
@@ -375,7 +374,7 @@ class MockBraketBackend(BraketBackend):
     def _default_options(cls) -> Options | None:
         pass
 
-    def run(self, run_input: QuantumCircuit | list[QuantumCircuit], **kwargs: Any) -> None:  # noqa: ANN401
+    def run(self, run_input: QuantumCircuit | list[QuantumCircuit], **kwargs) -> None:
         """
         Mock method for run.
         """

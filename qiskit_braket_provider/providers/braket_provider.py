@@ -1,7 +1,6 @@
 """Amazon Braket provider."""
 
 import warnings
-from typing import Any
 
 from qiskit.providers.exceptions import QiskitBackendNotFoundError
 
@@ -31,7 +30,7 @@ class BraketProvider:
          BraketBackend[dm1]]
     """
 
-    def get_backend(self, name: str | None = None, **kwargs: Any) -> BraketAwsBackend:  # noqa: ANN401
+    def get_backend(self, name: str | None = None, **kwargs) -> BraketAwsBackend:
         """Return a single backend matching the specified filters.
 
         Args:
@@ -53,7 +52,7 @@ class BraketProvider:
     def backends(
         self,
         name: str | None = None,
-        **kwargs: Any,  # noqa: ANN401
+        **kwargs,
     ) -> list[BraketAwsBackend | BraketLocalBackend]:
         """Return a list of backends matching the specified filters.
 
@@ -100,7 +99,7 @@ class BraketProvider:
 class AWSBraketProvider(BraketProvider):
     """AWSBraketProvider class for accessing Amazon Braket backends."""
 
-    def __init_subclass__(cls, **kwargs: Any) -> None:  # noqa: ANN401
+    def __init_subclass__(cls, **kwargs) -> None:
         """This throws a deprecation warning on subclassing."""
         warnings.warn(f"{cls.__name__} is deprecated.", DeprecationWarning, stacklevel=2)
         super().__init_subclass__(**kwargs)
