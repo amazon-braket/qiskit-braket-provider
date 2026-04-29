@@ -10,10 +10,10 @@ from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister, generate_
 from qiskit.circuit import Gate as QiskitGate
 from qiskit.circuit import Instruction as QiskitInstruction
 from qiskit.circuit import Measure, Parameter, ParameterVector
-from qiskit.circuit.library import GlobalPhaseGate, PauliEvolutionGate
+from qiskit.circuit.library import CXGate, GlobalPhaseGate, HGate, PauliEvolutionGate
 from qiskit.circuit.library import standard_gates as qiskit_gates
 from qiskit.quantum_info import Kraus, Operator, SparsePauliOp
-from qiskit.transpiler import PassManager, Target
+from qiskit.transpiler import InstructionProperties, PassManager, Target
 from qiskit_ionq import ionq_gates
 
 from braket.aws import AwsDevice
@@ -37,6 +37,7 @@ from qiskit_braket_provider.providers.adapter import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_SUPPORTED_NOISES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
+    _compile,
     _get_controlled_gateset,
     _validate_angle_restrictions,
     aws_device_to_target,
@@ -1764,3 +1765,20 @@ class TestThereAndBackAgain(TestCase):
         with self.assertRaises(ValueError) as context:
             to_braket(circuit)
         self.assertIn("Cannot add global barrier to empty circuit", str(context.exception))
+
+    def test_compile_preserves_layout_with_verbatim_boxes(self):
+        """Layout from transpilation should be preserved after restoring verbatim boxes."""
+        t = Target(num_qubits=2)
+        t.add_instruction(HGate(), {(0,): InstructionProperties(), (1,): InstructionProperties()})
+        t.add_instruction(
+            CXGate(), {(0, 1): InstructionProperties(), (1, 0): InstructionProperties()}
+        )
+
+        qc = QuantumCircuit(2)
+        qc.h(0)
+        qc.cx(0, 1)
+        qc.h(1)
+
+        result = _compile(qc, target=t)
+        compiled = result.circuits[0]
+        assert compiled.layout is not None

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.14.1 (2026-04-29)
+
+### Bug Fixes and Other Changes
+
+ * Ignore barriers if unsupported
+
 ## v0.14.0 (2026-04-27)
 
 ### Features
