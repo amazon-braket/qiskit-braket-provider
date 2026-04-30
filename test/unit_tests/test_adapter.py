@@ -2,11 +2,12 @@
 
 import copy
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
 import pytest
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister, generate_preset_pass_manager
+from qiskit.circuit import Gate as QiskitGate
 from qiskit.circuit import Instruction as QiskitInstruction
 from qiskit.circuit import Measure, Parameter, ParameterVector
 from qiskit.circuit.library import CXGate, GlobalPhaseGate, HGate, PauliEvolutionGate
@@ -54,7 +55,7 @@ from test.unit_tests.mocks import (
 
 _EPS = 1e-10  # global variable used to chop very small numbers to zero
 
-qiskit_ionq_gates = [
+qiskit_ionq_gates: list[QiskitGate] = [
     ionq_gates.GPIGate(Parameter("φ")),
     ionq_gates.GPI2Gate(Parameter("φ")),
     ionq_gates.MSGate(Parameter("φ0"), Parameter("φ1"), Parameter("ϴ")),
@@ -79,13 +80,15 @@ def check_to_braket_unitary_correct(
     qiskit_circuit: QuantumCircuit, optimization_level: int | None = None
 ) -> bool:
     """Checks if endianness-reversed Qiskit circuit matrix matches Braket counterpart"""
+    result = to_braket(qiskit_circuit, optimization_level=optimization_level)
+    assert isinstance(result, Circuit)
     return np.allclose(
-        to_braket(qiskit_circuit, optimization_level=optimization_level).to_unitary(),
+        result.to_unitary(),
         Operator(qiskit_circuit.decompose()).reverse_qargs().to_matrix(),
     )
 
 
-def check_to_braket_openqasm_unitary_correct(qasm_program: Program | str):
+def check_to_braket_openqasm_unitary_correct(qasm_program: Program | str) -> bool:
     """Checks that to_braket converts an OpenQASM correctly"""
     return np.allclose(
         to_braket(qasm_program).to_unitary(), Circuit.from_ir(qasm_program).to_unitary()
@@ -933,7 +936,7 @@ class TestAdapter(TestCase):
             to_braket(qiskit_circuit)
 
     @patch("qiskit_braket_provider.providers.adapter.transpile")
-    def test_invalid_ctrl_state(self, mock_transpile):
+    def test_invalid_ctrl_state(self, mock_transpile: MagicMock):
         """Tests that control states other than all 1s are rejected."""
         qiskit_circuit = QuantumCircuit(2)
         qiskit_circuit.h(0)
@@ -980,7 +983,7 @@ class TestAdapter(TestCase):
             qiskit_circuit, verbatim=True, coupling_map=connectivity
         )
 
-        def gate_matches_connectivity(gate) -> bool:
+        def gate_matches_connectivity(gate: Instruction) -> bool:
             return any(
                 gate.target.union(gate.control).issubset(adjacency) for adjacency in connectivity
             )

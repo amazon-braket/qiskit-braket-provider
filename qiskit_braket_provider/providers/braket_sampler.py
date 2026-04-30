@@ -52,7 +52,7 @@ class BraketSampler(BaseSamplerV2):
         verbatim: bool = False,
         optimization_level: int = 0,
         **options,
-    ):
+    ) -> None:
         """
         Initialize the Braket sampler.
 

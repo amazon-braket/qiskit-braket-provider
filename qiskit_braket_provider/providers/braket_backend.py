@@ -1,13 +1,13 @@
 """Amazon Braket backends."""
 
+from __future__ import annotations
+
 import copy
-import datetime
 import enum
 import logging
 import warnings
 from abc import ABC
-from collections.abc import Callable, Iterable
-from typing import Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from qiskit import QuantumCircuit
 from qiskit.providers import BackendV2, Options, QubitProperties
@@ -33,6 +33,12 @@ from .adapter import (
 )
 from .braket_quantum_task import BraketQuantumTask
 
+if TYPE_CHECKING:
+    import datetime
+    from collections.abc import Callable, Iterable
+
+    from .braket_provider import BraketProvider
+
 logger = logging.getLogger(__name__)
 
 _TASK_ID_DIVIDER = ";"
@@ -43,14 +49,14 @@ T = TypeVar("T", bound=Device, covariant=True)  # noqa: PLC0105
 class BraketBackend(BackendV2, ABC, Generic[T]):
     """Base Qiskit backend for Amazon Braket devices."""
 
-    def __init__(self, device: T, name: str, **fields):
+    def __init__(self, device: T, name: str, **fields) -> None:
         super().__init__(name=name, **fields)
         self._device = device
         self._supports_program_sets = (
             DeviceActionType.OPENQASM_PROGRAM_SET in self._device.properties.action
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"BraketBackend[{self.name}]"
 
     @property
@@ -62,7 +68,7 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
         """
         return None
 
-    def _validate_meas_level(self, meas_level: enum.Enum | int):
+    def _validate_meas_level(self, meas_level: enum.Enum | int) -> None:
         if isinstance(meas_level, enum.Enum):
             meas_level = meas_level.value
         if meas_level != 2:
@@ -85,7 +91,12 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
         action = self._device.properties.action.get(DeviceActionType.OPENQASM)
         return gateset_from_properties(action) if action else None
 
-    def _run_program_set(self, braket_circuits: list[Circuit], shots: int | None, **options):
+    def _run_program_set(
+        self,
+        braket_circuits: list[Circuit],
+        shots: int | None,
+        **options,
+    ) -> BraketQuantumTask:
         program_set = ProgramSet(braket_circuits, shots_per_executable=shots)
         task = self._device.run(program_set, **options)
         return BraketQuantumTask(
@@ -96,7 +107,7 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
 class BraketLocalBackend(BraketBackend[LocalSimulator]):
     """Runs quantum circuits on the Braket local simulator."""
 
-    def __init__(self, name: str = "default", **fields):
+    def __init__(self, name: str = "default", **fields) -> None:
         """Initialize the backend.
 
         Example:
@@ -117,15 +128,15 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
         self.status = self._device.status
 
     @property
-    def target(self):
+    def target(self) -> Target:
         return self._target
 
     @property
-    def max_circuits(self):
+    def max_circuits(self) -> None:
         return None
 
     @classmethod
-    def _default_options(cls):
+    def _default_options(cls) -> Options:
         return Options()
 
     @property
@@ -154,7 +165,11 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
         raise NotImplementedError(f"Control channel is not supported by {self.name}.")
 
     def run(
-        self, run_input: QuantumCircuit | list[QuantumCircuit], *, shots: int = 1024, **options
+        self,
+        run_input: QuantumCircuit | list[QuantumCircuit],
+        *,
+        shots: int = 1024,
+        **options,
     ) -> BraketQuantumTask:
         convert_input = [run_input] if isinstance(run_input, QuantumCircuit) else list(run_input)
         verbatim = options.pop("verbatim", False)
@@ -199,7 +214,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
     def __init__(
         self,
         arn: str | None = None,
-        provider=None,
+        provider: BraketProvider | None = None,
         name: str | None = None,
         description: str | None = None,
         online_date: datetime.datetime | None = None,
@@ -207,7 +222,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         *,
         device: AwsDevice | None = None,
         **fields,
-    ):
+    ) -> None:
         """Initialize the backend.
 
         Example:
@@ -268,11 +283,11 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         )
 
     @property
-    def target(self):
+    def target(self) -> Target:
         return self._target
 
     @property
-    def max_circuits(self):
+    def max_circuits(self) -> None:
         return None
 
     @property
@@ -280,7 +295,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         return self._qubit_labels
 
     @classmethod
-    def _default_options(cls):
+    def _default_options(cls) -> Options:
         return Options()
 
     def qubit_properties(self, qubit: int | list[int]) -> QubitProperties | list[QubitProperties]:
@@ -354,7 +369,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         num_processes: int | None = None,
         pass_manager: PassManager | None = None,
         **options,
-    ):
+    ) -> BraketQuantumTask:
         """Execute ``QuantumCircuit``s on a ``BraketAwsBackend``
 
         Args:
@@ -421,13 +436,18 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
             return self._target, None
         return None, self._gateset
 
-    def _run_batch(self, braket_circuits: list[Circuit], shots: int, **options):
+    def _run_batch(
+        self,
+        braket_circuits: list[Circuit],
+        shots: int,
+        **options,
+    ) -> BraketQuantumTask:
         batch_task = self._device.run_batch(braket_circuits, shots=shots, **options)
         tasks: list[AwsQuantumTask] = batch_task.tasks
         task_id = _TASK_ID_DIVIDER.join(task.id for task in tasks)
         return BraketQuantumTask(task_id=task_id, tasks=tasks, backend=self, shots=shots)
 
-    def __deepcopy__(self, memo):
+    def __deepcopy__(self, memo: dict[int, Any]) -> BraketAwsBackend:
         """Create deepcopy of the BraketBackend.
 
         Note: the underlying self._device, and thus self._device.aws_session
@@ -444,7 +464,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
 class AWSBraketBackend(BraketAwsBackend):
     """AWSBraketBackend."""
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, **kwargs) -> None:
         """This throws a deprecation warning on subclassing."""
         warnings.warn(f"{cls.__name__} is deprecated.", DeprecationWarning, stacklevel=2)
         super().__init_subclass__(**kwargs)
@@ -452,13 +472,13 @@ class AWSBraketBackend(BraketAwsBackend):
     def __init__(
         self,
         device: AwsDevice,
-        provider=None,
+        provider: BraketProvider | None = None,
         name: str | None = None,
         description: str | None = None,
         online_date: datetime.datetime | None = None,
         backend_version: str | None = None,
         **fields,
-    ):
+    ) -> None:
         """This throws a deprecation warning on initialization."""
         warnings.warn(
             f"{self.__class__.__name__} is deprecated. Use BraketAwsBackend instead",

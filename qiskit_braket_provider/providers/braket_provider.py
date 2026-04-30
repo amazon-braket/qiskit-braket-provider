@@ -30,7 +30,7 @@ class BraketProvider:
          BraketBackend[dm1]]
     """
 
-    def get_backend(self, name=None, **kwargs):
+    def get_backend(self, name: str | None = None, **kwargs) -> BraketAwsBackend:
         """Return a single backend matching the specified filters.
 
         Args:
@@ -49,7 +49,11 @@ class BraketProvider:
             raise QiskitBackendNotFoundError("No backend matches the criteria")
         return backends[0]
 
-    def backends(self, name=None, **kwargs):
+    def backends(
+        self,
+        name: str | None = None,
+        **kwargs,
+    ) -> list[BraketAwsBackend | BraketLocalBackend]:
         """Return a list of backends matching the specified filters.
 
         Args:
@@ -95,12 +99,12 @@ class BraketProvider:
 class AWSBraketProvider(BraketProvider):
     """AWSBraketProvider class for accessing Amazon Braket backends."""
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, **kwargs) -> None:
         """This throws a deprecation warning on subclassing."""
         warnings.warn(f"{cls.__name__} is deprecated.", DeprecationWarning, stacklevel=2)
         super().__init_subclass__(**kwargs)
 
-    def __init__(self):
+    def __init__(self) -> None:
         """This throws a deprecation warning on initialization."""
         warnings.warn(
             f"{self.__class__.__name__} is deprecated. Use BraketProvider instead",

@@ -3,7 +3,7 @@
 import copy
 import unittest
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
 from botocore import errorfactory
@@ -151,7 +151,7 @@ class TestBraketLocalBackend(TestCase):
             Exception("Mock exception"),
         ],
     )
-    def test_local_backend_run_exception(self, braket_devices_run):
+    def test_local_backend_run_exception(self, braket_devices_run: MagicMock):
         """Tests local backend with exception thrown during second run"""
         backend = BraketLocalBackend(name="default")
 
@@ -413,7 +413,9 @@ class TestBraketAwsBackend(TestCase):
 
     @patch("qiskit_braket_provider.providers.braket_backend.AwsQuantumTask")
     @patch("qiskit_braket_provider.providers.braket_backend.BraketQuantumTask")
-    def test_retrieve_job_task_ids(self, mock_braket_quantum_task, mock_aws_quantum_task):
+    def test_retrieve_job_task_ids(
+        self, mock_braket_quantum_task: MagicMock, mock_aws_quantum_task: MagicMock
+    ):
         """Test method for retrieving job task IDs."""
         device = Mock()
         device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
@@ -493,7 +495,7 @@ class TestBraketAwsBackend(TestCase):
         self.assertEqual(sum(result.get_counts().values()), 10)
 
     @patch("qiskit_braket_provider.providers.braket_backend.to_braket")
-    def test_native_transpilation(self, mock_to_braket):
+    def test_native_transpilation(self, mock_to_braket: MagicMock):
         """Tests running circuit with native mode"""
         mock_device = Mock()
         mock_device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
@@ -519,7 +521,7 @@ class TestBraketAwsBackend(TestCase):
         assert mock_to_braket.call_args.kwargs["verbatim"] is True
 
     @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice")
-    def test_queue_depth(self, mocked_device):
+    def test_queue_depth(self, mocked_device: MagicMock):
         """Tests queue depth."""
 
         mock_return_value = QueueDepthInfo(

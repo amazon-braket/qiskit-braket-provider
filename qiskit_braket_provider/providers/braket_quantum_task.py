@@ -24,7 +24,7 @@ _TASK_STATUS_MAP = {
 }
 
 
-def retry_if_result_none(result):
+def retry_if_result_none(result: object) -> bool:
     """Retry on result function."""
     return result is None
 
@@ -74,7 +74,7 @@ class BraketQuantumTask(JobV1):
         backend: BackendV2,
         tasks: list[LocalQuantumTask] | list[AwsQuantumTask] | AwsQuantumTask,
         **metadata,
-    ):
+    ) -> None:
         """BraketQuantumTask for execution of circuits on Amazon Braket or locally.
 
         Args:
@@ -95,7 +95,7 @@ class BraketQuantumTask(JobV1):
         """int: The number of shots for the task."""
         return self.metadata["metadata"].get("shots", 0)
 
-    def submit(self):
+    def submit(self) -> None:
         return
 
     def queue_position(self) -> QuantumTaskQueueInfo:
@@ -194,7 +194,7 @@ class BraketQuantumTask(JobV1):
             status=status,
         )
 
-    def cancel(self):
+    def cancel(self) -> None:
         if isinstance(self._tasks, QuantumTask):
             self._tasks.cancel()
         else:
