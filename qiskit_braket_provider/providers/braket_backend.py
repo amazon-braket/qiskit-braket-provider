@@ -349,7 +349,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         verbatim: bool = False,
         native: bool = False,
         *,
-        optimization_level: int = 0,
+        optimization_level: int | None = None,
         callback: Callable | None = None,
         num_processes: int | None = None,
         pass_manager: PassManager | None = None,
@@ -357,22 +357,38 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
     ):
         """Execute ``QuantumCircuit``s on a ``BraketAwsBackend``
 
+        Three modes of execution are supported by Qiskit-Braket-Provider (QBP):
+
+        1. **Default** (``verbatim=False``, ``native=False``): QBP performs basic translation
+           of the Qiskit circuit and passes it to the Braket service for processing,
+           optimization, and execution.
+        2. **Verbatim** (``verbatim=True``): The user submits a Qiskit circuit that can run
+           directly on hardware. QBP only translates it to a Braket circuit, wraps it in a
+           verbatim box, and submits it. No optimization, routing, or mapping is performed
+           by QBP or the Braket service.
+        3. **Native** (``native=True``): QBP optimizes, routes, and maps the circuit using
+           the provided ``optimization_level`` or ``pass_manager``, wraps the result in a
+           verbatim box, and submits it. The Braket service executes it without further
+           optimization, routing, or mapping.
+
         Args:
             run_input (QuantumCircuit | list[QuantumCircuit]): ``QuantumCircuit`` or list
                 of ``QuantumCircuit``s.
             shots (int | None): Number of measurement repetitions for the BraketAwsBackend.
                 Default: ``None``.
             verbatim (bool): Submit as a verbatim circuit (i.e. no transpilation).
-                Default: ``False``.
-            native (bool): use the Qiskit transpiler to compile to a verbatim native circuit
-                with noise aware transpilation when available and optimization_level > 2.
-                Default: ``False``.
-            optimization_level (int): Qiskit transpiler optimization level (see adapter.py).
-                Default: 0.
+                Cannot be used with ``native=True``. Default: ``False``.
+            native (bool): Use QBP to optimize, route, and map the circuit before submitting
+                as verbatim. Requires either ``optimization_level`` or ``pass_manager``.
+                Cannot be used with ``verbatim=True``. Default: ``False``.
+            optimization_level (int | None): Qiskit transpiler optimization level
+                (see adapter.py). Requires ``native=True``. Cannot be used with
+                ``pass_manager``. Default: ``None``.
             callback (Callable | None): Function for the Qiskit transpiler. Default: ``None``.
             num_processes (int | None): Allow for parallel transpilation. Default: ``None``.
             pass_manager (PassManager | None): User-specified ``PassManager`` for the
-                Qiskit transpiler (creates verbatim circuits). Default: ``None``.
+                Qiskit transpiler. Requires ``native=True``. Cannot be used with
+                ``optimization_level``. Default: ``None``.
         """
 
         if isinstance(run_input, QuantumCircuit):
@@ -385,6 +401,8 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         if "meas_level" in options:
             self._validate_meas_level(options["meas_level"])
             del options["meas_level"]
+
+        self._validate_run_config(verbatim, native, optimization_level, pass_manager)
 
         # Always use target for simulator
         target, basis_gates = self._target_and_basis_gates(native, pass_manager)
@@ -399,7 +417,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
                 angle_restrictions=(
                     native_angle_restrictions(self._device.properties) if native else None
                 ),
-                optimization_level=optimization_level,
+                optimization_level=optimization_level or 0,
                 callback=callback,
                 num_processes=num_processes,
                 pass_manager=pass_manager,
@@ -420,6 +438,56 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
             # Always use target for simulator
             return self._target, None
         return None, self._gateset
+
+    @staticmethod
+    def _validate_run_config(
+        verbatim: bool,
+        native: bool,
+        optimization_level: int | None,
+        pass_manager: PassManager | None,
+    ) -> None:
+        """Validate the run configuration for mutually exclusive and co-required options.
+
+        Three modes of execution are supported:
+
+        1. Default (verbatim=False, native=False): QBP performs basic translation of the
+           Qiskit circuit and passes it to the Braket service for processing, optimization,
+           and execution.
+        2. Verbatim (verbatim=True): The user submits a Qiskit circuit that can run directly
+           on hardware. QBP only translates it to a Braket circuit, wraps it in a verbatim
+           box, and submits it. No optimization, routing, or mapping is done by QBP or the
+           Braket service.
+        3. Native (native=True): QBP optimizes, routes, and maps the circuit according to
+           the provided optimization_level or pass_manager, wraps the result in a verbatim
+           box, and submits it. The Braket service executes it without further optimization,
+           routing, or mapping.
+
+        Raises:
+            QiskitBraketException: If the configuration is invalid.
+        """
+        if verbatim and native:
+            raise QiskitBraketException(
+                "verbatim and native cannot both be True. "
+                "Use verbatim=True to submit a pre-compiled circuit, "
+                "or native=True to let QBP optimize before submitting as verbatim."
+            )
+
+        if native and optimization_level is not None and pass_manager is not None:
+            raise QiskitBraketException(
+                "optimization_level and pass_manager cannot both be specified. "
+                "Provide one or the other when using native=True."
+            )
+
+        if native and optimization_level is None and pass_manager is None:
+            raise QiskitBraketException(
+                "native=True requires either optimization_level or pass_manager to be specified."
+            )
+
+        if not native and (optimization_level is not None or pass_manager is not None):
+            raise QiskitBraketException(
+                "optimization_level and pass_manager require native=True. "
+                "Set native=True to use these options."
+            )
 
     def _run_batch(self, braket_circuits: list[Circuit], shots: int, **options):
         batch_task = self._device.run_batch(braket_circuits, shots=shots, **options)

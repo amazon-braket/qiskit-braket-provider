@@ -334,7 +334,7 @@ class TestBraketAwsBackend(TestCase):
         braket_circuit = Circuit().h(1)
         device.run_batch.assert_called_once_with([braket_circuit, braket_circuit], shots=0)
 
-        backend.run([circuit, circuit], shots=0, native=True, num_processes=2)
+        backend.run([circuit, circuit], shots=0, native=True, optimization_level=0, num_processes=2)
         native_circuit = Circuit().add_verbatim_box(
             Circuit().rz(1, np.pi / 2).rx(1, np.pi / 2).rz(1, np.pi / 2)
         )
@@ -366,7 +366,7 @@ class TestBraketAwsBackend(TestCase):
             ProgramSet([braket_circuit, braket_circuit], shots_per_executable=5)
         )
 
-        backend.run([circuit, circuit], shots=5, native=True, num_processes=2)
+        backend.run([circuit, circuit], shots=5, native=True, optimization_level=0, num_processes=2)
         native_circuit = Circuit().add_verbatim_box(
             Circuit().rz(1, np.pi / 2).rx(1, np.pi / 2).rz(1, np.pi / 2)
         )
@@ -394,7 +394,9 @@ class TestBraketAwsBackend(TestCase):
         circuit = QuantumCircuit(1)
         circuit.h(0)
 
-        backend.run(circuit, shots=0, pass_manager=generate_preset_pass_manager(1, backend))
+        backend.run(
+            circuit, shots=0, native=True, pass_manager=generate_preset_pass_manager(1, backend)
+        )
         native_circuit = Circuit().add_verbatim_box(
             Circuit().rz(1, np.pi / 2).rx(1, np.pi / 2).rz(1, np.pi / 2)
         )
@@ -410,6 +412,101 @@ class TestBraketAwsBackend(TestCase):
         backend = BraketAwsBackend(device=device)
         with self.assertRaises(exception.QiskitBraketException):
             backend.run(1, shots=0)
+
+    def test_run_optimization_level_without_native_raises(self):
+        """Tests that specifying optimization_level without native=True raises."""
+        device = Mock()
+        device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
+        device.gate_calibrations = None
+        device.type = "QPU"
+        device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+        backend = BraketAwsBackend(device=device)
+        circuit = QuantumCircuit(1)
+        circuit.h(0)
+        circuit.measure_all()
+        with self.assertRaisesRegex(
+            exception.QiskitBraketException,
+            "optimization_level and pass_manager require native=True",
+        ):
+            backend.run(circuit, shots=0, optimization_level=2)
+
+    def test_run_pass_manager_without_native_raises(self):
+        """Tests that specifying pass_manager without native=True raises."""
+        device = Mock()
+        device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
+        device.gate_calibrations = None
+        device.type = "QPU"
+        device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+        backend = BraketAwsBackend(device=device)
+        circuit = QuantumCircuit(1)
+        circuit.h(0)
+        circuit.measure_all()
+        with self.assertRaisesRegex(
+            exception.QiskitBraketException,
+            "optimization_level and pass_manager require native=True",
+        ):
+            backend.run(
+                circuit,
+                shots=0,
+                pass_manager=generate_preset_pass_manager(1, backend),
+            )
+
+    def test_run_native_without_optimization_level_or_pass_manager_raises(self):
+        """Tests that specifying native=True without optimization_level or pass_manager raises."""
+        device = Mock()
+        device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
+        device.gate_calibrations = None
+        device.type = "QPU"
+        device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+        backend = BraketAwsBackend(device=device)
+        circuit = QuantumCircuit(1)
+        circuit.h(0)
+        circuit.measure_all()
+        with self.assertRaisesRegex(
+            exception.QiskitBraketException,
+            "native=True requires either optimization_level or pass_manager",
+        ):
+            backend.run(circuit, shots=0, native=True)
+
+    def test_run_verbatim_and_native_raises(self):
+        """Tests that verbatim=True and native=True cannot be used together."""
+        device = Mock()
+        device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
+        device.gate_calibrations = None
+        device.type = "QPU"
+        device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+        backend = BraketAwsBackend(device=device)
+        circuit = QuantumCircuit(1)
+        circuit.h(0)
+        circuit.measure_all()
+        with self.assertRaisesRegex(
+            exception.QiskitBraketException,
+            "verbatim and native cannot both be True",
+        ):
+            backend.run(circuit, shots=0, verbatim=True, native=True, optimization_level=1)
+
+    def test_run_native_with_both_optimization_level_and_pass_manager_raises(self):
+        """Tests that optimization_level and pass_manager cannot both be specified."""
+        device = Mock()
+        device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
+        device.gate_calibrations = None
+        device.type = "QPU"
+        device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+        backend = BraketAwsBackend(device=device)
+        circuit = QuantumCircuit(1)
+        circuit.h(0)
+        circuit.measure_all()
+        with self.assertRaisesRegex(
+            exception.QiskitBraketException,
+            "optimization_level and pass_manager cannot both be specified",
+        ):
+            backend.run(
+                circuit,
+                shots=0,
+                native=True,
+                optimization_level=2,
+                pass_manager=generate_preset_pass_manager(1, backend),
+            )
 
     @patch("qiskit_braket_provider.providers.braket_backend.AwsQuantumTask")
     @patch("qiskit_braket_provider.providers.braket_backend.BraketQuantumTask")
@@ -512,11 +609,41 @@ class TestBraketAwsBackend(TestCase):
 
         backend = AWSBraketBackend(device=mock_device)
 
-        backend.run(circuit, native=True)
+        backend.run(circuit, native=True, optimization_level=0)
         assert mock_to_braket.call_args.kwargs["target"] == backend.target
 
         backend.run(circuit, verbatim=True)
         assert mock_to_braket.call_args.kwargs["verbatim"] is True
+
+    def test_optimization_level_triggers_transpilation_on_qpu(self):
+        """Tests that optimization_level > 0 actually optimizes circuits on QPU backends,
+        even when all gates are already in the basis gate set."""
+        device = Mock()
+        device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
+        device.gate_calibrations = None
+        device.type = "QPU"
+        device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+
+        mock_batch = Mock()
+        mock_batch.tasks = [Mock(id="task0")]
+        device.run_batch.return_value = mock_batch
+
+        backend = BraketAwsBackend(device=device)
+
+        # Two consecutive H gates should cancel with optimization_level=3
+        circuit = QuantumCircuit(1)
+        circuit.h(0)
+        circuit.h(0)
+        circuit.measure_all()
+
+        backend.run(circuit, shots=100, optimization_level=3, native=True)
+
+        # Inspect the Braket circuit that was submitted
+        submitted_circuit = device.run_batch.call_args[0][0][0]
+        h_count = sum(1 for instr in submitted_circuit.instructions if instr.operator.name == "H")
+        assert h_count == 0, (
+            f"Expected H gates to cancel with optimization_level=3, but found {h_count}"
+        )
 
     @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice")
     def test_queue_depth(self, mocked_device):
