@@ -1,7 +1,14 @@
 """Tests for dynamic circuit support (if/else, for loops, while loops) in the Qiskit adapter."""
 
 import pytest
-from qiskit.circuit import Clbit, ForLoopOp, IfElseOp, WhileLoopOp
+from qiskit.circuit import (
+    CircuitInstruction,
+    Clbit,
+    ForLoopOp,
+    IfElseOp,
+    QuantumCircuit,
+    WhileLoopOp,
+)
 from qiskit.circuit.library import CXGate, HGate, Measure, XGate, YGate, ZGate
 from qiskit.transpiler import Target
 
@@ -21,12 +28,14 @@ from qiskit_braket_provider import to_qiskit
 from qiskit_braket_provider.providers.adapter import _compile, _QiskitProgramContext
 
 
-def _get_if_else_ops(circuit):
+def _get_if_else_ops(circuit: QuantumCircuit) -> list[CircuitInstruction]:
     """Extract all IfElseOp instructions from a circuit."""
     return [instr for instr in circuit.data if isinstance(instr.operation, IfElseOp)]
 
 
-def _get_ops_with_qubits(circuit):
+def _get_ops_with_qubits(
+    circuit: QuantumCircuit,
+) -> list[tuple[str, list[int]]]:
     """Get (gate_name, qubit_indices) tuples for all non-measure ops in a circuit."""
     return [
         (instr.operation.name, [circuit.find_bit(q).index for q in instr.qubits])
@@ -91,7 +100,11 @@ if (c[0] == 0) {
         ),
     ],
 )
-def test_if_else_branch_bodies(qasm, expected_true_ops, expected_false_ops):
+def test_if_else_branch_bodies(
+    qasm: str,
+    expected_true_ops: list[tuple[str, list[int]]],
+    expected_false_ops: list[tuple[str, list[int]]],
+):
     qc = to_qiskit(qasm)
     if_else_ops = _get_if_else_ops(qc)
     assert len(if_else_ops) == 1
@@ -147,7 +160,7 @@ if (c == 1) {
     ],
     ids=["condition_1", "condition_0"],
 )
-def test_condition_value(condition_value, expected_value):
+def test_condition_value(condition_value: str, expected_value: int):
     qasm = f"""
 OPENQASM 3.0;
 qubit[2] q;
@@ -427,7 +440,7 @@ for int[8] i in [0:1] {
 
 
 @pytest.fixture
-def mcm_target():
+def mcm_target() -> Target:
     t = Target(num_qubits=3)
     t.add_instruction(HGate())
     t.add_instruction(XGate())
@@ -489,7 +502,7 @@ if (c[0] == 1) {
         ),
     ],
 )
-def test_compile_preserves_if_else_ops(qasm, expected_if_else_count, mcm_target):
+def test_compile_preserves_if_else_ops(qasm: str, expected_if_else_count: int, mcm_target: Target):
     """IfElseOps should survive compilation through _compile."""
     result = _compile(qasm, target=mcm_target)
     compiled_circuit = result.circuits[0]
@@ -499,7 +512,7 @@ def test_compile_preserves_if_else_ops(qasm, expected_if_else_count, mcm_target)
     assert len(if_else_ops) == expected_if_else_count
 
 
-def test_compile_if_else_branch_bodies_intact(mcm_target):
+def test_compile_if_else_branch_bodies_intact(mcm_target: Target):
     """Branch body gate content and qubit targets should be preserved after compilation."""
     qasm = """
 OPENQASM 3.0;
@@ -523,7 +536,7 @@ if (c[0] == 1) {
     assert _get_ops_with_qubits(false_body) == [("x", [1])]
 
 
-def test_compile_if_else_condition_preserved(mcm_target):
+def test_compile_if_else_condition_preserved(mcm_target: Target):
     """The condition clbit and value should be preserved after compilation."""
     qasm = """
 OPENQASM 3.0;

@@ -1,7 +1,10 @@
 """Tests for verbatim pragma support in Qiskit to Braket adapter."""
 
+from typing import Any
+
 import pytest
-from qiskit.circuit import BoxOp
+from qiskit import QuantumCircuit
+from qiskit.circuit import BoxOp, CircuitInstruction
 
 from braket.circuits import Circuit
 from braket.default_simulator.openqasm.interpreter import VerbatimBoxDelimiter
@@ -11,11 +14,11 @@ from qiskit_braket_provider import to_qiskit
 from qiskit_braket_provider.providers.adapter import _QiskitProgramContext
 
 
-def _get_box_ops(qiskit_circuit):
+def _get_box_ops(qiskit_circuit: QuantumCircuit) -> list[CircuitInstruction]:
     return [instr for instr in qiskit_circuit.data if isinstance(instr.operation, BoxOp)]
 
 
-def _get_non_box_gates(qiskit_circuit):
+def _get_non_box_gates(qiskit_circuit: QuantumCircuit) -> list[CircuitInstruction]:
     return [instr for instr in qiskit_circuit.data if not isinstance(instr.operation, BoxOp)]
 
 
@@ -61,8 +64,10 @@ box {
     ],
     ids=["single_box_with_gates", "empty_box", "custom_label"],
 )
-def test_single_verbatim_box(qasm, num_qubits, label, expected_body_gates):
-    kwargs = {"verbatim_box_name": label} if label != "verbatim" else {}
+def test_single_verbatim_box(
+    qasm: str, num_qubits: int, label: str, expected_body_gates: list[str]
+):
+    kwargs: dict[str, Any] = {"verbatim_box_name": label} if label != "verbatim" else {}
     qc = to_qiskit(qasm, **kwargs)
 
     if num_qubits:
@@ -247,7 +252,7 @@ cnot $0, $1;
     ],
     ids=["openqasm_str", "braket_circuit", "braket_program"],
 )
-def test_no_verbatim_pragma(source, to_qiskit_kwargs):
+def test_no_verbatim_pragma(source: str | Circuit | Program, to_qiskit_kwargs: dict[str, Any]):
     qc = to_qiskit(source, **to_qiskit_kwargs)
     assert len(_get_box_ops(qc)) == 0
     gate_names = [d.operation.name for d in qc.data]
@@ -273,7 +278,7 @@ def test_no_verbatim_pragma(source, to_qiskit_kwargs):
     ],
     ids=["nested_start", "end_without_start", "invalid_marker"],
 )
-def test_context_marker_errors(markers, error_match):
+def test_context_marker_errors(markers: list[VerbatimBoxDelimiter | str], error_match: str):
     context = _QiskitProgramContext()
     context.add_qubits("q", 2)
 
