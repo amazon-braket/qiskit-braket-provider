@@ -363,7 +363,6 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._verbatim_circuit: QuantumCircuit | None = None
         self._verbatim_box_name = verbatim_box_name
         self._clbit_offset: dict[str, int] = {}
-        self._measured_bits: set[str] = set()
 
     @property
     def _active_circuit(self) -> QuantumCircuit:
@@ -466,13 +465,6 @@ class _QiskitProgramContext(AbstractProgramContext):
         *,
         classical_destination: Identifier | IndexedIdentifier | None = None,
     ) -> None:
-        if classical_destination is not None:
-            name = (
-                classical_destination.name
-                if isinstance(classical_destination, IndexedIdentifier)
-                else classical_destination
-            )
-            self._measured_bits.add(name.name)
         active = self._active_circuit
         # this is to cover the edge case where a user measures a qubit without assigning it to a classical register
         if active.num_clbits < len(target):
@@ -530,18 +522,28 @@ class _QiskitProgramContext(AbstractProgramContext):
         return True
 
     def is_mcm_dependent(self, expression) -> bool:
-        """Check if expression references a variable that was measured into."""
-        match expression:
-            case Identifier(name=name):
-                return name in self._measured_bits
-            case IndexExpression(collection=Identifier(name=name)):
-                return name in self._measured_bits
-            case BinaryExpression(lhs=lhs, rhs=rhs):
-                return self.is_mcm_dependent(lhs) or self.is_mcm_dependent(rhs)
-            case RangeDefinition() | DiscreteSet():
-                return True
-            case _:
-                return False
+        """Check if expression depends on a mid-circuit measurement result.
+
+        Delegates to the base class for identifier-based checks using
+        _mcm_dependent_scopes, but always returns True for RangeDefinition
+        and DiscreteSet to force for-loops through evaluate_for_range
+        (producing ForLoopOp).
+        """
+        if isinstance(expression, (RangeDefinition, DiscreteSet)):
+            return True
+        return super().is_mcm_dependent(expression)
+
+    def mark_mcm_dependent(self, name: str) -> None:
+        """Mark a variable as MCM-dependent in its declaration scope."""
+        super().mark_mcm_dependent(name)
+
+    def track_mcm_dependency(self, lvalue_name: str, rvalue) -> None:
+        """Propagate MCM-dependency through classical assignments."""
+        super().track_mcm_dependency(lvalue_name, rvalue)
+
+    def iter_classical_scopes(self, expression):
+        """Yield once since Qiskit circuit building doesn't do per-path branching."""
+        yield
 
     def evaluate_condition(self, condition):
         """Evaluate a branching condition using a circuit stack.
