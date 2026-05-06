@@ -322,7 +322,13 @@ class _SubstitutedTarget(Target):
     def _substitute(
         self, circuits: QuantumCircuit | Iterable[QuantumCircuit]
     ) -> QuantumCircuit | list[QuantumCircuit]:
-        return self._pass_manager.run(circuits)
+        single = isinstance(circuits, QuantumCircuit)
+        circuit_list: list[QuantumCircuit] = [circuits] if single else list(circuits)
+        results: list[QuantumCircuit] = self._pass_manager.run(circuit_list)
+        for original, result in zip(circuit_list, results, strict=True):
+            if original._layout is not None:
+                result._layout = original._layout
+        return results[0] if single else results
 
 
 class _SubstituteGates(TransformationPass):

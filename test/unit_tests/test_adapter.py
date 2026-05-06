@@ -6,7 +6,13 @@ from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
 import pytest
-from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister, generate_preset_pass_manager
+from qiskit import (
+    ClassicalRegister,
+    QuantumCircuit,
+    QuantumRegister,
+    generate_preset_pass_manager,
+    transpile,
+)
 from qiskit.circuit import Gate as QiskitGate
 from qiskit.circuit import Instruction as QiskitInstruction
 from qiskit.circuit import Measure, Parameter, ParameterVector
@@ -39,6 +45,7 @@ from qiskit_braket_provider.providers.adapter import (
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
     _compile,
     _get_controlled_gateset,
+    _SubstitutedTarget,
     _validate_angle_restrictions,
     aws_device_to_target,
     convert_qiskit_to_braket_circuit,
@@ -1782,3 +1789,24 @@ class TestThereAndBackAgain(TestCase):
         result = _compile(qc, target=t)
         compiled = result.circuits[0]
         assert compiled.layout is not None
+
+    def test_substitute_preserves_layout(self):
+        """_SubstitutedTarget._substitute should not strip layout set by transpile."""
+        target = _SubstitutedTarget(num_qubits=2)
+        target.add_instruction(
+            HGate(), {(0,): InstructionProperties(), (1,): InstructionProperties()}
+        )
+        target.add_instruction(
+            CXGate(), {(0, 1): InstructionProperties(), (1, 0): InstructionProperties()}
+        )
+
+        qc = QuantumCircuit(2)
+        qc.h(0)
+        qc.cx(0, 1)
+
+        transpiled = transpile(qc, target=target)
+        assert transpiled.layout is not None
+
+        result = target._substitute(transpiled)
+        assert result.layout is not None
+        assert result.layout == transpiled.layout
