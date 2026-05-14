@@ -1113,78 +1113,66 @@ if (c == 1) {
     assert qc.num_clbits == 2
 
 
-# ---- Tests for new base-class interface methods ----
+def test_mark_mcm_dependent_makes_variable_mcm_dependent():
+    context = _QiskitProgramContext()
+    context.add_qubits("q", 2)
+    context.declare_variable("c", BoolType())
+    context.mark_mcm_dependent("c")
+    assert context.is_mcm_dependent(Identifier("c"))
 
 
-class TestMarkMcmDependent:
-    """Tests for mark_mcm_dependent using base class _mcm_dependent_scopes."""
-
-    def test_mark_makes_variable_mcm_dependent(self):
-        context = _QiskitProgramContext()
-        context.add_qubits("q", 2)
-        context.declare_variable("c", BoolType())
-        context.mark_mcm_dependent("c")
-        assert context.is_mcm_dependent(Identifier("c"))
-
-    def test_unmarked_variable_is_not_mcm_dependent(self):
-        context = _QiskitProgramContext()
-        context.add_qubits("q", 1)
-        context.declare_variable("c", BoolType())
-        assert not context.is_mcm_dependent(Identifier("c"))
+def test_unmarked_variable_is_not_mcm_dependent():
+    context = _QiskitProgramContext()
+    context.add_qubits("q", 1)
+    context.declare_variable("c", BoolType())
+    assert not context.is_mcm_dependent(Identifier("c"))
 
 
-class TestTrackMcmDependency:
-    """Tests for track_mcm_dependency propagating MCM status through assignments."""
-
-    def test_propagates_dependency_from_mcm_variable(self):
-        context = _QiskitProgramContext()
-        context.add_qubits("q", 1)
-        context.declare_variable("c", BoolType())
-        context.declare_variable("d", BoolType())
-        context.mark_mcm_dependent("c")
-        # d = c should make d MCM-dependent
-        context.track_mcm_dependency("d", Identifier("c"))
-        assert context.is_mcm_dependent(Identifier("d"))
-
-    def test_clears_dependency_when_rvalue_not_mcm(self):
-        context = _QiskitProgramContext()
-        context.add_qubits("q", 1)
-        context.declare_variable("c", BoolType())
-        context.declare_variable("d", BoolType())
-        context.mark_mcm_dependent("d")
-        assert context.is_mcm_dependent(Identifier("d"))
-        # d = c where c is NOT mcm-dependent should clear d
-        context.track_mcm_dependency("d", Identifier("c"))
-        assert not context.is_mcm_dependent(Identifier("d"))
+def test_track_mcm_dependency_propagates_from_mcm_variable():
+    context = _QiskitProgramContext()
+    context.add_qubits("q", 1)
+    context.declare_variable("c", BoolType())
+    context.declare_variable("d", BoolType())
+    context.mark_mcm_dependent("c")
+    context.track_mcm_dependency("d", Identifier("c"))
+    assert context.is_mcm_dependent(Identifier("d"))
 
 
-class TestIterClassicalScopes:
-    """Tests for iter_classical_scopes yielding exactly once."""
+def test_track_mcm_dependency_clears_when_rvalue_not_mcm():
+    context = _QiskitProgramContext()
+    context.add_qubits("q", 1)
+    context.declare_variable("c", BoolType())
+    context.declare_variable("d", BoolType())
+    context.mark_mcm_dependent("d")
+    assert context.is_mcm_dependent(Identifier("d"))
+    context.track_mcm_dependency("d", Identifier("c"))
+    assert not context.is_mcm_dependent(Identifier("d"))
 
-    def test_yields_once(self):
-        context = _QiskitProgramContext()
-        count = sum(1 for _ in context.iter_classical_scopes(IntegerLiteral(0)))
-        assert count == 1
+
+def test_iter_classical_scopes_yields_once():
+    context = _QiskitProgramContext()
+    count = sum(1 for _ in context.iter_classical_scopes(IntegerLiteral(0)))
+    assert count == 1
 
 
-class TestIsMcmDependentBaseClass:
-    """Tests for is_mcm_dependent using base class _mcm_dependent_scopes."""
+def test_is_mcm_dependent_range_definition():
+    context = _QiskitProgramContext()
+    assert context.is_mcm_dependent(RangeDefinition(IntegerLiteral(0), IntegerLiteral(3), None))
 
-    def test_range_definition_always_mcm_dependent(self):
-        context = _QiskitProgramContext()
-        assert context.is_mcm_dependent(RangeDefinition(IntegerLiteral(0), IntegerLiteral(3), None))
 
-    def test_discrete_set_always_mcm_dependent(self):
-        context = _QiskitProgramContext()
-        assert context.is_mcm_dependent(DiscreteSet([IntegerLiteral(1), IntegerLiteral(2)]))
+def test_is_mcm_dependent_discrete_set():
+    context = _QiskitProgramContext()
+    assert context.is_mcm_dependent(DiscreteSet([IntegerLiteral(1), IntegerLiteral(2)]))
 
-    def test_literal_not_mcm_dependent(self):
-        context = _QiskitProgramContext()
-        assert not context.is_mcm_dependent(IntegerLiteral(42))
 
-    def test_mcm_dependency_through_full_program(self):
-        """End-to-end: measure marks variable, which is then detected as MCM-dependent."""
-        qasm = """
+def test_is_mcm_dependent_literal_not_dependent():
+    context = _QiskitProgramContext()
+    assert not context.is_mcm_dependent(IntegerLiteral(42))
+
+
+def test_is_mcm_dependent_through_full_program():
+    """End-to-end: measure marks variable, which is then detected as MCM-dependent."""
+    qasm = """
 OPENQASM 3.0;
 qubit[2] q;
 bit[1] c;
@@ -1193,21 +1181,20 @@ if (c[0] == 1) {
     x q[1];
 }
 """
-        qc = to_qiskit(qasm)
-        if_else_ops = _get_if_else_ops(qc)
-        assert len(if_else_ops) == 1
+    qc = to_qiskit(qasm)
+    if_else_ops = _get_if_else_ops(qc)
+    assert len(if_else_ops) == 1
 
-    def test_classical_assignment_propagates_mcm(self):
-        """Variable assigned from MCM result should be detected as MCM-dependent
-        when using the context directly (not through the interpreter, which
-        requires runtime values)."""
-        context = _QiskitProgramContext()
-        context.add_qubits("q", 2)
-        context.declare_variable("c", BoolType())
-        context.declare_variable("d", BoolType())
-        context.mark_mcm_dependent("c")
-        context.track_mcm_dependency("d", Identifier("c"))
-        assert context.is_mcm_dependent(Identifier("d"))
+
+def test_classical_assignment_propagates_mcm():
+    """Variable assigned from MCM result should be detected as MCM-dependent."""
+    context = _QiskitProgramContext()
+    context.add_qubits("q", 2)
+    context.declare_variable("c", BoolType())
+    context.declare_variable("d", BoolType())
+    context.mark_mcm_dependent("c")
+    context.track_mcm_dependency("d", Identifier("c"))
+    assert context.is_mcm_dependent(Identifier("d"))
 
 
 def test_negated_condition_raises_not_implemented():
