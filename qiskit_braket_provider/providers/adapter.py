@@ -533,14 +533,6 @@ class _QiskitProgramContext(AbstractProgramContext):
             return True
         return super().is_mcm_dependent(expression)
 
-    def mark_mcm_dependent(self, name: str) -> None:
-        """Mark a variable as MCM-dependent in its declaration scope."""
-        super().mark_mcm_dependent(name)
-
-    def track_mcm_dependency(self, lvalue_name: str, rvalue) -> None:
-        """Propagate MCM-dependency through classical assignments."""
-        super().track_mcm_dependency(lvalue_name, rvalue)
-
     def iter_classical_scopes(self, expression):
         """Yield once since Qiskit circuit building doesn't do per-path branching."""
         yield
