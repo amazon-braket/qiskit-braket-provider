@@ -781,23 +781,6 @@ if (c[0] != 1) {
         to_qiskit(qasm)
 
 
-def test_unsupported_condition_type():
-    """A non-boolean-castable static condition should raise an unsupported condition error."""
-    ctx = _QiskitProgramContext()
-    gen = ctx.evaluate_condition(ArrayLiteral(values=[BooleanLiteral(value=True)]))
-    with pytest.raises(TypeError, match="Unsupported condition in branching statement"):
-        next(gen)
-
-
-def test_evaluate_condition_static_yields_value_directly():
-    """A static condition yields its boolean value and terminates."""
-    ctx = _QiskitProgramContext()
-    gen = ctx.evaluate_condition(BooleanLiteral(value=True))
-    assert next(gen) is True
-    with pytest.raises(StopIteration):
-        next(gen)
-
-
 def test_is_mcm_dependent_for_loop_set_declarations():
     """For-loop set_declaration nodes (``RangeDefinition`` / ``DiscreteSet``)
     are always treated as MCM-dependent so the interpreter routes them
@@ -1075,30 +1058,6 @@ while (c != 0) {
         to_qiskit(qasm)
 
 
-def test_while_loop_unsupported_condition_type():
-    """A non-boolean-castable static while condition should raise an unsupported condition error."""
-    ctx = _QiskitProgramContext()
-    gen = ctx.evaluate_while_condition(ArrayLiteral(values=[BooleanLiteral(value=True)]))
-    with pytest.raises(TypeError, match="Unsupported condition in while loop"):
-        next(gen)
-
-
-def test_evaluate_while_condition_static_terminates_on_false():
-    """A static false while condition yields nothing and terminates."""
-    ctx = _QiskitProgramContext()
-    gen = ctx.evaluate_while_condition(BooleanLiteral(value=False))
-    with pytest.raises(StopIteration):
-        next(gen)
-
-
-def test_evaluate_while_condition_static_true_yields_true():
-    """A static true while condition yields True on each iteration."""
-    ctx = _QiskitProgramContext()
-    gen = ctx.evaluate_while_condition(BooleanLiteral(value=True))
-    assert next(gen) is True
-    gen.close()
-
-
 def test_for_loop_body_expands_circuit():
     """A physical qubit reference inside a for-loop body expands the main circuit."""
     qasm = """
@@ -1249,3 +1208,36 @@ if (c[0] == 1) {
         context.mark_mcm_dependent("c")
         context.track_mcm_dependency("d", Identifier("c"))
         assert context.is_mcm_dependent(Identifier("d"))
+
+
+def test_negated_condition_raises_not_implemented():
+    """A negated MCM condition like !c should raise NotImplementedError."""
+    qasm = """
+OPENQASM 3.0;
+qubit[2] q;
+bit c;
+c = measure q[0];
+if (!c) {
+    x q[1];
+}
+"""
+    with pytest.raises(NotImplementedError, match="Unsupported condition type"):
+        to_qiskit(qasm)
+
+
+def test_mcm_propagation_through_classical_assignment():
+    """MCM dependency should propagate through intermediate classical assignments."""
+    qasm = """
+OPENQASM 3.0;
+qubit[3] __qubits__;
+bit[1] mcm;
+bit __bit_1__;
+__bit_1__ = measure __qubits__[1];
+mcm[0] = __bit_1__;
+if (mcm[0] == 1) {
+    x __qubits__[2];
+}
+"""
+    qc = to_qiskit(qasm)
+    if_else_ops = _get_if_else_ops(qc)
+    assert len(if_else_ops) == 1

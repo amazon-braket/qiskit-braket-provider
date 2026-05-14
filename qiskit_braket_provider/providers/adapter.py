@@ -551,18 +551,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         Yields True (visit if-block) then False (visit else-block).
         Each yield pushes a new circuit onto the stack; after the interpreter
         visits the block, the circuit is popped and used to build an IfElseOp.
-
-        For static conditions (no measurement dependency), evaluates directly
-        and yields only the taken branch.
         """
-        if not self.is_mcm_dependent(condition):
-            try:
-                result = cast_to(BooleanLiteral, self._evaluate_expression(condition))
-            except (TypeError, ValueError, AttributeError) as e:
-                raise TypeError("Unsupported condition in branching statement") from e
-            yield result.value
-            return
-
         # MCM path: resolve condition to (Clbit, value)
         main = self._active_circuit
         if isinstance(condition, (Identifier, IndexExpression)):
@@ -575,6 +564,11 @@ class _QiskitProgramContext(AbstractProgramContext):
                     f"Only '==' is supported for mid-circuit measurement branching."
                 )
             resolved_condition = self._resolve_condition(condition)
+        else:
+            raise NotImplementedError(
+                f"Unsupported condition type '{type(condition).__name__}' in branching condition. "
+                f"Only Identifier, IndexExpression, and BinaryExpression (==) are supported."
+            )
 
         true_body = QuantumCircuit(main.num_qubits, main.num_clbits)
         self._circuit_stack.append(true_body)
@@ -688,31 +682,23 @@ class _QiskitProgramContext(AbstractProgramContext):
         raise NotImplementedError("continue statements are not supported in loops.")
 
     def evaluate_while_condition(self, condition: Expression):
-        """Evaluate a while-loop condition, yielding True per iteration.
-
-        For static conditions (no measurement dependency), evaluates directly.
-        For MCM-dependent conditions, captures the body into a WhileLoopOp.
-        """
-        if not self.is_mcm_dependent(condition):
-            try:
-                while cast_to(BooleanLiteral, self._evaluate_expression(condition)).value:
-                    yield True
-            except (TypeError, ValueError, AttributeError) as e:
-                raise TypeError("Unsupported condition in while loop") from e
-            else:
-                return
-
+        """Evaluate a while-loop condition, capturing the body into a WhileLoopOp."""
         # MCM path: resolve condition and capture body into WhileLoopOp
         main = self._active_circuit
         if isinstance(condition, (Identifier, IndexExpression)):
             resolved_condition = self._resolve_condition_from_identifier(condition)
-        else:
+        elif isinstance(condition, BinaryExpression):
             if condition.op != BinaryOperator["=="]:
                 raise NotImplementedError(
                     f"Unsupported operator '{condition.op.name}' in while-loop condition. "
                     f"Only '==' is supported for mid-circuit measurement while loops."
                 )
             resolved_condition = self._resolve_condition(condition)
+        else:
+            raise NotImplementedError(
+                f"Unsupported condition type '{type(condition).__name__}' in while-loop condition. "
+                f"Only Identifier, IndexExpression, and BinaryExpression (==) are supported."
+            )
 
         body = QuantumCircuit(main.num_qubits, main.num_clbits)
         self._circuit_stack.append(body)
