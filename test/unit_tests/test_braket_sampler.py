@@ -6,6 +6,7 @@ import numpy as np
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
 from qiskit.circuit import Parameter
 from qiskit.primitives import BackendSamplerV2
+from qiskit.primitives.containers import BitArray
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 
 from braket.circuits import Circuit
@@ -23,7 +24,7 @@ class TestBraketSampler(TestCase):
         self.sampler = BraketSampler(backend)
         self.sampler_backend = BackendSamplerV2(backend=backend)
 
-    def assert_correct_results(self, actual, expected):
+    def assert_correct_results(self, actual: BitArray, expected: BitArray):
         """Compares the results from BraketSampler and BackendSamplerV2"""
         counts = actual.get_int_counts()
         shots = actual.num_shots

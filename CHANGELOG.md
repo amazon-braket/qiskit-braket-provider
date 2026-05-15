@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.14.3 (2026-05-06)
+
+### Bug Fixes and Other Changes
+
+ * fixed missing layout after _substitute call
+
 ## v0.14.2 (2026-04-29)
 
 ### Bug Fixes and Other Changes

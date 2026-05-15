@@ -21,7 +21,7 @@ class BraketPrimitiveTask(BasePrimitiveJob[PrimitiveResult[PubResult], JobStatus
         task: QuantumTask,
         result_translator: Callable[[ProgramSetQuantumTaskResult], PrimitiveResult],
         program_set: ProgramSet,
-    ):
+    ) -> None:
         """
         Initialize the task.
 
@@ -50,7 +50,7 @@ class BraketPrimitiveTask(BasePrimitiveJob[PrimitiveResult[PubResult], JobStatus
     def status(self) -> JobStatus:
         return self._get_task_status()
 
-    def cancel(self):
+    def cancel(self) -> None:
         self._task.cancel()
 
     def job_id(self) -> str:

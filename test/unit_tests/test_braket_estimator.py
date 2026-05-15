@@ -1,5 +1,6 @@
 """Tests for BraketEstimator."""
 
+from collections.abc import Iterable
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
@@ -8,13 +9,14 @@ from qiskit import QuantumCircuit
 from qiskit.circuit import Parameter
 from qiskit.primitives import BackendEstimatorV2, BasePrimitiveJob
 from qiskit.primitives.containers.bindings_array import BindingsArray
-from qiskit.primitives.containers.estimator_pub import EstimatorPub
+from qiskit.primitives.containers.estimator_pub import EstimatorPub, EstimatorPubLike
 from qiskit.primitives.containers.observables_array import ObservablesArray
 from qiskit.quantum_info import SparsePauliOp
 
 from braket.program_sets import ProgramSet
 from qiskit_braket_provider.providers import BraketLocalBackend
 from qiskit_braket_provider.providers.braket_estimator import BraketEstimator
+from qiskit_braket_provider.providers.braket_primitive_task import BraketPrimitiveTask
 
 
 class TestBraketEstimator(TestCase):
@@ -26,7 +28,7 @@ class TestBraketEstimator(TestCase):
         self.estimator = BraketEstimator(self.backend)
         self.estimator_backend = BackendEstimatorV2(backend=self.backend)
 
-    def assert_correct_results(self, task, pubs):
+    def assert_correct_results(self, task: BraketPrimitiveTask, pubs: Iterable[EstimatorPubLike]):
         """Compares the results from BraketEstimator and BackendEstimatorV2"""
         for actual, expected in zip(
             task.result(), self.estimator_backend.run(pubs).result(), strict=True

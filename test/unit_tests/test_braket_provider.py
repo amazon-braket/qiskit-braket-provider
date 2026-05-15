@@ -2,7 +2,7 @@
 
 import uuid
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
 from networkx import DiGraph, from_dict_of_lists, relabel_nodes
@@ -116,7 +116,9 @@ class TestBraketProvider(TestCase):
 
     @patch("qiskit_braket_provider.providers.braket_backend.BraketAwsBackend")
     @patch("qiskit_braket_provider.providers.braket_backend.AwsDevice.get_devices")
-    def test_qiskit_circuit_transpilation_run(self, mock_get_devices, mock_aws_braket_backend):
+    def test_qiskit_circuit_transpilation_run(
+        self, mock_get_devices: MagicMock, mock_aws_braket_backend: MagicMock
+    ):
         """Tests qiskit circuit transpilation."""
         mock_get_devices.return_value = [
             AwsDevice(MOCK_GATE_MODEL_SIMULATOR_SV["deviceArn"], self.mock_session)
@@ -152,7 +154,7 @@ class TestBraketProvider(TestCase):
         self.assertTrue(result)
 
     @patch("braket.aws.aws_device.AwsDevice.get_devices")
-    def test_noncontigous_qubit_indices_qiskit_transpilation(self, mock_get_devices):
+    def test_noncontigous_qubit_indices_qiskit_transpilation(self, mock_get_devices: MagicMock):
         """Tests circuit transpilation with noncontiguous qubit indices."""
 
         mock_m_3_device = Mock()
@@ -194,7 +196,9 @@ class TestBraketProvider(TestCase):
     @patch("qiskit_braket_provider.providers.braket_backend.BraketAwsBackend.run")
     @patch("qiskit_braket_provider.providers.braket_job.AmazonBraketTask.queue_position")
     @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice")
-    def test_queue_position_for_quantum_tasks(self, mocked_device, mock_queue_position, mock_run):
+    def test_queue_position_for_quantum_tasks(
+        self, mocked_device: MagicMock, mock_queue_position: MagicMock, mock_run: MagicMock
+    ):
         """Tests queue position for quantum tasks."""
 
         mock_return_value = QuantumTaskQueueInfo(

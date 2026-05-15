@@ -7,7 +7,7 @@ from braket.circuits import Circuit
 from qiskit_braket_provider.providers.adapter import to_braket
 
 
-def _make_target(num_qubits):
+def _make_target(num_qubits: int) -> Target:
     target = Target(num_qubits=num_qubits)
     one_q = {(i,): None for i in range(num_qubits)}
     two_q = {(i, j): None for i in range(num_qubits) for j in range(num_qubits) if i != j}
@@ -37,13 +37,13 @@ def _make_target(num_qubits):
     return target
 
 
-def _unitaries_equal(u1, u2):
+def _unitaries_equal(u1: np.ndarray, u2: np.ndarray) -> bool:
     product = u1 @ np.conj(u2.T)
     phase = product[0, 0]
     return np.allclose(product, phase * np.eye(product.shape[0]))
 
 
-def _extract_gate_lines(qasm):
+def _extract_gate_lines(qasm: str) -> list[str]:
     skip = {"OPENQASM", "bit", "qubit", "//", "#pragma", "box", "}"}
     return [
         line.strip()
@@ -55,7 +55,7 @@ def _extract_gate_lines(qasm):
     ]
 
 
-def _get_braket_gate_names(braket_circuit):
+def _get_braket_gate_names(braket_circuit: Circuit) -> list[str]:
     directives = {"StartVerbatimBox", "EndVerbatimBox"}
     return [
         instr.operator.name
@@ -64,7 +64,7 @@ def _get_braket_gate_names(braket_circuit):
     ]
 
 
-def _assert_verbatim_roundtrip(qasm, **kwargs):
+def _assert_verbatim_roundtrip(qasm: str, **kwargs) -> str:
     bc = to_braket(qasm, **kwargs)
     ir_source = bc.to_ir(ir_type="OPENQASM").source
 
@@ -125,7 +125,7 @@ def test_has_measurements_with_target():
     ],
     ids=["1_qubit", "2_qubits", "3_qubits"],
 )
-def test_qubit_count_preserved(qasm, num_qubits):
+def test_qubit_count_preserved(qasm: str, num_qubits: int):
     bc = to_braket(qasm, target=_make_target(num_qubits))
     assert bc.qubit_count == num_qubits
 
