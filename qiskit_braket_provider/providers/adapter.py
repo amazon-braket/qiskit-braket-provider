@@ -483,7 +483,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         target: tuple[int],
         classical_targets: Sequence[int] | None = None,
         *,
-        classical_destination: Identifier | IndexedIdentifier | None = None,
+        classical_destination: Identifier | IndexedIdentifier | None = None,  # noqa: ARG002
     ) -> None:
         active = self._active_circuit
         # this is to cover the edge case where a user measures a qubit without assigning it to a classical register
@@ -553,7 +553,7 @@ class _QiskitProgramContext(AbstractProgramContext):
             return True
         return super().is_mcm_dependent(expression)
 
-    def iter_classical_scopes(self, expression):
+    def iter_classical_scopes(self, expression: Expression):  # noqa: ARG002
         """Yield once since Qiskit circuit building doesn't do per-path branching."""
         yield
 

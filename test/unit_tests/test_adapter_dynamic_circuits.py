@@ -13,7 +13,6 @@ from qiskit.circuit.library import CXGate, HGate, Measure, XGate, YGate, ZGate
 from qiskit.transpiler import Target
 
 from braket.default_simulator.openqasm.parser.openqasm_ast import (
-    ArrayLiteral,
     BooleanLiteral,
     BoolType,
     Cast,
@@ -1219,6 +1218,22 @@ bit c;
 c = measure q[0];
 if (!c) {
     x q[1];
+}
+"""
+    with pytest.raises(NotImplementedError, match="Unsupported condition type"):
+        to_qiskit(qasm)
+
+
+def test_negated_while_condition_raises_not_implemented():
+    """A negated MCM condition in a while loop should raise NotImplementedError."""
+    qasm = """
+OPENQASM 3.0;
+qubit[2] q;
+bit c;
+c = measure q[0];
+while (!c) {
+    x q[1];
+    c = measure q[0];
 }
 """
     with pytest.raises(NotImplementedError, match="Unsupported condition type"):
