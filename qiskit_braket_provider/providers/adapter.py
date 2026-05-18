@@ -378,7 +378,6 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._verbatim_circuit: QuantumCircuit | None = None
         self._verbatim_box_name = verbatim_box_name
         self._clbit_offset: dict[str, int] = {}
-        self._measured_bits: set[str] = set()
 
     @property
     def _active_circuit(self) -> QuantumCircuit:
@@ -484,15 +483,8 @@ class _QiskitProgramContext(AbstractProgramContext):
         target: tuple[int],
         classical_targets: Sequence[int] | None = None,
         *,
-        classical_destination: Identifier | IndexedIdentifier | None = None,
+        classical_destination: Identifier | IndexedIdentifier | None = None,  # noqa: ARG002
     ) -> None:
-        if classical_destination is not None:
-            name = (
-                classical_destination.name
-                if isinstance(classical_destination, IndexedIdentifier)
-                else classical_destination
-            )
-            self._measured_bits.add(name.name)
         active = self._active_circuit
         # this is to cover the edge case where a user measures a qubit without assigning it to a classical register
         if active.num_clbits < len(target):
@@ -550,18 +542,20 @@ class _QiskitProgramContext(AbstractProgramContext):
         return True
 
     def is_mcm_dependent(self, expression: Expression) -> bool:
-        """Check if expression references a variable that was measured into."""
-        match expression:
-            case Identifier(name=name):
-                return name in self._measured_bits
-            case IndexExpression(collection=Identifier(name=name)):
-                return name in self._measured_bits
-            case BinaryExpression(lhs=lhs, rhs=rhs):
-                return self.is_mcm_dependent(lhs) or self.is_mcm_dependent(rhs)
-            case RangeDefinition() | DiscreteSet():
-                return True
-            case _:
-                return False
+        """Check if expression depends on a mid-circuit measurement result.
+
+        Delegates to the base class for identifier-based checks using
+        _mcm_dependent_scopes, but always returns True for RangeDefinition
+        and DiscreteSet to force for-loops through evaluate_for_range
+        (producing ForLoopOp).
+        """
+        if isinstance(expression, (RangeDefinition, DiscreteSet)):
+            return True
+        return super().is_mcm_dependent(expression)
+
+    def iter_classical_scopes(self, expression: Expression):  # noqa: ARG002
+        """Yield once since Qiskit circuit building doesn't do per-path branching."""
+        yield
 
     def evaluate_condition(self, condition: Expression) -> Iterator[bool]:
         """Evaluate a branching condition using a circuit stack.
@@ -569,18 +563,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         Yields True (visit if-block) then False (visit else-block).
         Each yield pushes a new circuit onto the stack; after the interpreter
         visits the block, the circuit is popped and used to build an IfElseOp.
-
-        For static conditions (no measurement dependency), evaluates directly
-        and yields only the taken branch.
         """
-        if not self.is_mcm_dependent(condition):
-            try:
-                result = cast_to(BooleanLiteral, self._evaluate_expression(condition))
-            except (TypeError, ValueError, AttributeError) as e:
-                raise TypeError("Unsupported condition in branching statement") from e
-            yield result.value
-            return
-
         # MCM path: resolve condition to (Clbit, value)
         main = self._active_circuit
         if isinstance(condition, (Identifier, IndexExpression)):
@@ -593,6 +576,11 @@ class _QiskitProgramContext(AbstractProgramContext):
                     f"Only '==' is supported for mid-circuit measurement branching."
                 )
             resolved_condition = self._resolve_condition(condition)
+        else:
+            raise NotImplementedError(
+                f"Unsupported condition type '{type(condition).__name__}' in branching condition. "
+                f"Only Identifier, IndexExpression, and BinaryExpression (==) are supported."
+            )
 
         true_body = QuantumCircuit(main.num_qubits, main.num_clbits)
         self._circuit_stack.append(true_body)
@@ -706,31 +694,23 @@ class _QiskitProgramContext(AbstractProgramContext):
         raise NotImplementedError("continue statements are not supported in loops.")
 
     def evaluate_while_condition(self, condition: Expression) -> Iterator[bool]:
-        """Evaluate a while-loop condition, yielding True per iteration.
-
-        For static conditions (no measurement dependency), evaluates directly.
-        For MCM-dependent conditions, captures the body into a WhileLoopOp.
-        """
-        if not self.is_mcm_dependent(condition):
-            try:
-                while cast_to(BooleanLiteral, self._evaluate_expression(condition)).value:
-                    yield True
-            except (TypeError, ValueError, AttributeError) as e:
-                raise TypeError("Unsupported condition in while loop") from e
-            else:
-                return
-
+        """Evaluate a while-loop condition, capturing the body into a WhileLoopOp."""
         # MCM path: resolve condition and capture body into WhileLoopOp
         main = self._active_circuit
         if isinstance(condition, (Identifier, IndexExpression)):
             resolved_condition = self._resolve_condition_from_identifier(condition)
-        else:
+        elif isinstance(condition, BinaryExpression):
             if condition.op != BinaryOperator["=="]:
                 raise NotImplementedError(
                     f"Unsupported operator '{condition.op.name}' in while-loop condition. "
                     f"Only '==' is supported for mid-circuit measurement while loops."
                 )
             resolved_condition = self._resolve_condition(condition)
+        else:
+            raise NotImplementedError(
+                f"Unsupported condition type '{type(condition).__name__}' in while-loop condition. "
+                f"Only Identifier, IndexExpression, and BinaryExpression (==) are supported."
+            )
 
         body = QuantumCircuit(main.num_qubits, main.num_clbits)
         self._circuit_stack.append(body)

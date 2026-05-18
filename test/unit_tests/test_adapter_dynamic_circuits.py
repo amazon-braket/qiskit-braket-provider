@@ -13,12 +13,12 @@ from qiskit.circuit.library import CXGate, HGate, Measure, XGate, YGate, ZGate
 from qiskit.transpiler import Target
 
 from braket.default_simulator.openqasm.parser.openqasm_ast import (
-    ArrayLiteral,
     BooleanLiteral,
     BoolType,
     Cast,
     DiscreteSet,
     FunctionCall,
+    Identifier,
     IntegerLiteral,
     RangeDefinition,
     UnaryExpression,
@@ -793,23 +793,6 @@ if (c[0] != 1) {
         to_qiskit(qasm)
 
 
-def test_unsupported_condition_type():
-    """A non-boolean-castable static condition should raise an unsupported condition error."""
-    ctx = _QiskitProgramContext()
-    gen = ctx.evaluate_condition(ArrayLiteral(values=[BooleanLiteral(value=True)]))
-    with pytest.raises(TypeError, match="Unsupported condition in branching statement"):
-        next(gen)
-
-
-def test_evaluate_condition_static_yields_value_directly():
-    """A static condition yields its boolean value and terminates."""
-    ctx = _QiskitProgramContext()
-    gen = ctx.evaluate_condition(BooleanLiteral(value=True))
-    assert next(gen) is True
-    with pytest.raises(StopIteration):
-        next(gen)
-
-
 def test_is_mcm_dependent_for_loop_set_declarations():
     """For-loop set_declaration nodes (``RangeDefinition`` / ``DiscreteSet``)
     are always treated as MCM-dependent so the interpreter routes them
@@ -1087,30 +1070,6 @@ while (c != 0) {
         to_qiskit(qasm)
 
 
-def test_while_loop_unsupported_condition_type():
-    """A non-boolean-castable static while condition should raise an unsupported condition error."""
-    ctx = _QiskitProgramContext()
-    gen = ctx.evaluate_while_condition(ArrayLiteral(values=[BooleanLiteral(value=True)]))
-    with pytest.raises(TypeError, match="Unsupported condition in while loop"):
-        next(gen)
-
-
-def test_evaluate_while_condition_static_terminates_on_false():
-    """A static false while condition yields nothing and terminates."""
-    ctx = _QiskitProgramContext()
-    gen = ctx.evaluate_while_condition(BooleanLiteral(value=False))
-    with pytest.raises(StopIteration):
-        next(gen)
-
-
-def test_evaluate_while_condition_static_true_yields_true():
-    """A static true while condition yields True on each iteration."""
-    ctx = _QiskitProgramContext()
-    gen = ctx.evaluate_while_condition(BooleanLiteral(value=True))
-    assert next(gen) is True
-    gen.close()
-
-
 def test_for_loop_body_expands_circuit():
     """A physical qubit reference inside a for-loop body expands the main circuit."""
     qasm = """
@@ -1164,3 +1123,136 @@ if (c == 1) {
 """
     qc = to_qiskit(qasm)
     assert qc.num_clbits == 2
+
+
+def test_mark_mcm_dependent_makes_variable_mcm_dependent():
+    context = _QiskitProgramContext()
+    context.add_qubits("q", 2)
+    context.declare_variable("c", BoolType())
+    context.mark_mcm_dependent("c")
+    assert context.is_mcm_dependent(Identifier("c"))
+
+
+def test_unmarked_variable_is_not_mcm_dependent():
+    context = _QiskitProgramContext()
+    context.add_qubits("q", 1)
+    context.declare_variable("c", BoolType())
+    assert not context.is_mcm_dependent(Identifier("c"))
+
+
+def test_track_mcm_dependency_propagates_from_mcm_variable():
+    context = _QiskitProgramContext()
+    context.add_qubits("q", 1)
+    context.declare_variable("c", BoolType())
+    context.declare_variable("d", BoolType())
+    context.mark_mcm_dependent("c")
+    context.track_mcm_dependency("d", Identifier("c"))
+    assert context.is_mcm_dependent(Identifier("d"))
+
+
+def test_track_mcm_dependency_clears_when_rvalue_not_mcm():
+    context = _QiskitProgramContext()
+    context.add_qubits("q", 1)
+    context.declare_variable("c", BoolType())
+    context.declare_variable("d", BoolType())
+    context.mark_mcm_dependent("d")
+    assert context.is_mcm_dependent(Identifier("d"))
+    context.track_mcm_dependency("d", Identifier("c"))
+    assert not context.is_mcm_dependent(Identifier("d"))
+
+
+def test_iter_classical_scopes_yields_once():
+    context = _QiskitProgramContext()
+    count = sum(1 for _ in context.iter_classical_scopes(IntegerLiteral(0)))
+    assert count == 1
+
+
+def test_is_mcm_dependent_range_definition():
+    context = _QiskitProgramContext()
+    assert context.is_mcm_dependent(RangeDefinition(IntegerLiteral(0), IntegerLiteral(3), None))
+
+
+def test_is_mcm_dependent_discrete_set():
+    context = _QiskitProgramContext()
+    assert context.is_mcm_dependent(DiscreteSet([IntegerLiteral(1), IntegerLiteral(2)]))
+
+
+def test_is_mcm_dependent_literal_not_dependent():
+    context = _QiskitProgramContext()
+    assert not context.is_mcm_dependent(IntegerLiteral(42))
+
+
+def test_is_mcm_dependent_through_full_program():
+    """End-to-end: measure marks variable, which is then detected as MCM-dependent."""
+    qasm = """
+OPENQASM 3.0;
+qubit[2] q;
+bit[1] c;
+c[0] = measure q[0];
+if (c[0] == 1) {
+    x q[1];
+}
+"""
+    qc = to_qiskit(qasm)
+    if_else_ops = _get_if_else_ops(qc)
+    assert len(if_else_ops) == 1
+
+
+def test_classical_assignment_propagates_mcm():
+    """Variable assigned from MCM result should be detected as MCM-dependent."""
+    context = _QiskitProgramContext()
+    context.add_qubits("q", 2)
+    context.declare_variable("c", BoolType())
+    context.declare_variable("d", BoolType())
+    context.mark_mcm_dependent("c")
+    context.track_mcm_dependency("d", Identifier("c"))
+    assert context.is_mcm_dependent(Identifier("d"))
+
+
+def test_negated_condition_raises_not_implemented():
+    """A negated MCM condition like !c should raise NotImplementedError."""
+    qasm = """
+OPENQASM 3.0;
+qubit[2] q;
+bit c;
+c = measure q[0];
+if (!c) {
+    x q[1];
+}
+"""
+    with pytest.raises(NotImplementedError, match="Unsupported condition type"):
+        to_qiskit(qasm)
+
+
+def test_negated_while_condition_raises_not_implemented():
+    """A negated MCM condition in a while loop should raise NotImplementedError."""
+    qasm = """
+OPENQASM 3.0;
+qubit[2] q;
+bit c;
+c = measure q[0];
+while (!c) {
+    x q[1];
+    c = measure q[0];
+}
+"""
+    with pytest.raises(NotImplementedError, match="Unsupported condition type"):
+        to_qiskit(qasm)
+
+
+def test_mcm_propagation_through_classical_assignment():
+    """MCM dependency should propagate through intermediate classical assignments."""
+    qasm = """
+OPENQASM 3.0;
+qubit[3] __qubits__;
+bit[1] mcm;
+bit __bit_1__;
+__bit_1__ = measure __qubits__[1];
+mcm[0] = __bit_1__;
+if (mcm[0] == 1) {
+    x __qubits__[2];
+}
+"""
+    qc = to_qiskit(qasm)
+    if_else_ops = _get_if_else_ops(qc)
+    assert len(if_else_ops) == 1
