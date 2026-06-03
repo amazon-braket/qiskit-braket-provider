@@ -46,7 +46,7 @@ from qiskit.transpiler import (
     TransformationPass,
 )
 from qiskit_ionq import add_equivalences, ionq_gates
-from sympy import Add, Expr, Mul, Pow, Symbol
+from sympy import Add, Expr, Mul, Pow, Symbol, acos, asin, atan, cos, exp, log, sin, tan
 
 from braket import experimental_capabilities as braket_expcaps
 from braket.aws import AwsDevice, AwsDeviceType
@@ -287,6 +287,17 @@ _BRAKET_SUPPORTED_NOISES = [
     "twoqubitdephasing",
     # "twoqubitpaulichannel" no to_openqasm support yet
 ]
+
+_SYMPY_FUNCTION_TO_QISKIT_METHOD = {
+    sin: "sin",
+    cos: "cos",
+    tan: "tan",
+    asin: "arcsin",
+    acos: "arccos",
+    atan: "arctan",
+    exp: "exp",
+    log: "log",
+}
 
 _TRANSPILER_GATE_SUBSTITUTES: dict[tuple[str, tuple[float | str, ...]], Gate] = {
     ("rx", (pi,)): qiskit_gates.XGate(),
@@ -2078,8 +2089,11 @@ def _sympy_to_qiskit(
             return prod(_sympy_to_qiskit(arg, param_map) for arg in args)
         case Pow(base=base, exp=exp):
             return _sympy_to_qiskit(base, param_map) ** int(exp)
-        case obj if getattr(obj, "is_real", False):
+        case obj if getattr(obj, "is_number", False) and getattr(obj, "is_real", False):
             return float(obj)
+        case obj if obj.func in _SYMPY_FUNCTION_TO_QISKIT_METHOD and len(obj.args) == 1:
+            method_name = _SYMPY_FUNCTION_TO_QISKIT_METHOD[obj.func]
+            return getattr(_sympy_to_qiskit(obj.args[0], param_map), method_name)()
     raise TypeError(f"unrecognized parameter type in conversion: {type(expr)}")
 
 

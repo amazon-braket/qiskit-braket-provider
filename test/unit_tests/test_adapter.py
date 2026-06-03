@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
 import pytest
+import sympy
 from qiskit import (
     ClassicalRegister,
     QuantumCircuit,
@@ -35,7 +36,7 @@ from braket.device_schema.standardized_gate_model_qpu_device_properties_v1 impor
 from braket.devices import LocalSimulator
 from braket.experimental_capabilities import EnableExperimentalCapability
 from braket.ir.openqasm import Program
-from braket.parametric import FreeParameter
+from braket.parametric import FreeParameter, FreeParameterExpression
 from braket.pulse import PulseSequence
 from braket.registers import QubitSet
 from qiskit_braket_provider import exception, to_braket, to_qiskit
@@ -1487,6 +1488,35 @@ class TestFromBraket(TestCase):
 
         expected_qiskit_circuit.measure_all()
         self.assertEqual(qiskit_circuit, expected_qiskit_circuit)
+
+    def test_parametric_function_gate(self):
+        """Tests Braket to Qiskit conversion with functions of parameters."""
+        alpha = FreeParameter("alpha")
+        function_names = {
+            "sin": "sin",
+            "cos": "cos",
+            "tan": "tan",
+            "asin": "arcsin",
+            "acos": "arccos",
+            "atan": "arctan",
+            "exp": "exp",
+            "log": "log",
+        }
+
+        for braket_name, qiskit_name in function_names.items():
+            with self.subTest(braket_name=braket_name):
+                expression = FreeParameterExpression(getattr(sympy, braket_name)(alpha.expression))
+                braket_circuit = Circuit().rx(0, expression)
+                qiskit_circuit = to_qiskit(braket_circuit)
+
+                uuid = qiskit_circuit.parameters[0].uuid
+
+                expected_qiskit_circuit = QuantumCircuit(1)
+                qiskit_alpha = Parameter("alpha", uuid=uuid)
+                expected_qiskit_circuit.rx(getattr(qiskit_alpha, qiskit_name)(), 0)
+
+                expected_qiskit_circuit.measure_all()
+                self.assertEqual(qiskit_circuit, expected_qiskit_circuit)
 
     def test_unsupported_parameter_division(self):
         """Tests if TypeError is raised for parameter division."""
