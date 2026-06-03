@@ -102,7 +102,7 @@ class BraketSampler(BaseSamplerV2):
         shots_per_executable = pub_shots if pub_shots is not None else shots
         program_set = ProgramSet(circuit_bindings, shots_per_executable=shots_per_executable)
         return BraketPrimitiveTask(
-            self._backend._device.run(program_set, **self._options),
+            self._backend._execution_device.run(program_set, **self._options),
             lambda result: BraketSampler._translate_result(
                 result,
                 _JobMetadata(

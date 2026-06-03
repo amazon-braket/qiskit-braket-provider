@@ -14,9 +14,13 @@ from qiskit.primitives.containers.observables_array import ObservablesArray
 from qiskit.quantum_info import SparsePauliOp
 
 from braket.program_sets import ProgramSet
-from qiskit_braket_provider.providers import BraketLocalBackend
+from qiskit_braket_provider.providers import BraketAwsEmulatorBackend, BraketLocalBackend
 from qiskit_braket_provider.providers.braket_estimator import BraketEstimator
 from qiskit_braket_provider.providers.braket_primitive_task import BraketPrimitiveTask
+from test.unit_tests.mocks import (
+    MOCK_RIGETTI_M_3_QPU_CAPABILITIES,
+    MOCK_RIGETTI_TOPOLOGY_GRAPH,
+)
 
 
 class TestBraketEstimator(TestCase):
@@ -41,6 +45,33 @@ class TestBraketEstimator(TestCase):
         backend._supports_program_sets = False
         with self.assertRaises(ValueError):
             BraketEstimator(backend)
+
+    def test_emulator_backend_uses_emulator_for_program_sets(self):
+        """Tests that estimator primitives run ProgramSets on the device emulator."""
+        device = Mock()
+        device.properties = MOCK_RIGETTI_M_3_QPU_CAPABILITIES.copy(deep=True)
+        device.gate_calibrations = None
+        device.type = "QPU"
+        device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+
+        emulator = Mock()
+        emulator_task = Mock()
+        emulator_task.id = "emulator-program-set"
+        emulator.run.return_value = emulator_task
+        device.emulator.return_value = emulator
+
+        backend = BraketAwsEmulatorBackend(device=device)
+        estimator = BraketEstimator(backend)
+        qc = QuantumCircuit(1)
+        qc.rx(0.1, 0)
+        pub = (qc, SparsePauliOp(["Z"]))
+
+        job = estimator.run([pub], precision=0.1)
+
+        self.assertTrue(backend._supports_program_sets)
+        emulator.run.assert_called_once()
+        self.assertIsInstance(emulator.run.call_args[0][0], ProgramSet)
+        self.assertEqual(job.job_id(), "emulator-program-set")
 
     def test_simple_pub(self):
         """Test a simple pub with no broadcasting."""

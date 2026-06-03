@@ -17,6 +17,7 @@ from braket.circuits import Circuit
 from qiskit_braket_provider import (
     AWSBraketProvider,
     BraketAwsBackend,
+    BraketAwsEmulatorBackend,
     BraketLocalBackend,
     BraketProvider,
     to_braket,
@@ -28,6 +29,7 @@ from test.unit_tests.mocks import (
     MOCK_GATE_MODEL_SIMULATOR_TN,
     MOCK_RIGETTI_GATE_MODEL_M_3_QPU,
     MOCK_RIGETTI_M_3_QPU_CAPABILITIES,
+    MOCK_RIGETTI_TOPOLOGY_GRAPH,
     SIMULATOR_REGION,
 )
 
@@ -92,6 +94,44 @@ class TestBraketProvider(TestCase):
         provider = BraketProvider()
 
         self.assertIsInstance(provider.backends(name=None, local="sv1")[0], BraketLocalBackend)
+
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")
+    def test_provider_get_backend_emulator(self, mock_get_devices: MagicMock):
+        """Tests getting a local emulator backend for an AWS device."""
+        mock_device = Mock()
+        mock_device.name = "Aspen-M-3"
+        mock_device.provider_name = "Rigetti"
+        mock_device.properties = MOCK_RIGETTI_M_3_QPU_CAPABILITIES.copy(deep=True)
+        mock_device.properties.service = Mock()
+        mock_device.properties.service.updatedAt = "2026-06-03T00:00:00+00:00"
+        mock_device.type = AwsDeviceType.QPU
+        mock_device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+        mock_device.gate_calibrations = None
+        mock_device.aws_session.add_braket_user_agent = Mock()
+        mock_device.emulator.return_value = Mock()
+        mock_get_devices.return_value = [mock_device]
+
+        backend = BraketProvider().get_backend("Aspen-M-3", emulator=True)
+
+        self.assertIsInstance(backend, BraketAwsEmulatorBackend)
+        self.assertTrue(backend.is_emulator)
+        self.assertEqual(backend.name, "Aspen-M-3")
+        self.assertIn("AWS Device Emulator", backend.description)
+        mock_get_devices.assert_called_once_with(names=["Aspen-M-3"])
+        mock_device.emulator.assert_called_once()
+
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")
+    def test_provider_emulator_excludes_managed_simulators(self, mock_get_devices: MagicMock):
+        """Tests that emulator=True does not request emulators for managed simulators."""
+        mock_device = Mock()
+        mock_device.name = "SV1"
+        mock_device.provider_name = "Amazon"
+        mock_device.properties = MOCK_GATE_MODEL_SIMULATOR_SV
+        mock_device.type = AwsDeviceType.SIMULATOR
+        mock_get_devices.return_value = [mock_device]
+
+        self.assertEqual(BraketProvider().backends("SV1", emulator=True), [])
+        mock_device.emulator.assert_not_called()
 
     def test_real_devices(self):
         """Tests real devices."""

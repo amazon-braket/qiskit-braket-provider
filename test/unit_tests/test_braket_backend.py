@@ -26,6 +26,7 @@ from braket.tasks.local_quantum_task import LocalQuantumTask
 from qiskit_braket_provider import (
     AWSBraketBackend,
     BraketAwsBackend,
+    BraketAwsEmulatorBackend,
     BraketLocalBackend,
     BraketProvider,
     __version__,
@@ -599,3 +600,34 @@ class TestBraketAwsBackend(TestCase):
         self.assertEqual(deep_target.operations, target.operations)
         self.assertEqual(deep_target.operation_names, target.operation_names)
         self.assertNotEqual(deep, backend)
+
+
+class TestBraketAwsEmulatorBackend(TestCase):
+    """Tests class for BraketAwsEmulatorBackend."""
+
+    @patch("qiskit_braket_provider.providers.braket_backend.to_braket")
+    def test_emulator_backend_run(self, mock_to_braket: MagicMock):
+        """Tests that emulator backends submit circuits through AwsDevice.emulator()."""
+        device = Mock()
+        device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES.copy(deep=True)
+        device.gate_calibrations = None
+        device.type = "QPU"
+        device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+
+        emulator = Mock()
+        emulator_task = Mock(spec=LocalQuantumTask)
+        emulator_task.id = "emulator-task-0"
+        emulator.run.return_value = emulator_task
+        device.emulator.return_value = emulator
+
+        backend = BraketAwsEmulatorBackend(device=device)
+        braket_circuit = Circuit().h(1)
+        mock_to_braket.return_value = [braket_circuit]
+
+        task = backend.run(QuantumCircuit(1), shots=10)
+
+        self.assertTrue(backend.is_emulator)
+        self.assertIs(backend.emulator, emulator)
+        device.emulator.assert_called_once()
+        emulator.run.assert_called_once_with(task_specification=braket_circuit, shots=10)
+        self.assertEqual(task.task_id(), "emulator-task-0")

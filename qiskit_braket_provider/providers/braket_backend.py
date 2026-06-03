@@ -37,6 +37,8 @@ if TYPE_CHECKING:
     import datetime
     from collections.abc import Callable, Iterable
 
+    from braket.emulation.emulator import Emulator
+
     from .braket_provider import BraketProvider
 
 logger = logging.getLogger(__name__)
@@ -68,6 +70,10 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
         """
         return None
 
+    @property
+    def _execution_device(self) -> Device:
+        return self._device
+
     def _validate_meas_level(self, meas_level: enum.Enum | int) -> None:
         if isinstance(meas_level, enum.Enum):
             meas_level = meas_level.value
@@ -98,7 +104,7 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
         **options,
     ) -> BraketQuantumTask:
         program_set = ProgramSet(braket_circuits, shots_per_executable=shots)
-        task = self._device.run(program_set, **options)
+        task = self._execution_device.run(program_set, **options)
         return BraketQuantumTask(
             task_id=task.id, tasks=task, backend=self, shots=program_set.total_shots
         )
@@ -459,6 +465,47 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
             if key != "_device":
                 setattr(result, key, copy.deepcopy(value, memo))  # Pass memo along
         return result
+
+
+class BraketAwsEmulatorBackend(BraketAwsBackend):
+    """Runs quantum circuits on a local emulator for an Amazon Braket AWS device."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        """Initialize an emulator backend from an AWS device.
+
+        The backend keeps the original AWS device metadata for target construction and
+        transpilation, while submissions are sent to the device emulator.
+        """
+        super().__init__(*args, **kwargs)
+        self._emulator = self._device.emulator()
+        self._supports_program_sets = True
+
+    @property
+    def is_emulator(self) -> bool:
+        """bool: Whether this backend submits tasks to a local device emulator."""
+        return True
+
+    @property
+    def emulator(self) -> Emulator:
+        """Local emulator used to execute circuits for this AWS device."""
+        return self._emulator
+
+    @property
+    def _execution_device(self) -> Emulator:
+        return self._emulator
+
+    def _run_batch(
+        self,
+        braket_circuits: list[Circuit],
+        shots: int,
+        **options,
+    ) -> BraketQuantumTask:
+        tasks = [
+            self._emulator.run(task_specification=circuit, shots=shots, **options)
+            for circuit in braket_circuits
+        ]
+        task_id = _TASK_ID_DIVIDER.join(task.id for task in tasks)
+        return BraketQuantumTask(task_id=task_id, tasks=tasks, backend=self, shots=shots)
 
 
 class AWSBraketBackend(BraketAwsBackend):

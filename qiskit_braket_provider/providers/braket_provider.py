@@ -4,12 +4,12 @@ import warnings
 
 from qiskit.providers.exceptions import QiskitBackendNotFoundError
 
-from braket.aws import AwsDevice
+from braket.aws import AwsDevice, AwsDeviceType
 from braket.device_schema.dwave import DwaveDeviceCapabilities
 from braket.device_schema.quera import QueraDeviceCapabilities
 from braket.device_schema.xanadu import XanaduDeviceCapabilities
 
-from .braket_backend import BraketAwsBackend, BraketLocalBackend
+from .braket_backend import BraketAwsBackend, BraketAwsEmulatorBackend, BraketLocalBackend
 
 
 class BraketProvider:
@@ -30,7 +30,9 @@ class BraketProvider:
          BraketBackend[dm1]]
     """
 
-    def get_backend(self, name: str | None = None, **kwargs) -> BraketAwsBackend:
+    def get_backend(
+        self, name: str | None = None, **kwargs
+    ) -> BraketAwsBackend | BraketAwsEmulatorBackend | BraketLocalBackend:
         """Return a single backend matching the specified filters.
 
         Args:
@@ -53,7 +55,7 @@ class BraketProvider:
         self,
         name: str | None = None,
         **kwargs,
-    ) -> list[BraketAwsBackend | BraketLocalBackend]:
+    ) -> list[BraketAwsBackend | BraketAwsEmulatorBackend | BraketLocalBackend]:
         """Return a list of backends matching the specified filters.
 
         Args:
@@ -67,6 +69,7 @@ class BraketProvider:
                 BraketLocalBackend(name="braket_sv"),
                 BraketLocalBackend(name="braket_dm"),
             ]
+        emulator = kwargs.pop("emulator", False)
         names = [name] if name else None
         devices = AwsDevice.get_devices(names=names, **kwargs)
         # filter by supported devices
@@ -83,16 +86,22 @@ class BraketProvider:
                 ),
             )
         ]
+        backend_cls = BraketAwsEmulatorBackend if emulator else BraketAwsBackend
         return [
-            BraketAwsBackend(
+            backend_cls(
                 device=device,
                 provider=self,
                 name=device.name,
-                description=f"AWS Device: {device.provider_name} {device.name}.",
+                description=(
+                    f"AWS Device Emulator: {device.provider_name} {device.name}."
+                    if emulator
+                    else f"AWS Device: {device.provider_name} {device.name}."
+                ),
                 online_date=device.properties.service.updatedAt,
                 backend_version="2",
             )
             for device in supported_devices
+            if not emulator or device.type != AwsDeviceType.SIMULATOR
         ]
 
 

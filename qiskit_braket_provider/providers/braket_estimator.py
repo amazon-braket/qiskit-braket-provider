@@ -116,7 +116,7 @@ class BraketEstimator(BaseEstimatorV2):
         shots = int(np.ceil(1.0 / (pub_precision if pub_precision is not None else precision) ** 2))
         program_set = ProgramSet(all_bindings, shots_per_executable=shots)
         return BraketPrimitiveTask(
-            self._backend._device.run(program_set, **self._options),
+            self._backend._execution_device.run(program_set, **self._options),
             lambda result: BraketEstimator._translate_result(
                 result,
                 _JobMetadata(

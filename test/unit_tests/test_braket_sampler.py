@@ -1,6 +1,7 @@
 """Tests for BraketSampler."""
 
 from unittest import TestCase
+from unittest.mock import Mock
 
 import numpy as np
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
@@ -10,9 +11,13 @@ from qiskit.primitives.containers import BitArray
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 
 from braket.circuits import Circuit
-from braket.program_sets import CircuitBinding
-from qiskit_braket_provider.providers import BraketLocalBackend
+from braket.program_sets import CircuitBinding, ProgramSet
+from qiskit_braket_provider.providers import BraketAwsEmulatorBackend, BraketLocalBackend
 from qiskit_braket_provider.providers.braket_sampler import BraketSampler
+from test.unit_tests.mocks import (
+    MOCK_RIGETTI_M_3_QPU_CAPABILITIES,
+    MOCK_RIGETTI_TOPOLOGY_GRAPH,
+)
 
 
 class TestBraketSampler(TestCase):
@@ -55,6 +60,33 @@ class TestBraketSampler(TestCase):
             self.sampler.run([(qc, [0, 1, 2, 3], 100), (qc, [0, 1, 2, 3], 200)])
 
         self.assertIn("same shots", str(context.exception))
+
+    def test_emulator_backend_uses_emulator_for_program_sets(self):
+        """Tests that sampler primitives run ProgramSets on the device emulator."""
+        device = Mock()
+        device.properties = MOCK_RIGETTI_M_3_QPU_CAPABILITIES.copy(deep=True)
+        device.gate_calibrations = None
+        device.type = "QPU"
+        device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+
+        emulator = Mock()
+        emulator_task = Mock()
+        emulator_task.id = "emulator-program-set"
+        emulator.run.return_value = emulator_task
+        device.emulator.return_value = emulator
+
+        backend = BraketAwsEmulatorBackend(device=device)
+        sampler = BraketSampler(backend)
+        qc = QuantumCircuit(1)
+        qc.rx(0.1, 0)
+        qc.measure_all()
+
+        job = sampler.run([(qc,)], shots=10)
+
+        self.assertTrue(backend._supports_program_sets)
+        emulator.run.assert_called_once()
+        self.assertIsInstance(emulator.run.call_args[0][0], ProgramSet)
+        self.assertEqual(job.job_id(), "emulator-program-set")
 
     def test_run_local_multiple_registers(self):
         """Tests that correct results are returned for circuits with multiple registers"""
