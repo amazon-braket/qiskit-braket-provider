@@ -7,11 +7,11 @@ import numpy as np
 from qiskit.primitives import BaseEstimatorV2, DataBin, EstimatorPubLike, PrimitiveResult, PubResult
 from qiskit.primitives.containers.bindings_array import BindingsArray
 from qiskit.primitives.containers.estimator_pub import EstimatorPub
-from qiskit.quantum_info import SparsePauliOp
+from qiskit.quantum_info import Pauli, SparsePauliOp
 
-from braket.circuits.observables import Sum
 from braket.program_sets import CircuitBinding, ParameterSets, ProgramSet
 from braket.tasks import ProgramSetQuantumTaskResult
+from braket.tasks.program_set_quantum_task_result import MeasuredEntry
 from qiskit_braket_provider.providers.adapter import (
     rename_parameter,
     to_braket,
@@ -22,8 +22,8 @@ from qiskit_braket_provider.providers.braket_primitive_task import BraketPrimiti
 
 _DEFAULT_PRECISION = 0.015625  # Same value as BackendEstimatorV2
 
-# (broadcast_position, observable_index_or_None_for_Sum, parameter_set_index)
-_ResultMapEntry: TypeAlias = tuple[int, int | None, int]
+# (broadcast_position, observable_index, parameter_set_index, pauli_label, coefficient)
+_ResultMapEntry: TypeAlias = tuple[int, int, int, str, float]
 _ResultMap: TypeAlias = dict[int, list[_ResultMapEntry]]
 
 
@@ -31,7 +31,6 @@ _ResultMap: TypeAlias = dict[int, list[_ResultMapEntry]]
 class _PubMetadata:
     num_bindings: int
     binding_to_result_map: _ResultMap
-    sum_binding_indices: set[int]
 
 
 @dataclass
@@ -82,7 +81,11 @@ class BraketEstimator(BaseEstimatorV2):
         self._options = options
 
     def run(
-        self, pubs: Iterable[EstimatorPubLike], *, precision: float = _DEFAULT_PRECISION
+        self,
+        pubs: Iterable[EstimatorPubLike],
+        *,
+        precision: float = _DEFAULT_PRECISION,
+        abelian_grouping: bool = True,
     ) -> BraketPrimitiveTask:
         """
         Run estimator on the given pubs.
@@ -92,6 +95,8 @@ class BraketEstimator(BaseEstimatorV2):
                 to estimate.
             precision (float): Target precision for expectation value estimates.
                 Default: 0.015625.
+            abelian_grouping (bool): Whether to group qubit-wise commuting Pauli terms
+                into shared measurement bases. Default: ``True``.
 
         Returns:
             BraketPrimitiveTask: A job object containing the estimator results.
@@ -103,13 +108,12 @@ class BraketEstimator(BaseEstimatorV2):
         pub_metadata = []  # Track which bindings belong to which pub
 
         for pub in coerced_pubs:
-            bindings, binding_to_result_map, sum_binding_indices = self._translate_pub(pub)
+            bindings, binding_to_result_map = self._translate_pub(pub, abelian_grouping)
             all_bindings.extend(bindings)
             pub_metadata.append(
                 _PubMetadata(
                     num_bindings=len(bindings),
                     binding_to_result_map=binding_to_result_map,
-                    sum_binding_indices=sum_binding_indices,
                 )
             )
 
@@ -134,8 +138,8 @@ class BraketEstimator(BaseEstimatorV2):
         return next(iter(precision_values))
 
     def _translate_pub(
-        self, pub: EstimatorPub
-    ) -> tuple[list[CircuitBinding], _ResultMap, set[int]]:
+        self, pub: EstimatorPub, abelian_grouping: bool
+    ) -> tuple[list[CircuitBinding], _ResultMap]:
         """
         Convert an EstimatorPub to a list of CircuitBindings.
 
@@ -149,9 +153,9 @@ class BraketEstimator(BaseEstimatorV2):
             pub (EstimatorPub): The EstimatorPub to convert.
 
         Returns:
-            tuple[list[CircuitBinding], _ResultMap, set[int]]:
+            tuple[list[CircuitBinding], _ResultMap]:
             The circuit bindings, pub shape, a map of binding index to array positions,
-            and the indices of bindings with Pauli sum observables.
+            and the Pauli terms used to reconstruct each original observable.
         """
         backend = self._backend
         circuit = to_braket(
@@ -164,7 +168,6 @@ class BraketEstimator(BaseEstimatorV2):
 
         observables = np.asarray(pub.observables)
         param_values = pub.parameter_values
-        obs_keys = {BraketEstimator._make_obs_key(obs): obs for obs in observables.flatten()}
         observables_broadcast, param_indices_broadcast = (
             np.broadcast_arrays(
                 observables,
@@ -174,38 +177,43 @@ class BraketEstimator(BaseEstimatorV2):
             else (observables, np.empty(observables.shape, dtype=object))
         )
 
-        # Group parameter sets with the same observable
-        obs_groups = defaultdict(list)
+        # Group Pauli terms that are needed for the same parameter sets.  This keeps
+        # the ProgramSet compact without executing unused parameter/observable pairs.
+        term_groups = defaultdict(list)
         for position, (param_indices, obs) in enumerate(
             zip(param_indices_broadcast.flatten(), observables_broadcast.flatten(), strict=True)
         ):
-            obs_groups[BraketEstimator._make_obs_key(obs)].append((position, param_indices))
+            for pauli_label, coeff in BraketEstimator._observable_terms(obs):
+                term_groups[pauli_label].append((position, param_indices, coeff))
 
         bindings: list[CircuitBinding] = []
         binding_to_result_map: _ResultMap = {}
-        sum_binding_indices = set()
-        processed_obs_keys = set()
+        processed_term_labels = set()
 
-        for obs_key, pairs in obs_groups.items():
-            if obs_key in processed_obs_keys:
+        for term_label, occurrences in term_groups.items():
+            if term_label in processed_term_labels:
                 continue
 
-            param_indices = frozenset(pi for _, pi in pairs)
+            param_indices = frozenset(pi for _, pi, _ in occurrences)
 
-            # Find other observables with the same parameter sets to complete the Cartesian product
-            matching_obs_keys = [
-                ok
-                for ok, prs in obs_groups.items()
+            # Find other Pauli terms with the same parameter sets to complete the Cartesian product.
+            matching_term_labels = [
+                label
+                for label, term_occurrences in term_groups.items()
                 if (
-                    frozenset(pi for _, pi in prs) == param_indices and ok not in processed_obs_keys
+                    frozenset(pi for _, pi, _ in term_occurrences) == param_indices
+                    and label not in processed_term_labels
                 )
             ]
-            processed_obs_keys.update(matching_obs_keys)
+            processed_term_labels.update(matching_term_labels)
             param_idx_map = {pk: idx for idx, pk in enumerate(param_indices)}
 
+            commuting_groups = BraketEstimator._group_pauli_terms(
+                matching_term_labels, abelian_grouping
+            )
             braket_observables = [
-                translate_sparse_pauli_op(SparsePauliOp.from_list(obs_keys[ok].items()))
-                for ok in matching_obs_keys
+                translate_sparse_pauli_op(SparsePauliOp.from_list([(basis_label, 1.0)]))
+                for _, basis_label in commuting_groups
             ]
             parameter_sets = (
                 BraketEstimator._translate_parameters([param_values[pi] for pi in param_indices])
@@ -213,37 +221,21 @@ class BraketEstimator(BaseEstimatorV2):
                 else None
             )
             binding_idx = len(bindings)
-            monomials = []
-            for ok, observable in zip(matching_obs_keys, braket_observables, strict=True):
-                if isinstance(observable, Sum):
-                    bindings.append(
-                        CircuitBinding(circuit, input_sets=parameter_sets, observables=observable)
-                    )
-                    # Map each position in the broadcast to its location in the binding result
-                    binding_to_result_map[binding_idx] = [
-                        (position, None, param_idx_map[pi]) for position, pi in obs_groups[ok]
-                    ]
-                    sum_binding_indices.add(binding_idx)
-                    binding_idx += 1
-                else:
-                    monomials.append((ok, observable))
 
-            if monomials:
-                bindings.append(
-                    CircuitBinding(
-                        circuit,
-                        input_sets=parameter_sets,
-                        observables=[obs for _, obs in monomials],
-                    )
+            bindings.append(
+                CircuitBinding(
+                    circuit,
+                    input_sets=parameter_sets,
+                    observables=braket_observables,
                 )
-                # Map each position in the broadcast to its location in the binding result
-                obs_idx_map = {ok: idx for idx, (ok, _) in enumerate(monomials)}
-                binding_to_result_map[len(bindings) - 1] = [
-                    (position, obs_idx_map[ok], param_idx_map[pi])
-                    for ok, _ in monomials
-                    for position, pi in obs_groups[ok]
-                ]
-        return bindings, binding_to_result_map, sum_binding_indices
+            )
+            binding_to_result_map[binding_idx] = [
+                (position, obs_idx, param_idx_map[pi], label, coeff)
+                for obs_idx, (labels, _) in enumerate(commuting_groups)
+                for label in labels
+                for position, pi, coeff in term_groups[label]
+            ]
+        return bindings, binding_to_result_map
 
     @staticmethod
     def _make_obs_key(obs_val: SparsePauliOp | dict[str, float]) -> str:
@@ -257,6 +249,28 @@ class BraketEstimator(BaseEstimatorV2):
             str: A string representation that can be used as a dictionary key
         """
         return str(sorted(obs_val.items())) if isinstance(obs_val, dict) else str(obs_val)
+
+    @staticmethod
+    def _observable_terms(obs_val: SparsePauliOp | dict[str, float]) -> list[tuple[str, float]]:
+        """Return real-valued Pauli terms for an observable."""
+        return [(pauli_label, float(np.real(coeff))) for pauli_label, coeff in obs_val.items()]
+
+    @staticmethod
+    def _group_pauli_terms(
+        pauli_labels: list[str], abelian_grouping: bool
+    ) -> list[tuple[list[str], str]]:
+        """Group Pauli labels and return each group's representative measurement basis."""
+        if not abelian_grouping:
+            return [([label], label) for label in pauli_labels]
+
+        grouped_terms = SparsePauliOp(pauli_labels).group_commuting(qubit_wise=True)
+        groups = []
+        for group in grouped_terms:
+            labels = [pauli.to_label() for pauli in group.paulis]
+            z_basis = np.logical_or.reduce(group.paulis.z)
+            x_basis = np.logical_or.reduce(group.paulis.x)
+            groups.append((labels, Pauli((z_basis, x_basis)).to_label()))
+        return groups
 
     @staticmethod
     def _translate_parameters(param_list: list[BindingsArray]) -> ParameterSets:
@@ -302,20 +316,20 @@ class BraketEstimator(BaseEstimatorV2):
             num_bindings = pub_meta.num_bindings
             broadcast_shape = pub.shape
             binding_map = pub_meta.binding_to_result_map
-            sum_binding_indices = pub_meta.sum_binding_indices
 
             evs = np.zeros(broadcast_shape, dtype=float)
             for local_binding_idx in range(num_bindings):
                 program_result = task_result[binding_offset + local_binding_idx]
                 num_observables = len(program_result.observables)
 
-                for position, obs_idx, param_idx in binding_map[local_binding_idx]:
+                for position, obs_idx, param_idx, pauli_label, coeff in binding_map[
+                    local_binding_idx
+                ]:
                     # CircuitBinding returns results organized by parameter sets
                     # For each parameter, we get all observables
-                    evs[np.unravel_index(position, broadcast_shape)] = (
-                        program_result.expectation(param_idx)
-                        if local_binding_idx in sum_binding_indices
-                        else program_result[param_idx * num_observables + obs_idx].expectation
+                    measured_entry = program_result[param_idx * num_observables + obs_idx]
+                    evs[np.unravel_index(position, broadcast_shape)] += (
+                        coeff * BraketEstimator._pauli_expectation(measured_entry, pauli_label)
                     )
 
             pub_results.append(
@@ -331,3 +345,21 @@ class BraketEstimator(BaseEstimatorV2):
             binding_offset += num_bindings
 
         return PrimitiveResult(pub_results)
+
+    @staticmethod
+    def _pauli_expectation(measured_entry: MeasuredEntry, pauli_label: str) -> float:
+        """Reconstruct one Pauli-term expectation from a grouped measurement result."""
+        measured_qubits = list(measured_entry.measured_qubits)
+        term_qubits = [
+            len(pauli_label) - idx - 1 for idx, axis in enumerate(pauli_label) if axis != "I"
+        ]
+        if not term_qubits:
+            return 1.0
+
+        missing_qubits = set(term_qubits) - set(measured_qubits)
+        if missing_qubits:
+            raise ValueError(f"Measured result does not include qubits {sorted(missing_qubits)}")
+
+        column_indices = [measured_qubits.index(qubit) for qubit in term_qubits]
+        values = 1 - 2 * measured_entry.measurements[:, column_indices]
+        return float(np.prod(values, axis=1).mean())

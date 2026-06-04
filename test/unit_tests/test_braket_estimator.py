@@ -103,6 +103,24 @@ class TestBraketEstimator(TestCase):
             program_set = mock_run.call_args[0][0]
             self.assertIsInstance(program_set, ProgramSet)
 
+    def test_abelian_grouping_reduces_executables(self):
+        """Test that qubit-wise commuting observables share a measurement basis."""
+        qc = QuantumCircuit(2)
+        qc.h(0)
+        qc.cx(0, 1)
+
+        observables = [SparsePauliOp("ZI"), SparsePauliOp("IZ"), SparsePauliOp("ZZ")]
+        pub = (qc, observables)
+
+        grouped_task = self.estimator.run([pub], abelian_grouping=True)
+        ungrouped_task = self.estimator.run([pub], abelian_grouping=False)
+
+        self.assertEqual(len(grouped_task.program_set), 1)
+        self.assertEqual(len(grouped_task.program_set[0]), 1)
+        self.assertEqual(len(ungrouped_task.program_set), 1)
+        self.assertEqual(len(ungrouped_task.program_set[0]), 3)
+        self.assert_correct_results(grouped_task, [pub])
+
     def test_multiple_pubs(self):
         """Test running multiple pubs."""
         qc1 = QuantumCircuit(1)
@@ -348,9 +366,8 @@ class TestBraketEstimator(TestCase):
 
         task = self.estimator.run([pub])
         program_set = task.program_set
-        self.assertEqual(len(program_set), 2)
-        self.assertEqual(len(program_set[0]), num_params * 2)
-        self.assertEqual(len(program_set[1]), num_params * 3)
+        self.assertEqual(len(program_set), 1)
+        self.assertEqual(len(program_set[0]), num_params * 3)
         self.assert_correct_results(task, [pub])
 
     def test_run_local_all_pauli_sums(self):
@@ -378,9 +395,8 @@ class TestBraketEstimator(TestCase):
 
         task = self.estimator.run([pub])
         program_set = task.program_set
-        self.assertEqual(len(program_set), 2)
-        self.assertEqual(len(program_set[0]), num_params * 2)
-        self.assertEqual(len(program_set[1]), num_params * 3)
+        self.assertEqual(len(program_set), 1)
+        self.assertEqual(len(program_set[0]), num_params * 4)
         self.assert_correct_results(task, [pub])
 
     def test_run_local_broadcasting(self):
@@ -410,6 +426,7 @@ class TestBraketEstimator(TestCase):
         task = self.estimator.run([pub])
         program_set = task.program_set
         self.assertEqual(len(program_set), 3)
-        for entry in task.program_set:
-            self.assertEqual(len(entry), num_steps * 2)
+        self.assertEqual(
+            [len(entry) for entry in task.program_set], [num_steps * 2, num_steps * 2, num_steps]
+        )
         self.assert_correct_results(task, [pub])
