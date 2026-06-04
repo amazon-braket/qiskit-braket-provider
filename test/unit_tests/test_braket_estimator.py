@@ -348,9 +348,60 @@ class TestBraketEstimator(TestCase):
 
         task = self.estimator.run([pub])
         program_set = task.program_set
+        self.assertEqual(len(program_set), 1)
+        self.assertEqual(len(program_set[0]), num_params * 3)
+        self.assert_correct_results(task, [pub])
+
+    def test_run_local_pauli_sum_without_abelian_grouping(self):
+        """Tests that the estimator can run without grouping commuting observables"""
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        circuit.ry(Parameter("theta[0]"), 0)
+        circuit.rz(Parameter("theta[1]"), 0)
+        circuit.cx(0, 1)
+        circuit.h(0)
+
+        num_params = 20
+        pub = (
+            circuit,
+            [
+                [SparsePauliOp("ZZ")],
+                [SparsePauliOp("ZX")],
+                [SparsePauliOp("XZ")],
+                [SparsePauliOp(["ZX", "XZ"], [0.3, 0.8])],
+            ],
+            np.vstack([
+                np.linspace(-np.pi, np.pi, num_params),
+                np.linspace(-4 * np.pi, 4 * np.pi, num_params),
+            ]).T,
+        )
+
+        task = self.estimator.run([pub], abelian_grouping=False)
+        program_set = task.program_set
         self.assertEqual(len(program_set), 2)
         self.assertEqual(len(program_set[0]), num_params * 2)
         self.assertEqual(len(program_set[1]), num_params * 3)
+        self.assert_correct_results(task, [pub])
+
+    def test_run_local_abelian_grouping_reuses_duplicate_terms(self):
+        """Tests grouping still reconstructs observables that share measured Pauli terms"""
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+
+        pub = (
+            circuit,
+            [
+                SparsePauliOp(["ZI", "ZZ"], [0.25, 0.75]),
+                SparsePauliOp("ZI"),
+            ],
+        )
+
+        task = self.estimator.run([pub])
+        program_set = task.program_set
+        self.assertEqual(len(program_set), 1)
+        self.assertEqual(len(program_set[0]), 2)
         self.assert_correct_results(task, [pub])
 
     def test_run_local_all_pauli_sums(self):
