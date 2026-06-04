@@ -14,9 +14,11 @@ from qiskit.providers.exceptions import QiskitBackendNotFoundError
 from braket.aws import AwsDevice, AwsDeviceType, AwsQuantumTaskBatch, AwsSession
 from braket.aws.queue_information import QuantumTaskQueueInfo, QueueType
 from braket.circuits import Circuit
+from braket.emulation.local_emulator import LocalEmulator
 from qiskit_braket_provider import (
     AWSBraketProvider,
     BraketAwsBackend,
+    BraketEmulatorBackend,
     BraketLocalBackend,
     BraketProvider,
     to_braket,
@@ -29,6 +31,8 @@ from test.unit_tests.mocks import (
     MOCK_RIGETTI_GATE_MODEL_M_3_QPU,
     MOCK_RIGETTI_M_3_QPU_CAPABILITIES,
     SIMULATOR_REGION,
+    mock_emulator_capabilities,
+    mock_emulator_topology,
 )
 
 
@@ -242,3 +246,56 @@ class TestBraketProvider(TestCase):
         assert c.count_ops()["kraus"] == 3
         nq = [ins.operation.num_qubits for ins in c.data if ins.operation.name == "kraus"]
         assert nq == [1, 2, 1]
+
+    @staticmethod
+    def _mock_emulator_device() -> Mock:
+        """Build a mock ``AwsDevice`` exposing a real local emulator."""
+        capabilities = mock_emulator_capabilities()
+        capabilities.service = Mock()
+        capabilities.service.updatedAt = "2023-06-02T17:00:00+00:00"
+        device = Mock()
+        device.name = "Emulated-QPU"
+        device.provider_name = "provider1"
+        device.properties = capabilities
+        device.gate_calibrations = None
+        device.type = "QPU"
+        device.topology_graph = mock_emulator_topology()
+        device.emulator = LocalEmulator.from_device_properties(capabilities)
+        return device
+
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")
+    def test_provider_backends_emulator(self, mock_get_devices: MagicMock):
+        """Tests that ``emulator=True`` returns emulator backends."""
+        mock_get_devices.return_value = [self._mock_emulator_device()]
+        provider = BraketProvider()
+        backends = provider.backends(emulator=True)
+        self.assertTrue(len(backends) > 0)
+        for backend in backends:
+            with self.subTest(f"{backend.name}"):
+                self.assertIsInstance(backend, BraketEmulatorBackend)
+                self.assertTrue(backend.emulator)
+                self.assertIn("Emulator for AWS Device", backend.description)
+
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")
+    def test_get_backend_emulator(self, mock_get_devices: MagicMock):
+        """Tests that ``get_backend(name, emulator=True)`` returns an emulator backend."""
+        mock_get_devices.return_value = [self._mock_emulator_device()]
+        provider = BraketProvider()
+        backend = provider.get_backend("Emulated-QPU", emulator=True)
+        self.assertIsInstance(backend, BraketEmulatorBackend)
+        self.assertTrue(backend.emulator)
+
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")
+    def test_get_backend_emulator_runs(self, mock_get_devices: MagicMock):
+        """Tests that an emulator backend from the provider is runnable."""
+        mock_get_devices.return_value = [self._mock_emulator_device()]
+        provider = BraketProvider()
+        backend = provider.get_backend("Emulated-QPU", emulator=True)
+
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        circuit.measure_all()
+        transpiled = transpile(circuit, backend=backend, seed_transpiler=42)
+        result = backend.run(transpiled, shots=100).result()
+        self.assertEqual(sum(result.get_counts().values()), 100)

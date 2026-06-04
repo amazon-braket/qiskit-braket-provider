@@ -9,7 +9,7 @@ from braket.device_schema.dwave import DwaveDeviceCapabilities
 from braket.device_schema.quera import QueraDeviceCapabilities
 from braket.device_schema.xanadu import XanaduDeviceCapabilities
 
-from .braket_backend import BraketAwsBackend, BraketLocalBackend
+from .braket_backend import BraketAwsBackend, BraketEmulatorBackend, BraketLocalBackend
 
 
 class BraketProvider:
@@ -30,19 +30,23 @@ class BraketProvider:
          BraketBackend[dm1]]
     """
 
-    def get_backend(self, name: str | None = None, **kwargs) -> BraketAwsBackend:
+    def get_backend(
+        self, name: str | None = None, emulator: bool = False, **kwargs
+    ) -> BraketAwsBackend | BraketEmulatorBackend:
         """Return a single backend matching the specified filters.
 
         Args:
             name (str): name of the selected backend
+            emulator (bool): return a local emulator backend for the selected device
+                instead of the device itself. Default: ``False``.
             **kwargs: dict with additional options for filtering and storing aws session
         Returns:
-            BraketAwsBackend: a backend matching the filters.
+            BraketAwsBackend | BraketEmulatorBackend: a backend matching the filters.
         Raises:
             QiskitBackendNotFoundError: if no backend could be found or
             more than one backend matches the filters.
         """
-        backends = self.backends(name=name, **kwargs)
+        backends = self.backends(name=name, emulator=emulator, **kwargs)
         if len(backends) > 1:
             raise QiskitBackendNotFoundError("More than one backend matches the criteria")
         if not backends:
@@ -52,12 +56,17 @@ class BraketProvider:
     def backends(
         self,
         name: str | None = None,
+        emulator: bool = False,
         **kwargs,
-    ) -> list[BraketAwsBackend | BraketLocalBackend]:
+    ) -> list[BraketAwsBackend | BraketLocalBackend | BraketEmulatorBackend]:
         """Return a list of backends matching the specified filters.
 
         Args:
             name (str): name of the selected backend
+            emulator (bool): return local emulator backends for the matching devices
+                instead of the devices themselves. Emulators mimic the gate set,
+                connectivity and noise of a device while executing locally. Default:
+                ``False``.
             **kwargs: dict with additional options for filtering and storing aws session
         Returns:
             BraketAwsBackend: a list of backends matching the filters.
@@ -83,6 +92,18 @@ class BraketProvider:
                 ),
             )
         ]
+        if emulator:
+            return [
+                BraketEmulatorBackend(
+                    device=device,
+                    provider=self,
+                    name=device.name,
+                    description=f"Emulator for AWS Device: {device.provider_name} {device.name}.",
+                    online_date=device.properties.service.updatedAt,
+                    backend_version="2",
+                )
+                for device in supported_devices
+            ]
         return [
             BraketAwsBackend(
                 device=device,

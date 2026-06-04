@@ -18,6 +18,7 @@ from braket.aws.queue_information import QueueDepthInfo
 from braket.circuits import Circuit
 from braket.device_schema import DeviceActionType
 from braket.devices import Device, LocalSimulator
+from braket.emulation.emulator import Emulator
 from braket.program_sets import ProgramSet
 from braket.tasks.local_quantum_task import LocalQuantumTask
 
@@ -208,6 +209,168 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
         )
 
 
+class BraketEmulatorBackend(BraketBackend[Emulator]):
+    """Runs quantum circuits on a local emulator of an Amazon Braket device.
+
+    A Braket :class:`~braket.emulation.emulator.Emulator` mimics the gate set,
+    connectivity and noise of a real ``AwsDevice`` while executing locally, without
+    submitting tasks to the Amazon Braket service. Emulators do not expose device
+    properties and therefore cannot be turned into a Qiskit ``Target`` directly, so
+    the ``Target`` is built from the source ``AwsDevice`` while circuits are executed
+    on the wrapped emulator.
+    """
+
+    def __init__(
+        self,
+        device: AwsDevice,
+        provider: BraketProvider | None = None,
+        name: str | None = None,
+        description: str | None = None,
+        online_date: datetime.datetime | None = None,
+        backend_version: str | None = None,
+        **fields,
+    ) -> None:
+        """Initialize the backend.
+
+        Example:
+            >>> provider = BraketProvider()
+            >>> backend = provider.get_backend("Aria 1", emulator=True)
+            >>> transpiled_circuit = transpile(circuit, backend=backend)
+            >>> backend.run(transpiled_circuit, shots=10).result().get_counts()
+            {"100": 6, "001": 4}
+
+        Args:
+            device (AwsDevice): The Braket device to emulate. Its properties are used
+                to build the Qiskit ``Target`` and the emulator backend.
+            provider: Qiskit provider for this backend. Default: ``None``.
+            name (str | None): Name of backend. Default: ``None``.
+            description (str | None): Description of backend. Default: ``None``.
+            online_date (datetime | None): Online date. Default: ``None``.
+            backend_version (str | None): Backend version. Default: ``None``.
+            **fields: Extra arguments.
+        """
+        emulator = device.emulator
+        # Emulators have no device properties, so the base initializer (which probes
+        # ``device.properties.action``) is bypassed. Emulators run locally and do not
+        # support program sets.
+        BackendV2.__init__(
+            self,
+            provider=provider,
+            name=name or device.name,
+            description=description or f"Emulator for AWS Device: {device.name}.",
+            online_date=online_date,
+            backend_version=backend_version,
+            **fields,
+        )
+        self._device = emulator
+        self._supports_program_sets = False
+        self._target = aws_device_to_target(device=device)
+        self._qubit_labels = (
+            tuple(sorted(device.topology_graph.nodes)) if device.topology_graph else None
+        )
+        self.status = emulator.status
+
+    @property
+    def emulator(self) -> bool:
+        """bool: Whether this backend executes on a device emulator. Always ``True``."""
+        return True
+
+    @property
+    def target(self) -> Target:
+        return self._target
+
+    @property
+    def max_circuits(self) -> None:
+        return None
+
+    @property
+    def qubit_labels(self) -> tuple[int, ...] | None:
+        return self._qubit_labels
+
+    @classmethod
+    def _default_options(cls) -> Options:
+        return Options()
+
+    @property
+    def dtm(self) -> float:
+        raise NotImplementedError(
+            f"System time resolution of output signals is not supported by {self.name}."
+        )
+
+    @property
+    def meas_map(self) -> list[list[int]]:
+        raise NotImplementedError(f"Measurement map is not supported by {self.name}.")
+
+    def qubit_properties(self, qubit: int | list[int]) -> QubitProperties | list[QubitProperties]:
+        raise NotImplementedError
+
+    def drive_channel(self, qubit: int):
+        raise NotImplementedError(f"Drive channel is not supported by {self.name}.")
+
+    def measure_channel(self, qubit: int):
+        raise NotImplementedError(f"Measure channel is not supported by {self.name}.")
+
+    def acquire_channel(self, qubit: int):
+        raise NotImplementedError(f"Acquire channel is not supported by {self.name}.")
+
+    def control_channel(self, qubits: Iterable[int]):
+        raise NotImplementedError(f"Control channel is not supported by {self.name}.")
+
+    def run(
+        self,
+        run_input: QuantumCircuit | list[QuantumCircuit],
+        *,
+        shots: int = 1024,
+        **options,
+    ) -> BraketQuantumTask:
+        """Execute ``QuantumCircuit``s on the device emulator.
+
+        Args:
+            run_input (QuantumCircuit | list[QuantumCircuit]): ``QuantumCircuit`` or list
+                of ``QuantumCircuit``s.
+            shots (int): Number of measurement repetitions. Default: ``1024``.
+            **options: Extra options passed to the emulator.
+
+        Returns:
+            BraketQuantumTask: The task tracking emulated execution.
+        """
+        convert_input = [run_input] if isinstance(run_input, QuantumCircuit) else list(run_input)
+        verbatim = options.pop("verbatim", False)
+        circuits: list[Circuit] = [
+            to_braket(circ, target=self._target if not verbatim else None, verbatim=verbatim)
+            for circ in convert_input
+        ]
+
+        if shots == 0:
+            circuits = [x.state_vector() for x in circuits]
+        if "meas_level" in options:
+            self._validate_meas_level(options["meas_level"])
+            del options["meas_level"]
+        tasks = []
+        try:
+            for circuit in circuits:
+                task: LocalQuantumTask = self._device.run(task_specification=circuit, shots=shots)
+                tasks.append(task)
+
+        except Exception as ex:
+            logger.error("During creation of tasks an error occurred: %s", ex)
+            logger.error("Cancelling all tasks %d!", len(tasks))
+            for task in tasks:
+                logger.error("Attempt to cancel %s...", task.id)
+                task.cancel()
+                logger.error("State of %s: %s.", task.id, task.state())
+            raise
+
+        task_id = _TASK_ID_DIVIDER.join(task.id for task in tasks)
+
+        return BraketQuantumTask(
+            task_id=task_id,
+            tasks=tasks,
+            backend=self,
+            shots=shots,
+        )
+
+
 class BraketAwsBackend(BraketBackend[AwsDevice]):
     """Runs quantum circuits on the Amazon Braket service."""
 
@@ -281,6 +444,26 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
             backend=self,
             tasks=[AwsQuantumTask(arn=task_id) for task_id in task_ids],
         )
+
+    @property
+    def emulator(self) -> BraketEmulatorBackend:
+        """Return a local emulator backend for this device.
+
+        The emulator mimics the gate set, connectivity and noise of the device while
+        executing circuits locally, providing a soft check that a program can run on the
+        target device without submitting tasks to the Amazon Braket service. Emulators
+        are only available for QPUs, not for Braket managed simulators.
+
+        Returns:
+            BraketEmulatorBackend: A backend that runs circuits on this device's emulator.
+
+        Example:
+            >>> backend = BraketProvider().get_backend("Aria 1")
+            >>> emulator_backend = backend.emulator
+            >>> emulator_backend.run(transpiled_circuit, shots=10).result().get_counts()
+            {"100": 6, "001": 4}
+        """
+        return BraketEmulatorBackend(device=self._device, provider=self.provider)
 
     @property
     def target(self) -> Target:
