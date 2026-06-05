@@ -2066,7 +2066,29 @@ def _create_qiskit_kraus(gate_params: list[np.ndarray]) -> Instruction:
 def _sympy_to_qiskit(
     expr: Expr, param_map: dict[str, Parameter]
 ) -> ParameterExpression | Parameter:
-    """convert a sympy expression to qiskit Parameters recursively"""
+    """Convert a sympy expression to qiskit Parameters recursively.
+
+    Supported operations:
+        - Arithmetic: Add (+), Mul (*), Pow (**)
+        - Trigonometric: sin, cos, tan
+        - Inverse trigonometric: asin, acos, atan
+        - Exponential/Logarithmic: exp, log
+        - Other: abs, conjugate
+
+    Unsupported operations (will raise TypeError):
+        - Complex numbers (ImaginaryUnit)
+        - Other sympy functions not listed above
+
+    Args:
+        expr: Sympy expression to convert
+        param_map: Dictionary mapping parameter names to Qiskit Parameters
+
+    Returns:
+        Qiskit ParameterExpression or Parameter
+
+    Raises:
+        TypeError: If expression type is not recognized
+    """
     match expr:
         case Symbol(name=name):
             if name not in param_map:
