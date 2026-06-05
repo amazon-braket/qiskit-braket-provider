@@ -46,7 +46,7 @@ from qiskit.transpiler import (
     TransformationPass,
 )
 from qiskit_ionq import add_equivalences, ionq_gates
-from sympy import Add, Expr, Mul, Pow, Symbol
+from sympy import Add, Expr, Mul, Pow, Symbol, sin, cos, tan, exp, log, asin, acos, atan, abs, conjugate
 
 from braket import experimental_capabilities as braket_expcaps
 from braket.aws import AwsDevice, AwsDeviceType
@@ -2078,6 +2078,26 @@ def _sympy_to_qiskit(
             return prod(_sympy_to_qiskit(arg, param_map) for arg in args)
         case Pow(base=base, exp=exp):
             return _sympy_to_qiskit(base, param_map) ** int(exp)
+        case sin(arg=arg):
+            return _sympy_to_qiskit(arg, param_map).sin()
+        case cos(arg=arg):
+            return _sympy_to_qiskit(arg, param_map).cos()
+        case tan(arg=arg):
+            return _sympy_to_qiskit(arg, param_map).tan()
+        case exp(arg=arg):
+            return _sympy_to_qiskit(arg, param_map).exp()
+        case log(arg=arg):
+            return _sympy_to_qiskit(arg, param_map).log()
+        case asin(arg=arg):
+            return _sympy_to_qiskit(arg, param_map).asin()
+        case acos(arg=arg):
+            return _sympy_to_qiskit(arg, param_map).acos()
+        case atan(arg=arg):
+            return _sympy_to_qiskit(arg, param_map).atan()
+        case abs(arg=arg):
+            return _sympy_to_qiskit(arg, param_map).abs()
+        case conjugate(arg=arg):
+            return _sympy_to_qiskit(arg, param_map).conjugate()
         case obj if getattr(obj, "is_real", False):
             return float(obj)
     raise TypeError(f"unrecognized parameter type in conversion: {type(expr)}")

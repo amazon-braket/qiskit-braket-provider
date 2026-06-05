@@ -1497,6 +1497,61 @@ class TestFromBraket(TestCase):
         ):
             to_qiskit(braket_circuit)
 
+    def test_transcendental_functions_sin_cos(self):
+        """Tests Braket to Qiskit conversion with sin and cos functions."""
+        from braket.parametric import FreeParameterExpression
+        import braket.parametric.free_parameter_expression as fpe
+
+        theta = FreeParameter("theta")
+        expr = fpe.sin(theta) + fpe.cos(theta)
+        braket_circuit = Circuit().rx(0, expr)
+        qiskit_circuit = to_qiskit(braket_circuit)
+
+        # Verify the conversion contains sin and cos
+        self.assertTrue("sin" in str(qiskit_circuit.parameters[0]) or "cos" in str(qiskit_circuit.parameters[0]))
+
+    def test_transcendental_functions_exp_log(self):
+        """Tests Braket to Qiskit conversion with exp and log functions."""
+        from braket.parametric import FreeParameterExpression
+        import braket.parametric.free_parameter_expression as fpe
+
+        theta = FreeParameter("theta")
+        expr = fpe.exp(theta) + fpe.log(theta)
+        braket_circuit = Circuit().rx(0, expr)
+        qiskit_circuit = to_qiskit(braket_circuit)
+
+        # Verify the conversion contains exp and log
+        self.assertTrue("exp" in str(qiskit_circuit.parameters[0]) or "log" in str(qiskit_circuit.parameters[0]))
+
+    def test_transcendental_functions_trig_inverse(self):
+        """Tests Braket to Qiskit conversion with inverse trig functions."""
+        from braket.parametric import FreeParameterExpression
+        import braket.parametric.free_parameter_expression as fpe
+
+        theta = FreeParameter("theta")
+        expr = fpe.asin(theta) + fpe.acos(theta) + fpe.atan(theta)
+        braket_circuit = Circuit().rx(0, expr)
+        qiskit_circuit = to_qiskit(braket_circuit)
+
+        # Verify the conversion contains inverse trig functions
+        param_str = str(qiskit_circuit.parameters[0])
+        self.assertTrue(
+            "asin" in param_str or "acos" in param_str or "atan" in param_str
+        )
+
+    def test_transcendental_functions_abs_conjugate(self):
+        """Tests Braket to Qiskit conversion with abs and conjugate functions."""
+        from braket.parametric import FreeParameterExpression
+        import braket.parametric.free_parameter_expression as fpe
+
+        theta = FreeParameter("theta")
+        expr = fpe.abs(theta) + fpe.conjugate(theta)
+        braket_circuit = Circuit().rx(0, expr)
+        qiskit_circuit = to_qiskit(braket_circuit)
+
+        # Verify the conversion contains abs or conjugate
+        self.assertTrue("abs" in str(qiskit_circuit.parameters[0]) or "conjugate" in str(qiskit_circuit.parameters[0]))
+
     def test_unitary(self):
         """Tests Braket to Qiskit conversion with UnitaryGate."""
         braket_circuit = Circuit().h(0).unitary([0, 1], Gate.CNot().to_matrix())
