@@ -18,6 +18,7 @@ from braket.aws.queue_information import QueueDepthInfo
 from braket.circuits import Circuit
 from braket.device_schema import DeviceActionType
 from braket.devices import Device, LocalSimulator
+from braket.emulation.local_emulator import LocalEmulator
 from braket.program_sets import ProgramSet
 from braket.tasks.local_quantum_task import LocalQuantumTask
 
@@ -52,7 +53,7 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
     def __init__(self, device: T, name: str, **fields) -> None:
         super().__init__(name=name, **fields)
         self._device = device
-        self._supports_program_sets = (
+        self._supports_program_sets = hasattr(self._device, "properties") and (
             DeviceActionType.OPENQASM_PROGRAM_SET in self._device.properties.action
         )
 
@@ -86,6 +87,8 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
         Returns:
             set[str] | None: The requested gate set.
         """
+        if not hasattr(self._device, "properties"):
+            return None
         if native:
             return native_gate_set(self._device.properties)
         action = self._device.properties.action.get(DeviceActionType.OPENQASM)
@@ -107,7 +110,16 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
 class BraketLocalBackend(BraketBackend[LocalSimulator]):
     """Runs quantum circuits on the Braket local simulator."""
 
-    def __init__(self, name: str = "default", **fields) -> None:
+    def __init__(
+        self,
+        name: str = "default",
+        *,
+        _device: Device | None = None,
+        _target: Target | None = None,
+        _qubit_labels: tuple[int, ...] | None = None,
+        _supports_program_sets: bool | None = None,
+        **fields,
+    ) -> None:
         """Initialize the backend.
 
         Example:
@@ -119,13 +131,42 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
 
         Args:
             name (str): Name of backend. Default: ``default``.
+            _device (Device | None): Pre-built Braket device instance, e.g. a
+                ``LocalEmulator``. When provided, ``name`` is used as the backend name
+                and no ``LocalSimulator`` is created. Default: ``None``.
+            _target (Target | None): Pre-built Qiskit ``Target`` to use instead of
+                deriving one from the device properties. Required when ``_device`` does
+                not expose Braket device properties (e.g. ``LocalEmulator``).
+                Default: ``None``.
+            _qubit_labels (tuple[int, ...] | None): Qubit labels from the emulated
+                ``AwsDevice``. Default: ``None``.
+            _supports_program_sets (bool | None): Whether program sets are supported,
+                inherited from the emulated ``AwsDevice``. Default: ``None``.
             **fields: Extra arguments.
         """
-        simulator = LocalSimulator(backend=name)
-        super().__init__(simulator, name or simulator.name, **fields)
-        self._target = local_simulator_to_target(self._device)
+        if _device is not None:
+            device = _device
+            device_name = name
+        else:
+            device = LocalSimulator(backend=name)
+            device_name = name or device.name
+        super().__init__(device, device_name, **fields)
+        self._target = _target if _target is not None else local_simulator_to_target(self._device)
+        self._qubit_labels = _qubit_labels
+        if _supports_program_sets is not None:
+            self._supports_program_sets = _supports_program_sets
         self._gateset = self.get_gateset()
         self.status = self._device.status
+        self._is_emulator = isinstance(self._device, LocalEmulator)
+
+    @property
+    def is_emulator(self) -> bool:
+        """bool: Whether this backend wraps a local device emulator."""
+        return self._is_emulator
+
+    @property
+    def qubit_labels(self) -> tuple[int, ...] | None:
+        return self._qubit_labels
 
     @property
     def target(self) -> Target:
@@ -293,6 +334,38 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
     @property
     def qubit_labels(self) -> tuple[int, ...] | None:
         return self._qubit_labels
+
+    @property
+    def emulator(self) -> BraketLocalBackend:
+        """BraketLocalBackend: A local emulator backend for this device.
+
+        The emulator mimics the restrictions and noise of the underlying QPU by
+        validating and compiling circuits before running them on a local
+        density-matrix simulator.  It can be used as a soft check that a circuit
+        is compatible with the target device before submitting to real hardware.
+
+        Raises:
+            QiskitBraketException: If this backend wraps a managed simulator
+                (``AwsDeviceType.SIMULATOR``) rather than a QPU.
+
+        Example:
+            >>> provider = BraketProvider()
+            >>> backend = provider.get_backend("Aria 1")
+            >>> emulator_backend = backend.emulator
+            >>> result = emulator_backend.run(circuit, shots=100).result()
+        """
+        if self._device.type == AwsDeviceType.SIMULATOR:
+            raise QiskitBraketException(
+                f"Device {self.name} is a managed simulator and does not support emulation."
+            )
+        return BraketLocalBackend(
+            name=f"{self.name} Emulator",
+            provider=self.provider,
+            _device=self._device.emulator(),
+            _target=self._target,
+            _qubit_labels=self._qubit_labels,
+            _supports_program_sets=self._supports_program_sets,
+        )
 
     @classmethod
     def _default_options(cls) -> Options:

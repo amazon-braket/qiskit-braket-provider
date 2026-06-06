@@ -93,6 +93,57 @@ class TestBraketProvider(TestCase):
 
         self.assertIsInstance(provider.backends(name=None, local="sv1")[0], BraketLocalBackend)
 
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice")
+    def test_provider_backends_emulator(self, mock_aws_device: MagicMock):
+        """Tests getting emulator backends via emulator=True kwarg."""
+        from braket.emulation.local_emulator import LocalEmulator
+        from test.unit_tests.mocks import MOCK_RIGETTI_TOPOLOGY_GRAPH
+
+        mock_device = Mock()
+        mock_device.name = MOCK_RIGETTI_GATE_MODEL_M_3_QPU["deviceName"]
+        mock_device.provider_name = MOCK_RIGETTI_GATE_MODEL_M_3_QPU["providerName"]
+        mock_device.type = AwsDeviceType.QPU
+        mock_device.properties = MOCK_RIGETTI_M_3_QPU_CAPABILITIES
+        mock_device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+        mock_device.gate_calibrations = None
+        mock_emulator = Mock(spec=LocalEmulator)
+        mock_emulator.name = f"{mock_device.name} Emulator"
+        mock_emulator.status = "AVAILABLE"
+        mock_device.emulator.return_value = mock_emulator
+        mock_aws_device.get_devices.return_value = [mock_device]
+
+        provider = BraketProvider()
+        backends = provider.backends(emulator=True)
+
+        self.assertEqual(len(backends), 1)
+        self.assertIsInstance(backends[0], BraketLocalBackend)
+        self.assertTrue(backends[0].is_emulator)
+
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice")
+    def test_provider_get_backend_emulator(self, mock_aws_device: MagicMock):
+        """Tests provider.get_backend() with emulator=True returns BraketLocalBackend."""
+        from braket.emulation.local_emulator import LocalEmulator
+        from test.unit_tests.mocks import MOCK_RIGETTI_TOPOLOGY_GRAPH
+
+        mock_device = Mock()
+        mock_device.name = MOCK_RIGETTI_GATE_MODEL_M_3_QPU["deviceName"]
+        mock_device.provider_name = MOCK_RIGETTI_GATE_MODEL_M_3_QPU["providerName"]
+        mock_device.type = AwsDeviceType.QPU
+        mock_device.properties = MOCK_RIGETTI_M_3_QPU_CAPABILITIES
+        mock_device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+        mock_device.gate_calibrations = None
+        mock_emulator = Mock(spec=LocalEmulator)
+        mock_emulator.name = f"{mock_device.name} Emulator"
+        mock_emulator.status = "AVAILABLE"
+        mock_device.emulator.return_value = mock_emulator
+        mock_aws_device.get_devices.return_value = [mock_device]
+
+        provider = BraketProvider()
+        backend = provider.get_backend(MOCK_RIGETTI_GATE_MODEL_M_3_QPU["deviceName"], emulator=True)
+
+        self.assertIsInstance(backend, BraketLocalBackend)
+        self.assertTrue(backend.is_emulator)
+
     def test_real_devices(self):
         """Tests real devices."""
         with patch(

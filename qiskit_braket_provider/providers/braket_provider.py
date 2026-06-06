@@ -30,7 +30,9 @@ class BraketProvider:
          BraketBackend[dm1]]
     """
 
-    def get_backend(self, name: str | None = None, **kwargs) -> BraketAwsBackend:
+    def get_backend(
+        self, name: str | None = None, **kwargs
+    ) -> BraketAwsBackend | BraketLocalBackend:
         """Return a single backend matching the specified filters.
 
         Args:
@@ -58,15 +60,19 @@ class BraketProvider:
 
         Args:
             name (str): name of the selected backend
-            **kwargs: dict with additional options for filtering and storing aws session
+            **kwargs: dict with additional options for filtering and storing aws session.
+                Pass ``emulator=True`` to return local emulator backends instead of the
+                AWS-hosted devices.  Emulators are only available for QPU devices; passing
+                ``emulator=True`` alongside a simulator name raises an error.
         Returns:
-            BraketAwsBackend: a list of backends matching the filters.
+            BraketAwsBackend | BraketLocalBackend: a list of backends matching the filters.
         """
         if kwargs.get("local"):
             return [
                 BraketLocalBackend(name="braket_sv"),
                 BraketLocalBackend(name="braket_dm"),
             ]
+        emulator = kwargs.pop("emulator", False)
         names = [name] if name else None
         devices = AwsDevice.get_devices(names=names, **kwargs)
         # filter by supported devices
@@ -83,7 +89,7 @@ class BraketProvider:
                 ),
             )
         ]
-        return [
+        aws_backends = [
             BraketAwsBackend(
                 device=device,
                 provider=self,
@@ -94,6 +100,9 @@ class BraketProvider:
             )
             for device in supported_devices
         ]
+        if emulator:
+            return [backend.emulator for backend in aws_backends]
+        return aws_backends
 
 
 class AWSBraketProvider(BraketProvider):

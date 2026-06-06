@@ -15,6 +15,7 @@ from qiskit.primitives.containers.bindings_array import BindingsArray
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 
 from braket.circuits import Circuit
+from braket.emulation.emulator import Emulator
 from braket.program_sets import CircuitBinding, ParameterSets, ProgramSet
 from braket.tasks import ProgramSetQuantumTaskResult
 from qiskit_braket_provider.providers.adapter import rename_parameter, to_braket
@@ -101,8 +102,11 @@ class BraketSampler(BaseSamplerV2):
             parameter_indices.append(indices)
         shots_per_executable = pub_shots if pub_shots is not None else shots
         program_set = ProgramSet(circuit_bindings, shots_per_executable=shots_per_executable)
+        run_kwargs = dict(self._options)
+        if isinstance(self._backend._device, Emulator):
+            run_kwargs["shots"] = shots_per_executable
         return BraketPrimitiveTask(
-            self._backend._device.run(program_set, **self._options),
+            self._backend._device.run(program_set, **run_kwargs),
             lambda result: BraketSampler._translate_result(
                 result,
                 _JobMetadata(
