@@ -298,7 +298,7 @@ class TestBraketEstimator(TestCase):
             (circuit, observables, parameters[0]),
             (circuit, observables[1], parameters[1]),
         ]
-        task = self.estimator.run(pubs)
+        task = self.estimator.run(pubs, abelian_grouping=False)
         program_set = task.program_set
         self.assertEqual(len(program_set), 3)
         self.assertEqual(len(program_set[0]), 2)
@@ -314,7 +314,7 @@ class TestBraketEstimator(TestCase):
         circuit.ry(np.pi / 3, 0)
         observables = [SparsePauliOp("ZX"), SparsePauliOp("XZ")]
         pubs = [(circuit, observables), (circuit, observables[0])]
-        task = self.estimator.run(pubs)
+        task = self.estimator.run(pubs, abelian_grouping=False)
         program_set = task.program_set
         self.assertEqual(len(program_set), 2)
         self.assertEqual(len(program_set[0]), 2)
@@ -346,7 +346,7 @@ class TestBraketEstimator(TestCase):
             ]).T,
         )
 
-        task = self.estimator.run([pub])
+        task = self.estimator.run([pub], abelian_grouping=False)
         program_set = task.program_set
         self.assertEqual(len(program_set), 2)
         self.assertEqual(len(program_set[0]), num_params * 2)
@@ -376,7 +376,7 @@ class TestBraketEstimator(TestCase):
             ]).T,
         )
 
-        task = self.estimator.run([pub])
+        task = self.estimator.run([pub], abelian_grouping=False)
         program_set = task.program_set
         self.assertEqual(len(program_set), 2)
         self.assertEqual(len(program_set[0]), num_params * 2)
@@ -407,9 +407,161 @@ class TestBraketEstimator(TestCase):
             ),
         )
 
-        task = self.estimator.run([pub])
+        task = self.estimator.run([pub], abelian_grouping=False)
         program_set = task.program_set
         self.assertEqual(len(program_set), 3)
         for entry in task.program_set:
             self.assertEqual(len(entry), num_steps * 2)
+        self.assert_correct_results(task, [pub])
+
+    def test_abelian_grouping_collapses_commuting_group(self):
+        """A commuting group is measured in one covering executable, not one per term."""
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        obs = SparsePauliOp(["ZZ", "IZ", "ZI"], [1.0, 0.5, -0.3])
+        pub = (circuit, obs)
+
+        grouped = self.estimator.run([pub])
+        ungrouped = self.estimator.run([pub], abelian_grouping=False)
+
+        self.assertEqual(len(grouped.program_set[0]), 1)
+        self.assertEqual(len(ungrouped.program_set[0]), 3)
+        self.assert_correct_results(grouped, [pub])
+
+    def test_abelian_grouping_reuses_shared_terms(self):
+        """Two observables sharing a term reconstruct from one shared measurement."""
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        pub = (
+            circuit,
+            [
+                SparsePauliOp(["ZI", "ZZ"], [0.25, 0.75]),
+                SparsePauliOp("ZI"),
+            ],
+        )
+        task = self.estimator.run([pub])
+        program_set = task.program_set
+        self.assertEqual(len(program_set), 1)
+        self.assertEqual(len(program_set[0]), 1)
+        self.assert_correct_results(task, [pub])
+
+    def test_abelian_grouping_parameterized(self):
+        """Grouping reconstructs correctly across a parameter sweep."""
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        circuit.ry(Parameter("θ"), 0)
+        obs = SparsePauliOp(["ZZ", "IZ", "ZI"], [1.0, 0.5, -0.3])
+        num_params = 5
+        pub = (circuit, obs, np.linspace(0, np.pi, num_params))
+
+        task = self.estimator.run([pub])
+        program_set = task.program_set
+        self.assertEqual(len(program_set), 1)
+        self.assertEqual(len(program_set[0]), num_params)
+        self.assert_correct_results(task, [pub])
+
+    def test_abelian_grouping_identity_with_active_terms(self):
+        """An identity term alongside active terms is added with no extra executable."""
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        obs = SparsePauliOp(["II", "ZZ"], [0.5, 1.0])
+        pub = (circuit, obs)
+        task = self.estimator.run([pub])
+        program_set = task.program_set
+        self.assertEqual(len(program_set), 1)
+        self.assertEqual(len(program_set[0]), 1)
+        self.assert_correct_results(task, [pub])
+
+    def test_abelian_grouping_pure_identity(self):
+        """A pure-identity (constant) observable returns the constant without crashing."""
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        obs = SparsePauliOp(["II"], [2.0])
+        pub = (circuit, obs)
+        task = self.estimator.run([pub])
+        self.assert_correct_results(task, [pub])
+
+    def test_abelian_grouping_y_basis_group(self):
+        """A Y-basis commuting group is measured in one covering executable."""
+        circuit = QuantumCircuit(2)
+        circuit.ry(0.7, 0)
+        circuit.rx(1.1, 1)
+        circuit.cx(0, 1)
+        obs = SparsePauliOp(["YY", "YI", "IY"])
+        pub = (circuit, obs)
+        task = self.estimator.run([pub])
+        self.assertEqual(len(task.program_set), 1)
+        self.assertEqual(len(task.program_set[0]), 1)
+        self.assert_correct_results(task, [pub])
+
+    def test_abelian_grouping_mixed_basis_group(self):
+        """Terms needing different bases on different qubits share one covering measurement."""
+        circuit = QuantumCircuit(2)
+        circuit.ry(0.7, 0)
+        circuit.rx(1.1, 1)
+        circuit.cx(0, 1)
+        obs = SparsePauliOp(["ZI", "IX", "ZX"])
+        pub = (circuit, obs)
+        task = self.estimator.run([pub])
+        self.assertEqual(len(task.program_set), 1)
+        self.assertEqual(len(task.program_set[0]), 1)
+        self.assert_correct_results(task, [pub])
+
+    def test_abelian_grouping_multiple_groups(self):
+        """An observable spanning two commuting groups uses one executable per group."""
+        circuit = QuantumCircuit(3)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        circuit.ry(0.6, 2)
+        circuit.cx(1, 2)
+        obs = SparsePauliOp(
+            ["ZZI", "IZZ", "XII", "IXI", "IIX"],
+            [-1.0, -1.0, -0.5, -0.5, -0.5],
+        )
+        pub = (circuit, obs)
+        task = self.estimator.run([pub])
+        self.assertEqual(len(task.program_set), 2)
+        self.assert_correct_results(task, [pub])
+
+    def test_abelian_grouping_four_qubit_fewer_executions(self):
+        """On four qubits, grouping reconstructs correctly with fewer total executions."""
+        circuit = QuantumCircuit(4)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        circuit.ry(0.6, 2)
+        circuit.cx(2, 3)
+        circuit.cx(1, 2)
+        obs = SparsePauliOp(
+            ["ZZII", "IZZI", "IIZZ", "XIII", "IXII", "IIXI", "IIIX"],
+            [-1.0, -1.0, -1.0, -0.5, -0.5, -0.5, -0.5],
+        )
+        pub = (circuit, obs)
+        grouped = self.estimator.run([pub])
+        ungrouped = self.estimator.run([pub], abelian_grouping=False)
+        grouped_execs = sum(len(entry) for entry in grouped.program_set)
+        ungrouped_execs = sum(len(entry) for entry in ungrouped.program_set)
+        self.assertEqual(ungrouped_execs, 7)
+        self.assertEqual(grouped_execs, 2)
+        self.assert_correct_results(grouped, [pub])
+
+    def test_abelian_grouping_broadcasts_over_2d_shape(self):
+        """Grouping reconstructs every cell of a 2-D (observable x parameter) broadcast."""
+        theta = Parameter("θ")
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        circuit.ry(theta, 0)
+        observables = ObservablesArray([
+            [SparsePauliOp(["ZZ", "IZ", "ZI"], [1.0, 0.5, -0.3])],
+            [SparsePauliOp(["XX", "XI", "IX"], [1.0, 0.5, 0.25])],
+        ])
+        parameter_values = BindingsArray({theta: np.array([0.0, np.pi / 4, np.pi / 2])})
+        pub = (circuit, observables, parameter_values)
+        self.assertEqual(EstimatorPub.coerce(pub).shape, (2, 3))
+        task = self.estimator.run([pub])
         self.assert_correct_results(task, [pub])
