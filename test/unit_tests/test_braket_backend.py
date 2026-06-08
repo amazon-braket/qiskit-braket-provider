@@ -697,6 +697,26 @@ class TestBraketEmulatorBackend(TestCase):
         with self.assertRaises(exception.QiskitBraketException):
             backend.run(circuit, shots=10, meas_level=1)
 
+    def test_emulator_backend_run_meas_level_2(self):
+        """Tests that a valid meas_level is accepted by the emulator backend."""
+        backend = BraketEmulatorBackend(device=_mock_emulator_device())
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        circuit.measure_all()
+        transpiled = transpile(circuit, backend=backend, seed_transpiler=42)
+
+        result = backend.run(transpiled, shots=50, meas_level=2).result()
+        self.assertEqual(sum(result.get_counts().values()), 50)
+
+    def test_emulator_backend_run_shots0(self):
+        """Tests that shots=0 is rejected by the emulator backend."""
+        backend = BraketEmulatorBackend(device=_mock_emulator_device())
+        circuit = QuantumCircuit(1)
+        circuit.h(0)
+        with self.assertRaises(exception.QiskitBraketException):
+            backend.run(circuit, shots=0)
+
     def test_emulator_backend_run_exception(self):
         """Tests that the emulator backend cancels submitted tasks on error."""
         backend = BraketEmulatorBackend(device=_mock_emulator_device())

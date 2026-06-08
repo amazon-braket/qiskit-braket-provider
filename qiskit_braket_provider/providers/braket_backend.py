@@ -328,11 +328,16 @@ class BraketEmulatorBackend(BraketBackend[Emulator]):
         Args:
             run_input (QuantumCircuit | list[QuantumCircuit]): ``QuantumCircuit`` or list
                 of ``QuantumCircuit``s.
-            shots (int): Number of measurement repetitions. Default: ``1024``.
+            shots (int): Number of measurement repetitions. Must be positive; the emulator
+                reproduces QPU behavior and does not support exact (``shots=0``) simulation.
+                Default: ``1024``.
             **options: Extra options passed to the emulator.
 
         Returns:
             BraketQuantumTask: The task tracking emulated execution.
+
+        Raises:
+            QiskitBraketException: If ``shots`` is ``0``, or if ``meas_level`` is unsupported.
         """
         convert_input = [run_input] if isinstance(run_input, QuantumCircuit) else list(run_input)
         verbatim = options.pop("verbatim", False)
@@ -342,7 +347,11 @@ class BraketEmulatorBackend(BraketBackend[Emulator]):
         ]
 
         if shots == 0:
-            circuits = [x.state_vector() for x in circuits]
+            raise QiskitBraketException(
+                "The device emulator does not support shots=0. The emulator reproduces "
+                "QPU behavior, which requires a positive shot count. Use BraketLocalBackend "
+                "for exact (state vector) simulation."
+            )
         if "meas_level" in options:
             self._validate_meas_level(options["meas_level"])
             del options["meas_level"]
