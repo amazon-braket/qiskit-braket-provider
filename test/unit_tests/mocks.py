@@ -4,6 +4,7 @@ import copy
 import enum
 import uuid
 from collections import Counter
+from unittest.mock import Mock
 
 import numpy as np
 from networkx import DiGraph, from_dict_of_lists, relabel_nodes
@@ -11,13 +12,19 @@ from qiskit import QuantumCircuit
 from qiskit.providers import Options
 from qiskit.transpiler import Target
 
+from braket.aws import AwsDevice, AwsDeviceType
 from braket.device_schema import StandardizedGateModelQpuDeviceProperties
 from braket.device_schema.rigetti import RigettiDeviceCapabilities
 from braket.device_schema.simulators import GateModelSimulatorDeviceCapabilities
+from braket.emulation.local_emulator import LocalEmulator
 from braket.task_result import ProgramSetTaskResult, TaskMetadata
 from braket.tasks import GateModelQuantumTaskResult, ProgramSetQuantumTaskResult
 from braket.tasks.local_quantum_task import LocalQuantumTask
-from qiskit_braket_provider.providers.braket_backend import BraketBackend
+from qiskit_braket_provider.providers.braket_backend import (
+    BraketAwsBackend,
+    BraketBackend,
+    BraketLocalBackend,
+)
 
 RIGETTI_ARN = "arn:aws:braket:::device/qpu/rigetti/Aspen-10"
 RIGETTI_ASPEN_ARN = "arn:aws:braket:::device/qpu/rigetti/Aspen-M-3"
@@ -447,6 +454,25 @@ def mock_emulator_topology() -> DiGraph:
     """Return the topology graph matching ``mock_emulator_capabilities``."""
     graph = from_dict_of_lists({"0": [1], "1": [0]}, create_using=DiGraph())
     return relabel_nodes(graph, {n: int(n) for n in graph.nodes})
+
+
+def mock_emulator_device() -> Mock:
+    """Build a mock ``AwsDevice`` whose ``emulator()`` is a real local emulator."""
+    capabilities = mock_emulator_capabilities()
+    device = Mock(spec=AwsDevice)
+    device.name = "Emulated-QPU"
+    device.properties = capabilities
+    device.gate_calibrations = None
+    device.type = AwsDeviceType.QPU
+    device.topology_graph = mock_emulator_topology()
+    device.aws_session = Mock()
+    device.emulator = Mock(return_value=LocalEmulator.from_device_properties(capabilities))
+    return device
+
+
+def emulator_backend_from_device() -> BraketLocalBackend:
+    """Return an emulator backend backed by a real ``LocalEmulator``."""
+    return BraketAwsBackend(device=mock_emulator_device()).emulator
 
 
 class MockBraketBackend(BraketBackend):

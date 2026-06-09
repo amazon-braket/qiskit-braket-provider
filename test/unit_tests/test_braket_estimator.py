@@ -17,6 +17,7 @@ from braket.program_sets import ProgramSet
 from qiskit_braket_provider.providers import BraketLocalBackend
 from qiskit_braket_provider.providers.braket_estimator import BraketEstimator
 from qiskit_braket_provider.providers.braket_primitive_task import BraketPrimitiveTask
+from test.unit_tests.mocks import emulator_backend_from_device
 
 
 class TestBraketEstimator(TestCase):
@@ -41,6 +42,24 @@ class TestBraketEstimator(TestCase):
         backend._supports_program_sets = False
         with self.assertRaises(ValueError):
             BraketEstimator(backend)
+
+    def test_emulator_run_passes_shots(self):
+        """Tests that emulator backends pass shots when running a program set."""
+        backend = emulator_backend_from_device()
+        estimator = BraketEstimator(backend)
+        qc = QuantumCircuit(1)
+        qc.h(0)
+        pub = (qc, SparsePauliOp(["Z"]))
+
+        with patch.object(backend._device, "run") as mock_run:
+            mock_task = Mock()
+            mock_task.id = "test-task-id"
+            mock_run.return_value = mock_task
+
+            estimator.run([pub], precision=0.01)
+
+            mock_run.assert_called_once()
+            self.assertEqual(mock_run.call_args.kwargs["shots"], 10000)
 
     def test_simple_pub(self):
         """Test a simple pub with no broadcasting."""
