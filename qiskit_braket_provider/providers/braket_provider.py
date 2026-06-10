@@ -4,7 +4,7 @@ import warnings
 
 from qiskit.providers.exceptions import QiskitBackendNotFoundError
 
-from braket.aws import AwsDevice
+from braket.aws import AwsDevice, AwsDeviceType
 from braket.device_schema.dwave import DwaveDeviceCapabilities
 from braket.device_schema.quera import QueraDeviceCapabilities
 from braket.device_schema.xanadu import XanaduDeviceCapabilities
@@ -65,8 +65,8 @@ class BraketProvider:
             name (str): name of the selected backend
             emulator (bool): return local emulator backends for the matching devices
                 instead of the devices themselves. Emulators mimic the gate set,
-                connectivity and noise of a device while executing locally. Default:
-                ``False``.
+                connectivity and noise of a device while executing locally. Only QPUs
+                have emulators, so managed simulators are excluded. Default: ``False``.
             **kwargs: dict with additional options for filtering and storing aws session
         Returns:
             BraketAwsBackend: a list of backends matching the filters.
@@ -103,6 +103,7 @@ class BraketProvider:
                     backend_version="2",
                 )
                 for device in supported_devices
+                if device.type == AwsDeviceType.QPU
             ]
         return [
             BraketAwsBackend(

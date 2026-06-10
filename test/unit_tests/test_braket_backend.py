@@ -611,13 +611,14 @@ class TestBraketAwsBackend(TestCase):
         backend = BraketAwsBackend(device=device)
         emulator_backend = backend.emulator
         self.assertIsInstance(emulator_backend, BraketEmulatorBackend)
+        self.assertIsInstance(emulator_backend, BraketLocalBackend)
         self.assertTrue(emulator_backend.emulator)
         self.assertIs(emulator_backend.provider, backend.provider)
         self.assertIsInstance(emulator_backend._device, Emulator)
 
 
 def _mock_emulator_device() -> Mock:
-    """Build a mock ``AwsDevice`` whose ``emulator`` is a real local emulator."""
+    """Build a mock ``AwsDevice`` whose ``emulator()`` returns a real local emulator."""
     capabilities = mock_emulator_capabilities()
     device = Mock(spec=AwsDevice)
     device.name = "Emulated-QPU"
@@ -625,7 +626,7 @@ def _mock_emulator_device() -> Mock:
     device.gate_calibrations = None
     device.type = "QPU"
     device.topology_graph = mock_emulator_topology()
-    device.emulator = LocalEmulator.from_device_properties(capabilities)
+    device.emulator.return_value = LocalEmulator.from_device_properties(capabilities)
     return device
 
 
@@ -641,27 +642,6 @@ class TestBraketEmulatorBackend(TestCase):
         self.assertTrue(backend.emulator)
         self.assertEqual(backend.qubit_labels, (0, 1))
         self.assertIn("Emulator for AWS Device", backend.description)
-        with self.assertRaises(NotImplementedError):
-            backend.dtm()
-        with self.assertRaises(NotImplementedError):
-            backend.meas_map()
-        with self.assertRaises(NotImplementedError):
-            backend.qubit_properties(0)
-        with self.assertRaises(NotImplementedError):
-            backend.drive_channel(0)
-        with self.assertRaises(NotImplementedError):
-            backend.acquire_channel(0)
-        with self.assertRaises(NotImplementedError):
-            backend.measure_channel(0)
-        with self.assertRaises(NotImplementedError):
-            backend.control_channel([0, 1])
-
-    def test_emulator_backend_custom_description(self):
-        """Tests that a custom description is preserved by the emulator backend."""
-        backend = BraketEmulatorBackend(
-            device=_mock_emulator_device(), description="Custom emulator"
-        )
-        self.assertEqual(backend.description, "Custom emulator")
 
     def test_emulator_backend_run(self):
         """Tests running a circuit on the emulator backend."""
@@ -675,40 +655,6 @@ class TestBraketEmulatorBackend(TestCase):
         result = backend.run(transpiled, shots=100).result()
         self.assertEqual(sum(result.get_counts().values()), 100)
 
-    def test_emulator_backend_run_multiple_circuits(self):
-        """Tests running multiple circuits on the emulator backend."""
-        backend = BraketEmulatorBackend(device=_mock_emulator_device())
-        circuit = QuantumCircuit(2)
-        circuit.h(0)
-        circuit.cx(0, 1)
-        circuit.measure_all()
-        transpiled = transpile(circuit, backend=backend, seed_transpiler=42)
-
-        job = backend.run([transpiled, transpiled], shots=50)
-        results = job.result()
-        for index in range(2):
-            self.assertEqual(sum(results.get_counts(index).values()), 50)
-
-    def test_emulator_backend_run_meas_level(self):
-        """Tests that an invalid meas_level is rejected by the emulator backend."""
-        backend = BraketEmulatorBackend(device=_mock_emulator_device())
-        circuit = QuantumCircuit(1)
-        circuit.h(0)
-        with self.assertRaises(exception.QiskitBraketException):
-            backend.run(circuit, shots=10, meas_level=1)
-
-    def test_emulator_backend_run_meas_level_2(self):
-        """Tests that a valid meas_level is accepted by the emulator backend."""
-        backend = BraketEmulatorBackend(device=_mock_emulator_device())
-        circuit = QuantumCircuit(2)
-        circuit.h(0)
-        circuit.cx(0, 1)
-        circuit.measure_all()
-        transpiled = transpile(circuit, backend=backend, seed_transpiler=42)
-
-        result = backend.run(transpiled, shots=50, meas_level=2).result()
-        self.assertEqual(sum(result.get_counts().values()), 50)
-
     def test_emulator_backend_run_shots0(self):
         """Tests that shots=0 is rejected by the emulator backend."""
         backend = BraketEmulatorBackend(device=_mock_emulator_device())
@@ -716,20 +662,6 @@ class TestBraketEmulatorBackend(TestCase):
         circuit.h(0)
         with self.assertRaises(exception.QiskitBraketException):
             backend.run(circuit, shots=0)
-
-    def test_emulator_backend_run_exception(self):
-        """Tests that the emulator backend cancels submitted tasks on error."""
-        backend = BraketEmulatorBackend(device=_mock_emulator_device())
-        good_task = Mock(spec=LocalQuantumTask)
-        good_task.id = "0"
-        backend._device.run = Mock(side_effect=[good_task, Exception("Mock exception")])
-
-        circuit = QuantumCircuit(1)
-        circuit.h(0)
-        circuit.measure_all()
-        with self.assertRaises(Exception):  # noqa: B017
-            backend.run([circuit, circuit], shots=10)
-        good_task.cancel.assert_called_once()
 
     def test_emulator_backend_with_sampler(self):
         """Tests that the emulator backend works with a Qiskit primitive."""

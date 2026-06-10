@@ -260,16 +260,19 @@ class TestBraketProvider(TestCase):
         device.gate_calibrations = None
         device.type = "QPU"
         device.topology_graph = mock_emulator_topology()
-        device.emulator = LocalEmulator.from_device_properties(capabilities)
+        device.emulator.return_value = LocalEmulator.from_device_properties(capabilities)
         return device
 
     @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")
     def test_provider_backends_emulator(self, mock_get_devices: MagicMock):
-        """Tests that ``emulator=True`` returns emulator backends."""
-        mock_get_devices.return_value = [self._mock_emulator_device()]
+        """Tests that ``emulator=True`` returns emulator backends for QPUs only."""
+        simulator = Mock()
+        simulator.name = "SV1"
+        simulator.type = "SIMULATOR"
+        mock_get_devices.return_value = [self._mock_emulator_device(), simulator]
         provider = BraketProvider()
         backends = provider.backends(emulator=True)
-        self.assertTrue(len(backends) > 0)
+        self.assertEqual(len(backends), 1)
         for backend in backends:
             with self.subTest(f"{backend.name}"):
                 self.assertIsInstance(backend, BraketEmulatorBackend)
