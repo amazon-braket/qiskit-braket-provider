@@ -1489,6 +1489,16 @@ class TestFromBraket(TestCase):
         expected_qiskit_circuit.measure_all()
         self.assertEqual(qiskit_circuit, expected_qiskit_circuit)
 
+    def test_parametric_pow_gate_with_symbolic_power(self):
+        """Tests Braket to Qiskit conversion rejects symbolic powers."""
+        braket_circuit = Circuit().rx(0, FreeParameter("alpha") ** FreeParameter("beta"))
+
+        with pytest.raises(
+            TypeError,
+            match=r"unrecognized parameter type in conversion: <class 'sympy.core.symbol.Symbol'>",
+        ):
+            to_qiskit(braket_circuit)
+
     def test_parametric_function_gate(self):
         """Tests Braket to Qiskit conversion with functions of parameters."""
         alpha = FreeParameter("alpha")
