@@ -1518,6 +1518,26 @@ class TestFromBraket(TestCase):
                 expected_qiskit_circuit.measure_all()
                 self.assertEqual(qiskit_circuit, expected_qiskit_circuit)
 
+    def test_parametric_function_gate_with_composite_expression(self):
+        """Tests Braket to Qiskit conversion with functions in composite expressions."""
+        alpha = FreeParameter("alpha")
+        beta = FreeParameter("beta")
+        expression = FreeParameterExpression(
+            sympy.sqrt(sympy.sin(alpha.expression) + beta.expression**2)
+        )
+        braket_circuit = Circuit().rx(0, expression)
+        qiskit_circuit = to_qiskit(braket_circuit)
+
+        param_uuids = {param.name: param.uuid for param in qiskit_circuit.parameters}
+
+        expected_qiskit_circuit = QuantumCircuit(1)
+        qiskit_alpha = Parameter("alpha", uuid=param_uuids["alpha"])
+        qiskit_beta = Parameter("beta", uuid=param_uuids["beta"])
+        expected_qiskit_circuit.rx((qiskit_alpha.sin() + qiskit_beta**2) ** 0.5, 0)
+
+        expected_qiskit_circuit.measure_all()
+        self.assertEqual(qiskit_circuit, expected_qiskit_circuit)
+
     def test_unsupported_parameter_division(self):
         """Tests if TypeError is raised for parameter division."""
         braket_circuit = Circuit().rx(0, 1j * FreeParameter("alpha"))

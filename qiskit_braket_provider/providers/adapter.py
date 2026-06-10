@@ -322,6 +322,12 @@ _ParameterRestrictions: TypeAlias = dict[str, dict[_ParamKey, _QubitSet]]
 _T = TypeVar("_T")
 
 
+def _qiskit_numeric_power(exp: Expr) -> int | float:
+    if not getattr(exp, "is_number", False) or not getattr(exp, "is_real", False):
+        raise TypeError(f"unrecognized parameter type in conversion: {type(exp)}")
+    return int(exp) if getattr(exp, "is_integer", False) else float(exp)
+
+
 class _SubstitutedTarget(Target):
     def __new__(cls, *args, **kwargs) -> Self:
         out = super().__new__(cls, *args, **kwargs)
@@ -2088,7 +2094,7 @@ def _sympy_to_qiskit(
         case Mul(args=args):
             return prod(_sympy_to_qiskit(arg, param_map) for arg in args)
         case Pow(base=base, exp=exp):
-            return _sympy_to_qiskit(base, param_map) ** int(exp)
+            return _sympy_to_qiskit(base, param_map) ** _qiskit_numeric_power(exp)
         case obj if getattr(obj, "is_number", False) and getattr(obj, "is_real", False):
             return float(obj)
         case obj if obj.func in _SYMPY_FUNCTION_TO_QISKIT_METHOD and len(obj.args) == 1:
