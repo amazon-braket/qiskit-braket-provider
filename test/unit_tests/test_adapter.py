@@ -1492,18 +1492,19 @@ class TestFromBraket(TestCase):
     def test_parametric_function_gate(self):
         """Tests Braket to Qiskit conversion with functions of parameters."""
         alpha = FreeParameter("alpha")
-        function_names = {
-            "sin": "sin",
-            "cos": "cos",
-            "tan": "tan",
-            "asin": "arcsin",
-            "acos": "arccos",
-            "atan": "arctan",
-            "exp": "exp",
-            "log": "log",
+        function_conversions = {
+            "sin": lambda qiskit_alpha: qiskit_alpha.sin(),
+            "cos": lambda qiskit_alpha: qiskit_alpha.cos(),
+            "tan": lambda qiskit_alpha: qiskit_alpha.tan(),
+            "asin": lambda qiskit_alpha: qiskit_alpha.arcsin(),
+            "acos": lambda qiskit_alpha: qiskit_alpha.arccos(),
+            "atan": lambda qiskit_alpha: qiskit_alpha.arctan(),
+            "exp": lambda qiskit_alpha: qiskit_alpha.exp(),
+            "log": lambda qiskit_alpha: qiskit_alpha.log(),
+            "sqrt": lambda qiskit_alpha: qiskit_alpha**0.5,
         }
 
-        for braket_name, qiskit_name in function_names.items():
+        for braket_name, qiskit_conversion in function_conversions.items():
             with self.subTest(braket_name=braket_name):
                 expression = FreeParameterExpression(getattr(sympy, braket_name)(alpha.expression))
                 braket_circuit = Circuit().rx(0, expression)
@@ -1513,7 +1514,7 @@ class TestFromBraket(TestCase):
 
                 expected_qiskit_circuit = QuantumCircuit(1)
                 qiskit_alpha = Parameter("alpha", uuid=uuid)
-                expected_qiskit_circuit.rx(getattr(qiskit_alpha, qiskit_name)(), 0)
+                expected_qiskit_circuit.rx(qiskit_conversion(qiskit_alpha), 0)
 
                 expected_qiskit_circuit.measure_all()
                 self.assertEqual(qiskit_circuit, expected_qiskit_circuit)
