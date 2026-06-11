@@ -103,6 +103,16 @@ class TestBraketLocalBackend(TestCase):
         first_backend = BraketLocalBackend(name="braket_dm")
         self.assertEqual(first_backend.name, "braket_dm")
 
+    def test_local_backend_target_and_gateset_override(self):
+        """Tests local backend target and gateset overrides."""
+        target = Target(num_qubits=2)
+        gateset = {"h", "cx"}
+
+        backend = BraketLocalBackend(name="default", target=target, gateset=gateset)
+
+        self.assertIs(backend.target, target)
+        self.assertEqual(backend._gateset, gateset)
+
     def test_local_backend_circuit(self):
         """Tests local backend with circuit."""
         backend = BraketLocalBackend(name="default")
@@ -291,6 +301,21 @@ class TestBraketAwsBackend(TestCase):
 
         with self.assertRaises(ValueError):
             BraketAwsBackend(arn="some_arn", device="some_device")
+
+    def test_emulator_returns_local_backend_with_aws_target(self):
+        """Tests creating a local emulator backend from an AWS backend."""
+        device = Mock()
+        device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
+        device.gate_calibrations = None
+        device.type = "QPU"
+        device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+
+        backend = BraketAwsBackend(device=device)
+        emulator = backend.emulator()
+
+        self.assertIsInstance(emulator, BraketLocalBackend)
+        self.assertIs(emulator.target, backend.target)
+        self.assertEqual(emulator._gateset, backend._gateset)
 
     def test_deprecation_warning_on_init(self):
         """Test that a deprecation warning is raised when initializing AWSBraketBackend"""

@@ -107,7 +107,14 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
 class BraketLocalBackend(BraketBackend[LocalSimulator]):
     """Runs quantum circuits on the Braket local simulator."""
 
-    def __init__(self, name: str = "default", **fields) -> None:
+    def __init__(
+        self,
+        name: str = "default",
+        *,
+        target: Target | None = None,
+        gateset: set[str] | None = None,
+        **fields,
+    ) -> None:
         """Initialize the backend.
 
         Example:
@@ -123,8 +130,8 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
         """
         simulator = LocalSimulator(backend=name)
         super().__init__(simulator, name or simulator.name, **fields)
-        self._target = local_simulator_to_target(self._device)
-        self._gateset = self.get_gateset()
+        self._target = target if target is not None else local_simulator_to_target(self._device)
+        self._gateset = gateset if gateset is not None else self.get_gateset()
         self.status = self._device.status
 
     @property
@@ -297,6 +304,10 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
     @classmethod
     def _default_options(cls) -> Options:
         return Options()
+
+    def emulator(self) -> BraketLocalBackend:
+        """Return a local simulator backend using this backend's target."""
+        return BraketLocalBackend(target=self.target, gateset=self._gateset)
 
     def qubit_properties(self, qubit: int | list[int]) -> QubitProperties | list[QubitProperties]:
         # TODO: fetch information from device.properties.provider
