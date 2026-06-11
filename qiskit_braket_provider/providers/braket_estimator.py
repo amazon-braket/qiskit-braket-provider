@@ -6,11 +6,20 @@ from functools import reduce
 from typing import TypeAlias
 
 import numpy as np
-from qiskit.primitives import BaseEstimatorV2, DataBin, EstimatorPubLike, PrimitiveResult, PubResult
+from qiskit.primitives import (
+    BaseEstimatorV2,
+    BasePrimitiveJob,
+    DataBin,
+    EstimatorPubLike,
+    PrimitiveResult,
+    PubResult,
+)
 from qiskit.primitives.containers.bindings_array import BindingsArray
 from qiskit.primitives.containers.estimator_pub import EstimatorPub
+from qiskit.providers import JobStatus
 from qiskit.quantum_info import Pauli, PauliList, SparsePauliOp
 
+from braket.circuits import Circuit
 from braket.circuits.observables import Sum, Z
 from braket.program_sets import CircuitBinding, ParameterSets, ProgramSet
 from braket.tasks import ProgramSetQuantumTaskResult
@@ -31,11 +40,31 @@ _ResultMap: TypeAlias = dict[int, list[_ResultMapEntry]]
 
 
 @dataclass
+class _RoutingTarget:
+    pauli: Pauli
+    coeff: complex
+    positions_and_params: list
+
+
+@dataclass
+class _IdentityRouting:
+    coeff: complex
+    positions_and_params: list
+
+
+@dataclass
+class _QWCBindingMetadata:
+    param_idx_map: dict
+    routing_targets: list[_RoutingTarget]
+
+
+@dataclass
 class _PubMetadata:
     num_bindings: int
     binding_to_result_map: _ResultMap
     sum_binding_indices: set[int]
-    qwc_metadata: dict
+    qwc_metadata: dict[int, _QWCBindingMetadata]
+    identity_routing: list[_IdentityRouting]
 
 
 @dataclass
@@ -44,6 +73,39 @@ class _JobMetadata:
     pub_metadata: list[_PubMetadata]
     precision: float
     shots: int
+
+
+class _ConstantResultTask(BasePrimitiveJob[PrimitiveResult[PubResult], JobStatus]):
+    """
+    Job returned when every observable is constant (identity only), so there is
+    nothing to measure and no Braket task is submitted. The result is computed
+    analytically up front, unlike the lazy ``BraketPrimitiveTask``.
+    """
+
+    def __init__(self, result: PrimitiveResult[PubResult]) -> None:
+        super().__init__(job_id="constant")
+        self._result = result
+
+    def result(self) -> PrimitiveResult[PubResult]:
+        return self._result
+
+    def status(self) -> JobStatus:
+        return JobStatus.DONE
+
+    def cancel(self) -> None:
+        pass
+
+    def done(self) -> bool:
+        return True
+
+    def running(self) -> bool:
+        return False
+
+    def cancelled(self) -> bool:
+        return False
+
+    def in_final_state(self) -> bool:
+        return True
 
 
 class BraketEstimator(BaseEstimatorV2):
@@ -91,7 +153,7 @@ class BraketEstimator(BaseEstimatorV2):
         *,
         precision: float = _DEFAULT_PRECISION,
         abelian_grouping: bool = True,
-    ) -> BraketPrimitiveTask:
+    ) -> BasePrimitiveJob:
         """
         Run estimator on the given pubs.
 
@@ -113,29 +175,24 @@ class BraketEstimator(BaseEstimatorV2):
         pub_metadata = []  # Track which bindings belong to which pub
 
         for pub in coerced_pubs:
-            bindings, binding_to_result_map, sum_binding_indices, qwc_metadata = (
-                self._translate_pub(pub, abelian_grouping=abelian_grouping)
-            )
+            bindings, pub_meta = self._translate_pub(pub, abelian_grouping=abelian_grouping)
             all_bindings.extend(bindings)
-            pub_metadata.append(
-                _PubMetadata(
-                    num_bindings=len(bindings),
-                    binding_to_result_map=binding_to_result_map,
-                    sum_binding_indices=sum_binding_indices,
-                    qwc_metadata=qwc_metadata,
-                )
-            )
+            pub_metadata.append(pub_meta)
 
         shots = int(np.ceil(1.0 / (pub_precision if pub_precision is not None else precision) ** 2))
+        job_metadata = _JobMetadata(
+            pubs=coerced_pubs, pub_metadata=pub_metadata, precision=precision, shots=shots
+        )
+
+        # Every observable is constant: nothing to measure, so skip the device entirely
+        # and reconstruct the (purely identity) expectation values analytically.
+        if not all_bindings:
+            return _ConstantResultTask(BraketEstimator._translate_result(None, job_metadata))
+
         program_set = ProgramSet(all_bindings, shots_per_executable=shots)
         return BraketPrimitiveTask(
             self._backend._device.run(program_set, **self._options),
-            lambda result: BraketEstimator._translate_result(
-                result,
-                _JobMetadata(
-                    pubs=coerced_pubs, pub_metadata=pub_metadata, precision=precision, shots=shots
-                ),
-            ),
+            lambda result: BraketEstimator._translate_result(result, job_metadata),
             program_set,
         )
 
@@ -147,10 +204,10 @@ class BraketEstimator(BaseEstimatorV2):
         return next(iter(precision_values))
 
     def _translate_pub(
-        self, pub: EstimatorPub, abelian_grouping: bool = True
-    ) -> tuple[list[CircuitBinding], _ResultMap, set[int], dict]:
+        self, pub: EstimatorPub, abelian_grouping: bool
+    ) -> tuple[list[CircuitBinding], _PubMetadata]:
         """
-        Convert an EstimatorPub to a list of CircuitBindings.
+        Convert an EstimatorPub to a list of CircuitBindings and its reconstruction metadata.
 
         Since a CircuitBinding only takes one-dimensional parameter and observable arrays,
         multiple CircuitBindings are necessary to capture all the data in an EstimatorPub,
@@ -163,10 +220,8 @@ class BraketEstimator(BaseEstimatorV2):
             abelian_grouping (bool): Toggle qubit-wise commutation grouping optimizations.
 
         Returns:
-            tuple[list[CircuitBinding], _ResultMap, set[int], dict]:
-            The circuit bindings, pub shape, a map of binding index to array positions,
-            the indices of bindings with Pauli sum observables, and metadata for
-            reconstructing grouped (qubit-wise commuting) measurements.
+            tuple[list[CircuitBinding], _PubMetadata]: The circuit bindings and the metadata
+            needed to reconstruct expectation values for this pub.
         """
         backend = self._backend
         circuit = to_braket(
@@ -198,15 +253,16 @@ class BraketEstimator(BaseEstimatorV2):
 
         bindings: list[CircuitBinding] = []
         binding_to_result_map: _ResultMap = {}
-        sum_binding_indices = set()
-        qwc_metadata: dict = {}
+        sum_binding_indices: set[int] = set()
+        qwc_metadata: dict[int, _QWCBindingMetadata] = {}
+        identity_routing: list[_IdentityRouting] = []
         processed_obs_keys = set()
 
-        for obs_key, pairs in obs_groups.items():
+        for obs_key in obs_groups:
             if obs_key in processed_obs_keys:
                 continue
 
-            param_indices = frozenset(pi for _, pi in pairs)
+            param_indices = frozenset(pi for _, pi in obs_groups[obs_key])
 
             # Find other observables with the same parameter sets to complete the Cartesian product
             matching_obs_keys = [
@@ -230,142 +286,182 @@ class BraketEstimator(BaseEstimatorV2):
             )
 
             if abelian_grouping:
-                all_paulis = []
-                for ok in matching_obs_keys:
-                    op_from_dict = SparsePauliOp.from_list(list(obs_keys[ok].items()))
-                    all_paulis.extend(op_from_dict.paulis)
-
-                # Sort for a stable order so grouping and result-mapping are reproducible
-                unique_paulis = sorted(set(all_paulis), key=lambda p: p.to_label())
-
-                identity_paulis = []
-                active_paulis = []
-                for p in unique_paulis:
-                    targets = [i for i, char in enumerate(reversed(p.to_label())) if char != "I"]
-                    if not targets:
-                        identity_paulis.append(p)
-                    else:
-                        active_paulis.append(p)
-
-                if active_paulis:
-                    active_pauli_list = PauliList(active_paulis)
-                    for obs_group in active_pauli_list.group_commuting(qubit_wise=True):
-                        binding_idx = len(bindings)
-
-                        cov_z = np.logical_or.reduce(obs_group.z)
-                        cov_x = np.logical_or.reduce(obs_group.x)
-                        covering_pauli = Pauli((cov_z, cov_x))
-
-                        # One covering observable, in a list as CircuitBinding expects
-                        braket_covering_obs = translate_sparse_pauli_op(
-                            SparsePauliOp(covering_pauli)
-                        )
-                        bindings.append(
-                            CircuitBinding(
-                                circuit,
-                                input_sets=parameter_sets,
-                                observables=[braket_covering_obs],
-                            )
-                        )
-
-                        routing_targets = []
-                        for ok in matching_obs_keys:
-                            op_from_dict = SparsePauliOp.from_list(list(obs_keys[ok].items()))
-                            for p, coeff in zip(
-                                op_from_dict.paulis, op_from_dict.coeffs, strict=True
-                            ):
-                                if p in obs_group:
-                                    routing_targets.append({
-                                        "pauli": p,
-                                        "coeff": coeff,
-                                        "positions_and_params": obs_groups[ok],
-                                    })
-
-                        qwc_metadata[binding_idx] = {
-                            "param_idx_map": param_idx_map,
-                            "routing_targets": routing_targets,
-                        }
-
-                    if identity_paulis:
-                        target_binding = len(bindings) - 1
-                        id_routing = []
-                        for ok in matching_obs_keys:
-                            op_from_dict = SparsePauliOp.from_list(list(obs_keys[ok].items()))
-                            for p, coeff in zip(
-                                op_from_dict.paulis, op_from_dict.coeffs, strict=True
-                            ):
-                                if p in identity_paulis:
-                                    id_routing.append({
-                                        "coeff": coeff,
-                                        "positions_and_params": obs_groups[ok],
-                                    })
-                        qwc_metadata[target_binding]["identity_routing"] = id_routing
-
-                elif identity_paulis:
-                    # Pure-constant observable: no real measurement needed, but a binding must carry
-                    # at least one observable, so attach a throwaway one.
-                    binding_idx = len(bindings)
-                    n = pub.circuit.num_qubits
-                    dummy_obs = translate_sparse_pauli_op(SparsePauliOp("I" * (n - 1) + "Z"))
-                    bindings.append(
-                        CircuitBinding(circuit, input_sets=parameter_sets, observables=[dummy_obs])
-                    )
-
-                    id_routing = []
-                    for ok in matching_obs_keys:
-                        op_from_dict = SparsePauliOp.from_list(list(obs_keys[ok].items()))
-                        for p, coeff in zip(op_from_dict.paulis, op_from_dict.coeffs, strict=True):
-                            if p in identity_paulis:
-                                id_routing.append({
-                                    "coeff": coeff,
-                                    "positions_and_params": obs_groups[ok],
-                                })
-
-                    qwc_metadata[binding_idx] = {
-                        "param_idx_map": param_idx_map,
-                        "routing_targets": [],
-                        "identity_routing": id_routing,
-                    }
-
+                grouped_bindings, group_identity = self._grouped_bindings(
+                    circuit=circuit,
+                    parameter_sets=parameter_sets,
+                    matching_obs_keys=matching_obs_keys,
+                    obs_keys=obs_keys,
+                    obs_groups=obs_groups,
+                    param_idx_map=param_idx_map,
+                )
+                identity_routing.extend(group_identity)
+                for binding, meta in grouped_bindings:
+                    qwc_metadata[len(bindings)] = meta
+                    bindings.append(binding)
             else:
-                braket_observables = [
-                    translate_sparse_pauli_op(SparsePauliOp.from_list(obs_keys[ok].items()))
-                    for ok in matching_obs_keys
-                ]
-                binding_idx = len(bindings)
-                monomials = []
-                for ok, observable in zip(matching_obs_keys, braket_observables, strict=True):
-                    if isinstance(observable, Sum):
-                        bindings.append(
-                            CircuitBinding(
-                                circuit, input_sets=parameter_sets, observables=observable
-                            )
-                        )
-                        # Map each position in the broadcast to its location in the binding result
-                        binding_to_result_map[binding_idx] = [
-                            (position, None, param_idx_map[pi]) for position, pi in obs_groups[ok]
-                        ]
+                for binding, result_entries, is_sum in self._per_term_bindings(
+                    circuit=circuit,
+                    parameter_sets=parameter_sets,
+                    matching_obs_keys=matching_obs_keys,
+                    obs_keys=obs_keys,
+                    obs_groups=obs_groups,
+                    param_idx_map=param_idx_map,
+                ):
+                    binding_idx = len(bindings)
+                    bindings.append(binding)
+                    binding_to_result_map[binding_idx] = result_entries
+                    if is_sum:
                         sum_binding_indices.add(binding_idx)
-                        binding_idx += 1
-                    else:
-                        monomials.append((ok, observable))
 
-                if monomials:
-                    bindings.append(
-                        CircuitBinding(
-                            circuit,
-                            input_sets=parameter_sets,
-                            observables=[obs for _, obs in monomials],
+        pub_metadata = _PubMetadata(
+            num_bindings=len(bindings),
+            binding_to_result_map=binding_to_result_map,
+            sum_binding_indices=sum_binding_indices,
+            qwc_metadata=qwc_metadata,
+            identity_routing=identity_routing,
+        )
+
+        return bindings, pub_metadata
+
+    def _grouped_bindings(
+        self,
+        *,
+        circuit: Circuit,
+        parameter_sets: ParameterSets | None,
+        matching_obs_keys: list[str],
+        obs_keys: dict,
+        obs_groups: dict,
+        param_idx_map: dict,
+    ) -> tuple[list[tuple[CircuitBinding, _QWCBindingMetadata]], list[_IdentityRouting]]:
+        """
+        Build covering-Pauli bindings for one set of observables sharing parameter sets.
+
+        Qubit-wise commuting terms are measured together through a single covering Pauli.
+        Constant (identity) terms are never measured: their expectation value is exactly 1,
+        so they are returned as ``_IdentityRouting`` entries for the result builder to
+        apply directly.
+
+        Returns:
+            tuple[list[tuple[CircuitBinding, _QWCBindingMetadata]], list[_IdentityRouting]]:
+            The covering bindings paired with their reconstruction metadata, and the
+            identity contributions for this group.
+        """
+        ops_by_key = {
+            ok: SparsePauliOp.from_list(list(obs_keys[ok].items())) for ok in matching_obs_keys
+        }
+        all_paulis = [p for ok in matching_obs_keys for p in ops_by_key[ok].paulis]
+
+        # Sort for a stable order so grouping and result-mapping are reproducible
+        unique_paulis = sorted(set(all_paulis), key=lambda p: p.to_label())
+
+        identity_paulis = []
+        active_paulis = []
+        for p in unique_paulis:
+            if any(char != "I" for char in p.to_label()):
+                active_paulis.append(p)
+            else:
+                identity_paulis.append(p)
+
+        identity_routing: list[_IdentityRouting] = []
+        if identity_paulis:
+            for ok in matching_obs_keys:
+                op_from_dict = ops_by_key[ok]
+                for p, coeff in zip(op_from_dict.paulis, op_from_dict.coeffs, strict=True):
+                    if p in identity_paulis:
+                        identity_routing.append(
+                            _IdentityRouting(coeff=coeff, positions_and_params=obs_groups[ok])
                         )
-                    )
-                    # Map each position in the broadcast to its location in the binding result
-                    obs_idx_map = {ok: idx for idx, (ok, _) in enumerate(monomials)}
-                    binding_to_result_map[len(bindings) - 1] = [
-                        (position, obs_idx_map[ok], param_idx_map[pi])
-                        for ok, _ in monomials
-                        for position, pi in obs_groups[ok]
-                    ]
-        return bindings, binding_to_result_map, sum_binding_indices, qwc_metadata
+
+        bindings_with_meta: list[tuple[CircuitBinding, _QWCBindingMetadata]] = []
+        if active_paulis:
+            active_pauli_list = PauliList(active_paulis)
+            for obs_group in active_pauli_list.group_commuting(qubit_wise=True):
+                cov_z = np.logical_or.reduce(obs_group.z)
+                cov_x = np.logical_or.reduce(obs_group.x)
+                covering_pauli = Pauli((cov_z, cov_x))
+
+                # One covering observable, in a list as CircuitBinding expects
+                braket_covering_obs = translate_sparse_pauli_op(SparsePauliOp(covering_pauli))
+                binding = CircuitBinding(
+                    circuit, input_sets=parameter_sets, observables=[braket_covering_obs]
+                )
+
+                routing_targets = []
+                for ok in matching_obs_keys:
+                    op_from_dict = ops_by_key[ok]
+                    for p, coeff in zip(op_from_dict.paulis, op_from_dict.coeffs, strict=True):
+                        if p in obs_group:
+                            routing_targets.append(
+                                _RoutingTarget(
+                                    pauli=p, coeff=coeff, positions_and_params=obs_groups[ok]
+                                )
+                            )
+
+                bindings_with_meta.append((
+                    binding,
+                    _QWCBindingMetadata(
+                        param_idx_map=param_idx_map, routing_targets=routing_targets
+                    ),
+                ))
+
+        return bindings_with_meta, identity_routing
+
+    def _per_term_bindings(
+        self,
+        *,
+        circuit: Circuit,
+        parameter_sets: ParameterSets | None,
+        matching_obs_keys: list[str],
+        obs_keys: dict,
+        obs_groups: dict,
+        param_idx_map: dict,
+    ) -> list[tuple[CircuitBinding, list[_ResultMapEntry], bool]]:
+        """
+        Build one binding per term for a set of observables (grouping disabled).
+
+        This is the original per-term path. Each ``Sum`` observable gets its own binding,
+        and the remaining single-term observables share one binding.
+
+        Returns:
+            list[tuple[CircuitBinding, list[_ResultMapEntry], bool]]: ``(binding,
+            result_map_entries, is_sum)`` tuples. ``is_sum`` is True when the binding's
+            observable is a Braket ``Sum``, so the result builder reads a single summed
+            expectation rather than per-monomial values.
+        """
+        braket_observables = [
+            translate_sparse_pauli_op(SparsePauliOp.from_list(obs_keys[ok].items()))
+            for ok in matching_obs_keys
+        ]
+
+        results: list[tuple[CircuitBinding, list[_ResultMapEntry], bool]] = []
+        monomials = []
+        for ok, observable in zip(matching_obs_keys, braket_observables, strict=True):
+            if isinstance(observable, Sum):
+                binding = CircuitBinding(circuit, input_sets=parameter_sets, observables=observable)
+                # Map each position in the broadcast to its location in the binding result
+                result_entries: list[_ResultMapEntry] = [
+                    (position, None, param_idx_map[pi]) for position, pi in obs_groups[ok]
+                ]
+                results.append((binding, result_entries, True))
+            else:
+                monomials.append((ok, observable))
+
+        if monomials:
+            binding = CircuitBinding(
+                circuit,
+                input_sets=parameter_sets,
+                observables=[obs for _, obs in monomials],
+            )
+            # Map each position in the broadcast to its location in the binding result
+            obs_idx_map = {ok: idx for idx, (ok, _) in enumerate(monomials)}
+            result_entries = [
+                (position, obs_idx_map[ok], param_idx_map[pi])
+                for ok, _ in monomials
+                for position, pi in obs_groups[ok]
+            ]
+            results.append((binding, result_entries, False))
+
+        return results
 
     @staticmethod
     def _make_obs_key(obs_val: SparsePauliOp | dict[str, float]) -> str:
@@ -400,15 +496,16 @@ class BraketEstimator(BaseEstimatorV2):
 
     @staticmethod
     def _translate_result(
-        task_result: ProgramSetQuantumTaskResult, metadata: _JobMetadata
+        task_result: ProgramSetQuantumTaskResult | None, metadata: _JobMetadata
     ) -> PrimitiveResult[PubResult]:
         """
         Reconstruct PrimitiveResult from Braket task results.
 
         Args:
-            task_result (ProgramSetQuantumTaskResult): The result of a Braket program set task
+            task_result (ProgramSetQuantumTaskResult | None): The result of a Braket program
+                set task, or None when every observable is constant and no task was run.
             metadata (_JobMetadata): Metadata needed to reconstruct results, including:
-                - circuits: List of QuantumCircuits
+                - pubs: List of EstimatorPubs
                 - pub_metadata: List of metadata for each pub
                 - precision: Target precision
                 - shots: Number of shots used
@@ -428,44 +525,39 @@ class BraketEstimator(BaseEstimatorV2):
             qwc_metadata = pub_meta.qwc_metadata
 
             evs = np.zeros(broadcast_shape, dtype=float)
+
+            # identity terms have expectation 1, so each adds its coefficient directly (no measurement)
+            for term in pub_meta.identity_routing:
+                for position, _ in term.positions_and_params:
+                    evs[np.unravel_index(position, broadcast_shape)] += term.coeff.real
+
             for local_binding_idx in range(num_bindings):
                 program_result = task_result[binding_offset + local_binding_idx]
 
                 if local_binding_idx in qwc_metadata:
                     meta = qwc_metadata[local_binding_idx]
-                    param_idx_map = meta["param_idx_map"]
+                    param_idx_map = meta.param_idx_map
                     measured_qubits = list(range(pub.circuit.num_qubits))
 
-                    for target in meta["routing_targets"]:
-                        pauli = target["pauli"]
-                        coeff = target["coeff"]
+                    for target in meta.routing_targets:
+                        pauli = target.pauli
+                        coeff = target.coeff
 
-                        for position, param_indices in target["positions_and_params"]:
+                        pauli_str = pauli.to_label()
+                        targets = [i for i, char in enumerate(reversed(pauli_str)) if char != "I"]
+                        braket_z_obs = reduce(operator.matmul, [Z() for _ in range(len(targets))])
+
+                        for position, param_indices in target.positions_and_params:
                             param_set_idx = param_idx_map[param_indices] if param_indices else 0
                             measured_entry = program_result[param_set_idx]
                             measurements = measured_entry.measurements
 
-                            pauli_str = pauli.to_label()
-                            targets = [
-                                i for i, char in enumerate(reversed(pauli_str)) if char != "I"
-                            ]
-
-                            braket_z_obs = reduce(
-                                operator.matmul, [Z() for _ in range(len(targets))]
-                            )
                             term_expectation = expectation_from_measurements(
                                 measurements, measured_qubits, braket_z_obs, targets
                             )
 
                             flat_idx = np.unravel_index(position, broadcast_shape)
                             evs[flat_idx] += coeff.real * term_expectation
-
-                    if "identity_routing" in meta:
-                        for id_target in meta["identity_routing"]:
-                            coeff = id_target["coeff"]
-                            for position, _ in id_target["positions_and_params"]:
-                                flat_idx = np.unravel_index(position, broadcast_shape)
-                                evs[flat_idx] += coeff.real * 1.0
                 else:
                     num_observables = len(program_result.observables)
                     for position, obs_idx, param_idx in binding_map[local_binding_idx]:
