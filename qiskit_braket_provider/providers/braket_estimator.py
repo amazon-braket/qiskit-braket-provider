@@ -77,9 +77,9 @@ class _JobMetadata:
 
 class _ConstantResultTask(BasePrimitiveJob[PrimitiveResult[PubResult], JobStatus]):
     """
-    Job returned when every observable is constant (identity only), so there is
-    nothing to measure and no Braket task is submitted. The result is computed
-    analytically up front, unlike the lazy ``BraketPrimitiveTask``.
+    Job returned when every observable in a pub is constant (identity only).
+    No Braket task is submitted; the estimator computes the result
+    analytically and this job just returns it.
     """
 
     def __init__(self, result: PrimitiveResult[PubResult]) -> None:
@@ -166,7 +166,9 @@ class BraketEstimator(BaseEstimatorV2):
                 each group is measured with a single execution. Default: True.
 
         Returns:
-            BraketPrimitiveTask: A job object containing the estimator results.
+            BasePrimitiveJob: A job containing the estimator results. Normally a
+                BraketPrimitiveTask, or a _ConstantResultTask when every observable is
+                constant and no task is submitted.
         """
         coerced_pubs = [EstimatorPub.coerce(pub) for pub in pubs]
         pub_precision = BraketEstimator._pub_precision(coerced_pubs)
