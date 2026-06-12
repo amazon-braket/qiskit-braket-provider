@@ -111,8 +111,10 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
         self,
         name: str = "default",
         *,
+        device: LocalSimulator | None = None,
         target: Target | None = None,
         gateset: set[str] | None = None,
+        qubit_labels: tuple[int, ...] | None = None,
         **fields,
     ) -> None:
         """Initialize the backend.
@@ -128,15 +130,20 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
             name (str): Name of backend. Default: ``default``.
             **fields: Extra arguments.
         """
-        simulator = LocalSimulator(backend=name)
+        simulator = device or LocalSimulator(backend=name)
         super().__init__(simulator, name or simulator.name, **fields)
         self._target = target if target is not None else local_simulator_to_target(self._device)
         self._gateset = gateset if gateset is not None else self.get_gateset()
+        self._qubit_labels = qubit_labels
         self.status = self._device.status
 
     @property
     def target(self) -> Target:
         return self._target
+
+    @property
+    def qubit_labels(self) -> tuple[int, ...] | None:
+        return self._qubit_labels
 
     @property
     def max_circuits(self) -> None:
@@ -181,7 +188,12 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
         convert_input = [run_input] if isinstance(run_input, QuantumCircuit) else list(run_input)
         verbatim = options.pop("verbatim", False)
         circuits: list[Circuit] = [
-            to_braket(circ, target=self._target if not verbatim else None, verbatim=verbatim)
+            to_braket(
+                circ,
+                qubit_labels=self.qubit_labels,
+                target=self._target if not verbatim else None,
+                verbatim=verbatim,
+            )
             for circ in convert_input
         ]
 
@@ -307,7 +319,12 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
 
     def emulator(self) -> BraketLocalBackend:
         """Return a local simulator backend using this backend's target."""
-        return BraketLocalBackend(target=self.target, gateset=self._gateset)
+        return BraketLocalBackend(
+            device=self._device.emulator(),
+            target=self.target,
+            gateset=self._gateset,
+            qubit_labels=self.qubit_labels,
+        )
 
     def qubit_properties(self, qubit: int | list[int]) -> QubitProperties | list[QubitProperties]:
         # TODO: fetch information from device.properties.provider

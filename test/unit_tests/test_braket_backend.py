@@ -31,7 +31,7 @@ from qiskit_braket_provider import (
     __version__,
     exception,
 )
-from qiskit_braket_provider.providers.adapter import native_gate_connectivity
+from qiskit_braket_provider.providers.adapter import native_gate_connectivity, to_braket
 from test.unit_tests.mocks import (
     MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES,
     MOCK_RIGETTI_M_3_QPU_CAPABILITIES,
@@ -103,15 +103,22 @@ class TestBraketLocalBackend(TestCase):
         first_backend = BraketLocalBackend(name="braket_dm")
         self.assertEqual(first_backend.name, "braket_dm")
 
-    def test_local_backend_target_and_gateset_override(self):
-        """Tests local backend target and gateset overrides."""
+    def test_local_backend_metadata_overrides(self):
+        """Tests local backend metadata overrides."""
         target = Target(num_qubits=2)
         gateset = {"h", "cx"}
+        qubit_labels = (3, 5)
 
-        backend = BraketLocalBackend(name="default", target=target, gateset=gateset)
+        backend = BraketLocalBackend(
+            name="default",
+            target=target,
+            gateset=gateset,
+            qubit_labels=qubit_labels,
+        )
 
         self.assertIs(backend.target, target)
         self.assertEqual(backend._gateset, gateset)
+        self.assertEqual(backend.qubit_labels, qubit_labels)
 
     def test_local_backend_circuit(self):
         """Tests local backend with circuit."""
@@ -302,20 +309,57 @@ class TestBraketAwsBackend(TestCase):
         with self.assertRaises(ValueError):
             BraketAwsBackend(arn="some_arn", device="some_device")
 
-    def test_emulator_returns_local_backend_with_aws_target(self):
+    def test_emulator_returns_local_backend_with_aws_metadata(self):
         """Tests creating a local emulator backend from an AWS backend."""
         device = Mock()
         device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
         device.gate_calibrations = None
         device.type = "QPU"
         device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+        local_device = device.emulator.return_value
+        local_device.properties.action = {}
 
         backend = BraketAwsBackend(device=device)
         emulator = backend.emulator()
 
+        device.emulator.assert_called_once()
         self.assertIsInstance(emulator, BraketLocalBackend)
+        self.assertIs(emulator._device, local_device)
         self.assertIs(emulator.target, backend.target)
         self.assertEqual(emulator._gateset, backend._gateset)
+        self.assertEqual(emulator.qubit_labels, backend.qubit_labels)
+
+    def test_emulator_run_uses_aws_target_qubit_labels(self):
+        """Tests running a circuit through an AWS backend emulator."""
+        device = Mock()
+        device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
+        device.gate_calibrations = None
+        device.type = "QPU"
+        device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+        local_device = device.emulator.return_value
+        local_device.properties.action = {}
+        local_task = Mock(spec=LocalQuantumTask)
+        local_task.id = "local-task"
+        local_device.run.return_value = local_task
+
+        backend = BraketAwsBackend(device=device)
+        emulator = backend.emulator()
+
+        circuit = QuantumCircuit(3)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        circuit.cx(0, 2)
+
+        task = emulator.run(circuit, shots=10)
+
+        device.emulator.assert_called_once()
+        local_device.run.assert_called_once()
+        submitted_circuit = local_device.run.call_args.kwargs["task_specification"]
+        self.assertEqual(
+            submitted_circuit,
+            to_braket(circuit, qubit_labels=backend.qubit_labels, target=backend.target),
+        )
+        self.assertEqual(task.task_id(), "local-task")
 
     def test_deprecation_warning_on_init(self):
         """Test that a deprecation warning is raised when initializing AWSBraketBackend"""
