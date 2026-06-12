@@ -472,7 +472,7 @@ def mock_emulator_device() -> Mock:
 
 def emulator_backend_from_device() -> BraketLocalBackend:
     """Return an emulator backend backed by a real ``LocalEmulator``."""
-    return BraketAwsBackend(device=mock_emulator_device()).emulator
+    return BraketAwsBackend(device=mock_emulator_device()).emulator()
 
 
 class MockBraketBackend(BraketBackend):

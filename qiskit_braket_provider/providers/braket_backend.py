@@ -335,9 +335,8 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
     def qubit_labels(self) -> tuple[int, ...] | None:
         return self._qubit_labels
 
-    @property
     def emulator(self) -> BraketLocalBackend:
-        """BraketLocalBackend: A local emulator backend for this device.
+        """Return a local emulator backend for this device.
 
         The emulator mimics the restrictions and noise of the underlying QPU by
         validating and compiling circuits before running them on a local
@@ -351,7 +350,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         Example:
             >>> provider = BraketProvider()
             >>> backend = provider.get_backend("Aria 1")
-            >>> emulator_backend = backend.emulator
+            >>> emulator_backend = backend.emulator()
             >>> result = emulator_backend.run(circuit, shots=100).result()
         """
         if self._device.type == AwsDeviceType.SIMULATOR:

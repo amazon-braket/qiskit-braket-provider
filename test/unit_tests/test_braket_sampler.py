@@ -1,7 +1,6 @@
 """Tests for BraketSampler."""
 
 from unittest import TestCase
-from unittest.mock import Mock, patch
 
 import numpy as np
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
@@ -11,7 +10,6 @@ from qiskit.primitives.containers import BitArray
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 
 from braket.circuits import Circuit
-from braket.emulation.emulator import Emulator
 from braket.program_sets import CircuitBinding
 from qiskit_braket_provider.providers import BraketLocalBackend
 from qiskit_braket_provider.providers.braket_sampler import BraketSampler
@@ -39,25 +37,6 @@ class TestBraketSampler(TestCase):
             self.assertTrue(
                 np.isclose(v / shots, counts_backend[k] / shots_backend, rtol=0.3, atol=0.2)
             )
-
-    def test_emulator_device_passes_shots(self):
-        """Tests that Emulator devices receive shots when running a program set."""
-        backend = BraketLocalBackend()
-        backend._device = Mock(spec=Emulator)
-        sampler = BraketSampler(backend)
-        circuit = QuantumCircuit(1)
-        circuit.h(0)
-        circuit.measure_all()
-
-        with patch.object(backend._device, "run") as mock_run:
-            mock_task = Mock()
-            mock_task.id = "test-task-id"
-            mock_run.return_value = mock_task
-
-            sampler.run([circuit], shots=100)
-
-            mock_run.assert_called_once()
-            self.assertEqual(mock_run.call_args.kwargs["shots"], 100)
 
     def test_program_sets_unsupported(self):
         """Tests that initialization raises a ValueError if program sets aren't supported"""

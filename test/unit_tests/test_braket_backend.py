@@ -10,7 +10,6 @@ from botocore import errorfactory
 from networkx import DiGraph, complete_graph
 from qiskit import QuantumCircuit, generate_preset_pass_manager, transpile
 from qiskit.circuit import Instruction as QiskitInstruction
-from qiskit.circuit import Parameter
 from qiskit.circuit.library import n_local
 from qiskit.circuit.random import random_circuit
 from qiskit.primitives import BackendEstimatorV2
@@ -30,7 +29,6 @@ from qiskit_braket_provider import (
     BraketAwsBackend,
     BraketLocalBackend,
     BraketProvider,
-    BraketSampler,
     __version__,
     exception,
 )
@@ -624,7 +622,7 @@ class TestBraketAwsBackend(TestCase):
         device.emulator.return_value = mock_emulator
         backend = BraketAwsBackend(device=device)
 
-        emulator_backend = backend.emulator
+        emulator_backend = backend.emulator()
 
         self.assertIsInstance(emulator_backend, BraketLocalBackend)
         self.assertTrue(emulator_backend.is_emulator)
@@ -633,7 +631,7 @@ class TestBraketAwsBackend(TestCase):
         self.assertEqual(emulator_backend._supports_program_sets, backend._supports_program_sets)
 
     def test_emulator_property_raises_for_simulator(self):
-        """Tests that emulator property raises for managed simulator devices."""
+        """Tests that emulator method raises for managed simulator devices."""
         device = Mock()
         device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
         device.gate_calibrations = None
@@ -642,7 +640,7 @@ class TestBraketAwsBackend(TestCase):
         backend = BraketAwsBackend(device=device)
 
         with self.assertRaises(exception.QiskitBraketException):
-            _ = backend.emulator
+            _ = backend.emulator()
 
 
 class TestBraketLocalBackendEmulator(TestCase):
@@ -709,7 +707,7 @@ class TestBraketLocalBackendEmulator(TestCase):
         """Tests that qubit labels and program set support are inherited from the QPU."""
         device = mock_emulator_device()
         backend = BraketAwsBackend(device=device)
-        emulator_backend = backend.emulator
+        emulator_backend = backend.emulator()
 
         self.assertEqual(emulator_backend.qubit_labels, (0, 1))
         self.assertTrue(emulator_backend._supports_program_sets)
@@ -726,39 +724,4 @@ class TestBraketLocalBackendEmulator(TestCase):
 
         result = backend.run(transpiled, shots=100).result()
 
-        self.assertEqual(sum(result.get_counts().values()), 100)
-
-    def test_emulator_backend_with_sampler(self):
-        """Tests that BraketSampler works with an emulator backend."""
-        backend = emulator_backend_from_device()
-        sampler = BraketSampler(backend=backend)
-
-        circuit = QuantumCircuit(2)
-        circuit.h(0)
-        circuit.cx(0, 1)
-        circuit.measure_all()
-        transpiled = transpile(circuit, backend=backend, seed_transpiler=42)
-
-        job = sampler.run([transpiled], shots=100)
-        counts = job.result()[0].data.meas.get_counts()
-
-        self.assertEqual(sum(counts.values()), 100)
-        self.assertTrue(job.done())
-        job.cancel()
-
-    def test_emulator_backend_with_parameterized_sampler(self):
-        """Tests that BraketSampler runs parameterized circuits on an emulator backend."""
-        backend = emulator_backend_from_device()
-        sampler = BraketSampler(backend=backend)
-
-        theta = Parameter("θ")
-        circuit = QuantumCircuit(1)
-        circuit.ry(theta, 0)
-        circuit.measure_all()
-        transpiled = transpile(circuit, backend=backend, seed_transpiler=42)
-
-        job = sampler.run([(transpiled, [0.0, np.pi / 2])], shots=50)
-        result = job.result()[0].data.meas
-
-        self.assertEqual(result.num_shots, 50)
         self.assertEqual(sum(result.get_counts().values()), 100)

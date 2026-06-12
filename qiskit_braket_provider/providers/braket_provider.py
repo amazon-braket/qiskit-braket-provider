@@ -37,19 +37,23 @@ class BraketProvider:
 
         Args:
             name (str): name of the selected backend
+            emulator (bool): if ``True``, return a local emulator backend for the matched
+                QPU device instead of the AWS-hosted device. Default: ``False``.
             **kwargs: dict with additional options for filtering and storing aws session
         Returns:
-            BraketAwsBackend: a backend matching the filters.
+            BraketAwsBackend | BraketLocalBackend: a backend matching the filters.
         Raises:
             QiskitBackendNotFoundError: if no backend could be found or
             more than one backend matches the filters.
         """
+        emulator = kwargs.pop("emulator", False)
         backends = self.backends(name=name, **kwargs)
         if len(backends) > 1:
             raise QiskitBackendNotFoundError("More than one backend matches the criteria")
         if not backends:
             raise QiskitBackendNotFoundError("No backend matches the criteria")
-        return backends[0]
+        backend = backends[0]
+        return backend.emulator() if emulator else backend
 
     def backends(
         self,
@@ -61,18 +65,14 @@ class BraketProvider:
         Args:
             name (str): name of the selected backend
             **kwargs: dict with additional options for filtering and storing aws session.
-                Pass ``emulator=True`` to return local emulator backends instead of the
-                AWS-hosted devices.  Emulators are only available for QPU devices; passing
-                ``emulator=True`` alongside a simulator name raises an error.
         Returns:
-            BraketAwsBackend | BraketLocalBackend: a list of backends matching the filters.
+            list[BraketAwsBackend | BraketLocalBackend]: a list of backends matching the filters.
         """
         if kwargs.get("local"):
             return [
                 BraketLocalBackend(name="braket_sv"),
                 BraketLocalBackend(name="braket_dm"),
             ]
-        emulator = kwargs.pop("emulator", False)
         names = [name] if name else None
         devices = AwsDevice.get_devices(names=names, **kwargs)
         # filter by supported devices
@@ -89,7 +89,7 @@ class BraketProvider:
                 ),
             )
         ]
-        aws_backends = [
+        return [
             BraketAwsBackend(
                 device=device,
                 provider=self,
@@ -100,9 +100,6 @@ class BraketProvider:
             )
             for device in supported_devices
         ]
-        if emulator:
-            return [backend.emulator for backend in aws_backends]
-        return aws_backends
 
 
 class AWSBraketProvider(BraketProvider):

@@ -10,7 +10,6 @@ from qiskit.primitives.containers.estimator_pub import EstimatorPub
 from qiskit.quantum_info import SparsePauliOp
 
 from braket.circuits.observables import Sum
-from braket.emulation.emulator import Emulator
 from braket.program_sets import CircuitBinding, ParameterSets, ProgramSet
 from braket.tasks import ProgramSetQuantumTaskResult
 from qiskit_braket_provider.providers.adapter import (
@@ -116,11 +115,8 @@ class BraketEstimator(BaseEstimatorV2):
 
         shots = int(np.ceil(1.0 / (pub_precision if pub_precision is not None else precision) ** 2))
         program_set = ProgramSet(all_bindings, shots_per_executable=shots)
-        run_kwargs = dict(self._options)
-        if isinstance(self._backend._device, Emulator):
-            run_kwargs["shots"] = shots
         return BraketPrimitiveTask(
-            self._backend._device.run(program_set, **run_kwargs),
+            self._backend._device.run(program_set, **self._options),
             lambda result: BraketEstimator._translate_result(
                 result,
                 _JobMetadata(

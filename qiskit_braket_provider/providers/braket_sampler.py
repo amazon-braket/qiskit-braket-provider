@@ -15,13 +15,8 @@ from qiskit.primitives.containers.bindings_array import BindingsArray
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 
 from braket.circuits import Circuit
-from braket.emulation.emulator import Emulator
-from braket.ir.openqasm import Program
 from braket.program_sets import CircuitBinding, ParameterSets, ProgramSet
-from braket.task_result import AdditionalMetadata
-from braket.tasks import GateModelQuantumTaskResult, ProgramSetQuantumTaskResult
-from braket.tasks.local_quantum_task import LocalQuantumTask
-from braket.tasks.program_set_quantum_task_result import CompositeEntry, MeasuredEntry
+from braket.tasks import ProgramSetQuantumTaskResult
 from qiskit_braket_provider.providers.adapter import rename_parameter, to_braket
 from qiskit_braket_provider.providers.braket_backend import BraketBackend
 from qiskit_braket_provider.providers.braket_primitive_task import BraketPrimitiveTask
@@ -106,15 +101,8 @@ class BraketSampler(BaseSamplerV2):
             parameter_indices.append(indices)
         shots_per_executable = pub_shots if pub_shots is not None else shots
         program_set = ProgramSet(circuit_bindings, shots_per_executable=shots_per_executable)
-        run_kwargs = dict(self._options)
-        if getattr(self._backend, "is_emulator", False):
-            task = self._run_on_emulator(program_set, shots_per_executable, run_kwargs)
-        else:
-            if isinstance(self._backend._device, Emulator):
-                run_kwargs["shots"] = shots_per_executable
-            task = self._backend._device.run(program_set, **run_kwargs)
         return BraketPrimitiveTask(
-            task,
+            self._backend._device.run(program_set, **self._options),
             lambda result: BraketSampler._translate_result(
                 result,
                 _JobMetadata(
@@ -124,77 +112,6 @@ class BraketSampler(BaseSamplerV2):
                 ),
             ),
             program_set,
-        )
-
-    def _run_on_emulator(
-        self,
-        program_set: ProgramSet,
-        shots_per_executable: int,
-        run_kwargs: dict,
-    ) -> LocalQuantumTask:
-        entries = []
-        task_metadata = None
-        for entry in program_set.entries:
-            if isinstance(entry, Circuit):
-                task = self._backend._device.run(entry, shots=shots_per_executable, **run_kwargs)
-                gate_result = task.result()
-                task_metadata = task_metadata or gate_result.task_metadata
-                measured_entries = [BraketSampler._gate_model_to_measured_entry(gate_result)]
-                program = Program(source="OPENQASM 3.0;")
-                inputs = ParameterSets({})
-            else:
-                input_sets = entry.input_sets.as_list() if entry.input_sets else [None]
-                measured_entries = []
-                for inputs_dict in input_sets:
-                    circuit = (
-                        entry.circuit.make_bound_circuit(inputs_dict)
-                        if inputs_dict is not None
-                        else entry.circuit
-                    )
-                    task = self._backend._device.run(
-                        circuit, shots=shots_per_executable, **run_kwargs
-                    )
-                    gate_result = task.result()
-                    task_metadata = task_metadata or gate_result.task_metadata
-                    measured_entries.append(
-                        BraketSampler._gate_model_to_measured_entry(gate_result, inputs=inputs_dict)
-                    )
-                program = entry.to_ir()
-                inputs = entry.input_sets or ParameterSets({})
-            entries.append(
-                CompositeEntry(
-                    entries=measured_entries,
-                    program=program,
-                    inputs=inputs,
-                    observables=None,
-                    shots_per_executable=shots_per_executable,
-                    additional_metadata=AdditionalMetadata(),
-                )
-            )
-        result = ProgramSetQuantumTaskResult(
-            entries=entries,
-            task_metadata=task_metadata,
-            num_executables=program_set.total_executables,
-            program_set=program_set,
-        )
-        return LocalQuantumTask(result)
-
-    @staticmethod
-    def _gate_model_to_measured_entry(
-        gate_result: GateModelQuantumTaskResult,
-        *,
-        inputs: dict[str, float] | None = None,
-    ) -> MeasuredEntry:
-        return MeasuredEntry(
-            measurements=gate_result.measurements,
-            counts=gate_result.measurement_counts,
-            probabilities=gate_result.measurement_probabilities,
-            measured_qubits=gate_result.measured_qubits,
-            measurements_from_device=gate_result.measurements_copied_from_device,
-            probabilities_from_device=gate_result.measurement_probabilities_copied_from_device,
-            program="",
-            inputs=inputs,
-            observable=None,
         )
 
     @staticmethod
