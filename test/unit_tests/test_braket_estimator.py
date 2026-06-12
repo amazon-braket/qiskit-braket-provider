@@ -11,6 +11,7 @@ from qiskit.primitives import BackendEstimatorV2, BasePrimitiveJob
 from qiskit.primitives.containers.bindings_array import BindingsArray
 from qiskit.primitives.containers.estimator_pub import EstimatorPub, EstimatorPubLike
 from qiskit.primitives.containers.observables_array import ObservablesArray
+from qiskit.providers import JobStatus
 from qiskit.quantum_info import SparsePauliOp
 
 from braket.program_sets import ProgramSet
@@ -485,6 +486,27 @@ class TestBraketEstimator(TestCase):
         pub = (circuit, obs)
         task = self.estimator.run([pub])
         self.assert_correct_results(task, [pub])
+
+    def test_constant_result_task_reports_completed_job(self):
+        """A fully-constant pub returns an already-finished job that needs no device polling."""
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        pub = (circuit, SparsePauliOp(["II"], [2.0]))
+
+        task = self.estimator.run([pub])
+
+        # No device task is submitted, so the job is already complete.
+        self.assertEqual(task.status(), JobStatus.DONE)
+        self.assertTrue(task.done())
+        self.assertTrue(task.in_final_state())
+        self.assertFalse(task.running())
+        self.assertFalse(task.cancelled())
+
+        # cancel() is a no-op on an already-complete job.
+        task.cancel()
+        self.assertTrue(task.done())
+        self.assertFalse(task.cancelled())
 
     def test_abelian_grouping_y_basis_group(self):
         """A Y-basis commuting group is measured in one covering executable."""
