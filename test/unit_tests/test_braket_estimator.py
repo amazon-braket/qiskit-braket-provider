@@ -42,6 +42,36 @@ class TestBraketEstimator(TestCase):
         with self.assertRaises(ValueError):
             BraketEstimator(backend)
 
+    def test_run_emulator_backend_with_mocked_device(self):
+        """Tests estimator execution through an emulator-shaped local backend."""
+        mock_task = Mock()
+        mock_task.id = "test-task-id"
+        mock_device = Mock()
+        mock_device.status = "AVAILABLE"
+        mock_device.properties = None
+        mock_device.run.return_value = mock_task
+        backend = BraketLocalBackend(
+            name="emulator",
+            device=mock_device,
+            target=BraketLocalBackend().target,
+            is_emulator=True,
+            qubit_labels=(4,),
+            supports_program_sets=True,
+        )
+        estimator = BraketEstimator(backend)
+        circuit = QuantumCircuit(1)
+        circuit.h(0)
+        observable = SparsePauliOp(["Z"])
+
+        job = estimator.run([(circuit, observable)], precision=0.01)
+
+        mock_device.run.assert_called_once()
+        program_set = mock_device.run.call_args.args[0]
+        self.assertIsInstance(program_set, ProgramSet)
+        self.assertIs(job.program_set, program_set)
+        self.assertEqual(program_set[0].circuit.qubits, {4})
+        self.assertEqual(program_set.total_shots, 10000)
+
     def test_simple_pub(self):
         """Test a simple pub with no broadcasting."""
         qc = QuantumCircuit(2)

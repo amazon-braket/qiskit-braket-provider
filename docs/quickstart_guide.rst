@@ -49,6 +49,26 @@ list all available backends for your account (including simulators and QPUs) wit
 A list of available quantum devices and their features can be found in the `Amazon Braket Developer
 Guide <https://docs.aws.amazon.com/braket/latest/developerguide/braket-devices.html>`_.
 
+Running a circuit on a device emulator
+======================================
+
+Amazon Braket device emulators are local backends derived from supported QPU devices. They are
+created with the Braket SDK ``AwsDevice.emulator()`` method and reuse the QPU target for Qiskit
+transpilation.
+
+.. code-block:: python
+
+    provider = BraketProvider()
+    backend = provider.get_backend("Aria 1", emulator=True)
+
+    print(backend.is_emulator)  # True
+    job = backend.run(circuit, shots=100)
+    result = job.result()
+    print(result.get_counts())
+
+AWS managed simulators, such as ``SV1``, ``TN1``, and ``DM1``, are not device emulators. Request an
+emulator for a supported QPU device instead.
+
 Running circuits on the local simulator
 =======================================
 

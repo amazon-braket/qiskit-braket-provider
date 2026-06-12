@@ -1,6 +1,7 @@
 """Tests for BraketSampler."""
 
 from unittest import TestCase
+from unittest.mock import Mock
 
 import numpy as np
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
@@ -10,7 +11,7 @@ from qiskit.primitives.containers import BitArray
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 
 from braket.circuits import Circuit
-from braket.program_sets import CircuitBinding
+from braket.program_sets import CircuitBinding, ProgramSet
 from qiskit_braket_provider.providers import BraketLocalBackend
 from qiskit_braket_provider.providers.braket_sampler import BraketSampler
 
@@ -55,6 +56,36 @@ class TestBraketSampler(TestCase):
             self.sampler.run([(qc, [0, 1, 2, 3], 100), (qc, [0, 1, 2, 3], 200)])
 
         self.assertIn("same shots", str(context.exception))
+
+    def test_run_emulator_backend_with_mocked_device(self):
+        """Tests sampler execution through an emulator-shaped local backend."""
+        mock_task = Mock()
+        mock_task.id = "test-task-id"
+        mock_device = Mock()
+        mock_device.status = "AVAILABLE"
+        mock_device.properties = None
+        mock_device.run.return_value = mock_task
+        backend = BraketLocalBackend(
+            name="emulator",
+            device=mock_device,
+            target=BraketLocalBackend().target,
+            is_emulator=True,
+            qubit_labels=(4,),
+            supports_program_sets=True,
+        )
+        sampler = BraketSampler(backend)
+        circuit = QuantumCircuit(1, 1)
+        circuit.h(0)
+        circuit.measure(0, 0)
+
+        job = sampler.run([(circuit,)], shots=5)
+
+        mock_device.run.assert_called_once()
+        program_set = mock_device.run.call_args.args[0]
+        self.assertIsInstance(program_set, ProgramSet)
+        self.assertIs(job.program_set, program_set)
+        self.assertEqual(program_set[0].qubits, {4})
+        self.assertEqual(program_set.total_shots, 5)
 
     def test_run_local_multiple_registers(self):
         """Tests that correct results are returned for circuits with multiple registers"""

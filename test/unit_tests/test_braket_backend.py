@@ -2,6 +2,7 @@
 
 import copy
 import unittest
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import MagicMock, Mock, patch
 
@@ -10,7 +11,7 @@ from botocore import errorfactory
 from networkx import DiGraph, complete_graph
 from qiskit import QuantumCircuit, generate_preset_pass_manager, transpile
 from qiskit.circuit import Instruction as QiskitInstruction
-from qiskit.circuit.library import n_local
+from qiskit.circuit.library import XGate, n_local
 from qiskit.circuit.random import random_circuit
 from qiskit.primitives import BackendEstimatorV2
 from qiskit.quantum_info import SparsePauliOp, Statevector
@@ -81,6 +82,7 @@ class TestBraketLocalBackend(TestCase):
         """Tests local backend."""
         backend = BraketLocalBackend(name="default")
         self.assertTrue(backend)
+        self.assertFalse(backend.is_emulator)
         self.assertIsInstance(backend.target, Target)
         self.assertIsNone(backend.max_circuits)
         with self.assertRaises(NotImplementedError):
@@ -102,6 +104,28 @@ class TestBraketLocalBackend(TestCase):
         """Test local backend output"""
         first_backend = BraketLocalBackend(name="braket_dm")
         self.assertEqual(first_backend.name, "braket_dm")
+
+    def test_local_backend_requires_target_for_injected_device(self):
+        """Tests injected non-simulator devices require a supplied target."""
+        with self.assertRaisesRegex(ValueError, "Must specify a target"):
+            BraketLocalBackend(device=SimpleNamespace(status="AVAILABLE"))
+
+    def test_local_backend_with_injected_device_without_properties(self):
+        """Tests injected devices without properties can use explicit metadata."""
+        target = copy.deepcopy(BraketLocalBackend().target)
+        backend = BraketLocalBackend(
+            name="emulator",
+            device=SimpleNamespace(status="AVAILABLE"),
+            target=target,
+            is_emulator=True,
+            qubit_labels=(3,),
+            supports_program_sets=True,
+        )
+
+        self.assertTrue(backend.is_emulator)
+        self.assertTrue(backend._supports_program_sets)
+        self.assertEqual(backend.qubit_labels, (3,))
+        self.assertEqual(backend._gateset, set(target.operation_names))
 
     def test_local_backend_circuit(self):
         """Tests local backend with circuit."""
@@ -283,6 +307,48 @@ class TestBraketAwsBackend(TestCase):
             backend.measure_channel(0)
         with self.assertRaises(NotImplementedError):
             backend.control_channel([0, 1])
+
+    def test_device_backend_emulator(self):
+        """Tests creating a local emulator backend from an AWS backend."""
+        device = Mock()
+        device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES.copy(deep=True)
+        device.properties.action["braket.ir.openqasm.program_set"] = {
+            "actionType": "braket.ir.openqasm.program_set",
+            "version": ["1"],
+            "maximumExecutables": 500,
+            "maximumTotalShots": 1000000,
+        }
+        device.gate_calibrations = None
+        device.type = "QPU"
+        device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+        task = Mock(spec=LocalQuantumTask)
+        task.id = "0"
+        emulator_device = SimpleNamespace(status="AVAILABLE", run=Mock(return_value=task))
+        device.emulator.return_value = emulator_device
+
+        backend = BraketAwsBackend(device=device, description="AWS Device: Rigetti Aspen-M-3.")
+        emulator = backend.emulator()
+        circuit = QuantumCircuit(1)
+        circuit.h(0)
+        emulator.run(circuit, shots=1)
+
+        self.assertIsInstance(emulator, BraketLocalBackend)
+        self.assertIs(emulator._device, emulator_device)
+        self.assertTrue(emulator.is_emulator)
+        self.assertEqual(emulator.name, backend.name)
+        self.assertEqual(emulator.target.instructions, backend.target.instructions)
+        self.assertIsNot(emulator.target, backend.target)
+        self.assertEqual(emulator._supports_program_sets, backend._supports_program_sets)
+        self.assertEqual(emulator.qubit_labels, backend.qubit_labels)
+        self.assertEqual(
+            emulator_device.run.call_args.kwargs["task_specification"].qubits,
+            {backend.qubit_labels[0]},
+        )
+        device.emulator.assert_called_once_with()
+
+        emulator.target.add_instruction(XGate(), {(0,): None})
+        self.assertIn("x", emulator.target.operation_names)
+        self.assertNotIn("x", backend.target.operation_names)
 
     def test_invalid_identifiers(self):
         """Test the invalid identifiers of BraketAwsBackend."""

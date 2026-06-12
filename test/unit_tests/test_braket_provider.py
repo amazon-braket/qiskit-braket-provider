@@ -1,6 +1,7 @@
 """Tests for Amazon Braket provider."""
 
 import uuid
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import MagicMock, Mock, patch
 
@@ -24,10 +25,12 @@ from qiskit_braket_provider import (
 )
 from qiskit_braket_provider.providers.braket_backend import BraketBackend
 from test.unit_tests.mocks import (
+    MOCK_GATE_MODEL_SIMULATOR_CAPABILITIES,
     MOCK_GATE_MODEL_SIMULATOR_SV,
     MOCK_GATE_MODEL_SIMULATOR_TN,
     MOCK_RIGETTI_GATE_MODEL_M_3_QPU,
     MOCK_RIGETTI_M_3_QPU_CAPABILITIES,
+    MOCK_RIGETTI_TOPOLOGY_GRAPH,
     SIMULATOR_REGION,
 )
 
@@ -92,6 +95,82 @@ class TestBraketProvider(TestCase):
         provider = BraketProvider()
 
         self.assertIsInstance(provider.backends(name=None, local="sv1")[0], BraketLocalBackend)
+
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")
+    def test_provider_get_backend_emulator(self, mock_get_devices: MagicMock):
+        """Tests getting a local emulator backend for an AWS backend."""
+        emulator_device = SimpleNamespace(status="AVAILABLE")
+        mock_device = Mock()
+        mock_device.name = "Aspen-M-3"
+        mock_device.provider_name = "Rigetti"
+        mock_device.properties = MOCK_RIGETTI_M_3_QPU_CAPABILITIES.copy(deep=True)
+        mock_device.properties.service = Mock()
+        mock_device.properties.service.updatedAt = "2023-06-02T17:00:00+00:00"
+        mock_device.gate_calibrations = None
+        mock_device.type = AwsDeviceType.QPU
+        mock_device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+        mock_device.emulator.return_value = emulator_device
+        mock_get_devices.return_value = [mock_device]
+
+        backend = BraketProvider().get_backend(
+            "Aspen-M-3", emulator=True, aws_session=self.mock_session
+        )
+
+        self.assertIsInstance(backend, BraketLocalBackend)
+        self.assertIs(backend._device, emulator_device)
+        self.assertTrue(backend.is_emulator)
+        self.assertEqual(backend.name, "Aspen-M-3")
+        mock_device.emulator.assert_called_once_with()
+        mock_get_devices.assert_called_once_with(names=["Aspen-M-3"], aws_session=self.mock_session)
+
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")
+    def test_provider_get_backend_emulator_rejects_managed_simulator(
+        self, mock_get_devices: MagicMock
+    ):
+        """Tests named managed simulators give a clear emulator error."""
+        mock_device = Mock()
+        mock_device.name = "SV1"
+        mock_device.properties = MOCK_GATE_MODEL_SIMULATOR_CAPABILITIES.copy(deep=True)
+        mock_device.type = AwsDeviceType.SIMULATOR
+        mock_get_devices.return_value = [mock_device]
+
+        with self.assertRaisesRegex(
+            QiskitBackendNotFoundError, "does not support device emulation"
+        ):
+            BraketProvider().get_backend("SV1", emulator=True, aws_session=self.mock_session)
+
+        mock_device.emulator.assert_not_called()
+        mock_get_devices.assert_called_once_with(names=["SV1"], aws_session=self.mock_session)
+
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")
+    def test_provider_backends_emulator_filters_managed_simulators(
+        self, mock_get_devices: MagicMock
+    ):
+        """Tests emulator discovery excludes AWS managed simulators."""
+        emulator_device = SimpleNamespace(status="AVAILABLE")
+        qpu_device = Mock()
+        qpu_device.name = "Aspen-M-3"
+        qpu_device.provider_name = "Rigetti"
+        qpu_device.properties = MOCK_RIGETTI_M_3_QPU_CAPABILITIES.copy(deep=True)
+        qpu_device.properties.service = Mock()
+        qpu_device.properties.service.updatedAt = "2023-06-02T17:00:00+00:00"
+        qpu_device.gate_calibrations = None
+        qpu_device.type = AwsDeviceType.QPU
+        qpu_device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+        qpu_device.emulator.return_value = emulator_device
+        simulator_device = Mock()
+        simulator_device.name = "SV1"
+        simulator_device.properties = MOCK_GATE_MODEL_SIMULATOR_CAPABILITIES.copy(deep=True)
+        simulator_device.type = AwsDeviceType.SIMULATOR
+        mock_get_devices.return_value = [qpu_device, simulator_device]
+
+        backends = BraketProvider().backends(emulator=True, aws_session=self.mock_session)
+
+        self.assertEqual(len(backends), 1)
+        self.assertIsInstance(backends[0], BraketLocalBackend)
+        self.assertIs(backends[0]._device, emulator_device)
+        qpu_device.emulator.assert_called_once_with()
+        simulator_device.emulator.assert_not_called()
 
     def test_real_devices(self):
         """Tests real devices."""
