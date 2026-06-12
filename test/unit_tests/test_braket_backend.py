@@ -28,7 +28,6 @@ from braket.tasks.local_quantum_task import LocalQuantumTask
 from qiskit_braket_provider import (
     AWSBraketBackend,
     BraketAwsBackend,
-    BraketEmulatorBackend,
     BraketLocalBackend,
     BraketProvider,
     __version__,
@@ -606,14 +605,13 @@ class TestBraketAwsBackend(TestCase):
         self.assertNotEqual(deep, backend)
 
     def test_emulator_property(self):
-        """Tests that ``BraketAwsBackend.emulator`` returns an emulator backend."""
+        """Tests that ``BraketAwsBackend.emulator`` returns a local emulator backend."""
         device = _mock_emulator_device()
         backend = BraketAwsBackend(device=device)
         emulator_backend = backend.emulator
-        self.assertIsInstance(emulator_backend, BraketEmulatorBackend)
         self.assertIsInstance(emulator_backend, BraketLocalBackend)
         self.assertTrue(emulator_backend.emulator)
-        self.assertIs(emulator_backend.provider, backend.provider)
+        self.assertIsNone(emulator_backend.provider)
         self.assertIsInstance(emulator_backend._device, Emulator)
 
 
@@ -630,12 +628,16 @@ def _mock_emulator_device() -> Mock:
     return device
 
 
-class TestBraketEmulatorBackend(TestCase):
-    """Tests class for BraketEmulatorBackend."""
+class TestEmulatorBackend(TestCase):
+    """Tests the local emulator backend returned by ``BraketAwsBackend.emulator``."""
+
+    @staticmethod
+    def _emulator_backend() -> BraketLocalBackend:
+        return BraketAwsBackend(device=_mock_emulator_device()).emulator
 
     def test_emulator_backend(self):
         """Tests the emulator backend attributes."""
-        backend = BraketEmulatorBackend(device=_mock_emulator_device())
+        backend = self._emulator_backend()
         self.assertTrue(backend)
         self.assertIsInstance(backend.target, Target)
         self.assertIsNone(backend.max_circuits)
@@ -645,7 +647,7 @@ class TestBraketEmulatorBackend(TestCase):
 
     def test_emulator_backend_run(self):
         """Tests running a circuit on the emulator backend."""
-        backend = BraketEmulatorBackend(device=_mock_emulator_device())
+        backend = self._emulator_backend()
         circuit = QuantumCircuit(2)
         circuit.h(0)
         circuit.cx(0, 1)
@@ -657,7 +659,7 @@ class TestBraketEmulatorBackend(TestCase):
 
     def test_emulator_backend_run_shots0(self):
         """Tests that shots=0 is rejected by the emulator backend."""
-        backend = BraketEmulatorBackend(device=_mock_emulator_device())
+        backend = self._emulator_backend()
         circuit = QuantumCircuit(1)
         circuit.h(0)
         with self.assertRaises(exception.QiskitBraketException):
@@ -665,7 +667,7 @@ class TestBraketEmulatorBackend(TestCase):
 
     def test_emulator_backend_with_sampler(self):
         """Tests that the emulator backend works with a Qiskit primitive."""
-        backend = BraketEmulatorBackend(device=_mock_emulator_device())
+        backend = self._emulator_backend()
         sampler = BackendSamplerV2(backend=backend)
         circuit = QuantumCircuit(2)
         circuit.h(0)

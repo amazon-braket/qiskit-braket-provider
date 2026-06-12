@@ -15,7 +15,6 @@ Provider classes and functions
     :toctree: ../stubs/
 
     BraketAwsBackend
-    BraketEmulatorBackend
     BraketEstimator
     BraketLocalBackend
     BraketProvider
@@ -29,7 +28,6 @@ from .adapter import to_braket as to_braket
 from .adapter import to_qiskit as to_qiskit
 from .braket_backend import AWSBraketBackend as AWSBraketBackend
 from .braket_backend import BraketAwsBackend as BraketAwsBackend
-from .braket_backend import BraketEmulatorBackend as BraketEmulatorBackend
 from .braket_backend import BraketLocalBackend as BraketLocalBackend
 from .braket_estimator import BraketEstimator as BraketEstimator
 from .braket_job import AmazonBraketTask as AmazonBraketTask
