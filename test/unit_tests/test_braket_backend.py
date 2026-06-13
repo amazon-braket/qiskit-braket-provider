@@ -33,6 +33,7 @@ from qiskit_braket_provider import (
     exception,
 )
 from qiskit_braket_provider.providers.adapter import native_gate_connectivity
+from qiskit_braket_provider.providers.braket_backend import BraketBackend
 from test.unit_tests.mocks import (
     MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES,
     MOCK_RIGETTI_M_3_QPU_CAPABILITIES,
@@ -73,6 +74,11 @@ class TestBraketBackend(TestCase):
         """Test the repr method of BraketBackend."""
         backend = BraketLocalBackend(name="default")
         self.assertEqual(repr(backend), "BraketBackend[default]")
+
+    def test_base_qubit_labels(self):
+        """Test the default base qubit labels fallback."""
+        backend = BraketLocalBackend(name="default")
+        self.assertIsNone(BraketBackend.qubit_labels.fget(backend))
 
 
 class TestBraketLocalBackend(TestCase):
@@ -125,6 +131,21 @@ class TestBraketLocalBackend(TestCase):
         self.assertTrue(backend.is_emulator)
         self.assertTrue(backend._supports_program_sets)
         self.assertEqual(backend.qubit_labels, (3,))
+        self.assertEqual(backend._gateset, set(target.operation_names))
+
+    def test_local_backend_without_device_actions(self):
+        """Tests fallback when device properties expose no action map."""
+        target = copy.deepcopy(BraketLocalBackend().target)
+        backend = BraketLocalBackend(
+            name="emulator",
+            device=SimpleNamespace(
+                status="AVAILABLE",
+                properties=SimpleNamespace(action={}),
+            ),
+            target=target,
+        )
+
+        self.assertIsNone(backend.get_gateset())
         self.assertEqual(backend._gateset, set(target.operation_names))
 
     def test_local_backend_circuit(self):
