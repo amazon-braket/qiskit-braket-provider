@@ -2,7 +2,7 @@
 
 from collections.abc import Iterable
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
 from qiskit import QuantumCircuit
@@ -15,7 +15,11 @@ from qiskit.quantum_info import SparsePauliOp
 
 from braket.program_sets import ProgramSet
 from qiskit_braket_provider.providers import BraketLocalBackend
-from qiskit_braket_provider.providers.braket_estimator import BraketEstimator
+from qiskit_braket_provider.providers.braket_estimator import (
+    BraketEstimator,
+    _JobMetadata,
+    _PubMetadata,
+)
 from qiskit_braket_provider.providers.braket_primitive_task import BraketPrimitiveTask
 
 
@@ -413,3 +417,92 @@ class TestBraketEstimator(TestCase):
         for entry in task.program_set:
             self.assertEqual(len(entry), num_steps * 2)
         self.assert_correct_results(task, [pub])
+
+    def test_abelian_grouping_reduces_executables(self):
+        """Grouping co-measures qubit-wise-commuting observables, cutting Braket executables."""
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        # Z-basis {ZZ, IZ, ZI}, X-basis {XX, XI}, Y-basis {YY}: 6 observables, 3 commuting groups.
+        observables = [SparsePauliOp(p) for p in ["ZZ", "IZ", "ZI", "XX", "XI", "YY"]]
+        pub = (circuit, observables)
+
+        ungrouped = BraketEstimator(self.backend, abelian_grouping=False).run([pub], precision=0.05)
+        grouped = BraketEstimator(self.backend, abelian_grouping=True).run([pub], precision=0.05)
+
+        self.assertEqual(ungrouped.program_set.total_executables, 6)
+        self.assertEqual(grouped.program_set.total_executables, 3)
+        self.assert_correct_results(grouped, [pub])
+
+    def test_abelian_grouping_matches_reference_no_parameters(self):
+        """Grouped estimates match BackendEstimatorV2 for mixed commuting / sum / identity terms."""
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        observables = [
+            SparsePauliOp(["ZZ", "ZI", "II"], [1.0, 0.5, 0.25]),  # commuting terms plus identity
+            SparsePauliOp(["XX", "YY"], [0.5, 0.5]),  # spans two measurement bases
+            SparsePauliOp("XI"),
+        ]
+        pub = (circuit, observables)
+        task = BraketEstimator(self.backend, abelian_grouping=True).run([pub], precision=0.02)
+        self.assert_correct_results(task, [pub])
+
+    def test_abelian_grouping_matches_reference_parameterized(self):
+        """Grouped estimates match BackendEstimatorV2 with parameters and broadcasting."""
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        circuit.ry(Parameter("θ"), 0)
+        num_steps = 5
+        pub = (
+            circuit,
+            [[SparsePauliOp("ZZ")], [SparsePauliOp("ZI")], [SparsePauliOp("XX")]],
+            np.linspace(0, np.pi, num_steps),
+        )
+        task = BraketEstimator(self.backend, abelian_grouping=True).run([pub], precision=0.03)
+        self.assert_correct_results(task, [pub])
+
+    def test_abelian_grouping_parity_reconstruction_exact(self):
+        """Deterministically pin the grouped parity reconstruction without the simulator.
+
+        Feeds a hand-built bitstring array through ``_translate_result`` and asserts exact
+        expectation values. The single-qubit observables have distinct values so a qubit-to-column
+        swap would change the result and fail the test.
+        """
+        # One Z-basis group binding over 2 qubits; columns chosen so <Z_q0> != <Z_q1>.
+        measurements = np.array([[0, 0], [0, 1], [0, 1], [1, 1]])
+        # col0 = [0,0,0,1] -> <Z on q0> = +0.5 ; col1 = [0,1,1,1] -> <Z on q1> = -0.5
+
+        # task_result[binding][param].measurements -> the hand-built bitstrings
+        composite_entry = Mock(entries=[Mock(measurements=measurements)])
+        task_result = MagicMock()
+        task_result.__getitem__.return_value = composite_entry
+
+        circuit = QuantumCircuit(2)
+        observables = [
+            SparsePauliOp("ZZ"),  # support q0, q1            -> 0.0
+            SparsePauliOp("IZ"),  # Z on q0 (little-endian)   -> +0.5
+            SparsePauliOp("ZI"),  # Z on q1                   -> -0.5
+            SparsePauliOp(["II"], [0.5]),  # identity         -> 0.5 * 1
+        ]
+        pub = EstimatorPub.coerce((circuit, observables))
+
+        pub_meta = _PubMetadata(
+            num_bindings=1,
+            binding_to_result_map={},
+            sum_binding_indices=set(),
+            grouped_binding_map={
+                0: [
+                    (0, 0, 1.0, (0, 1)),
+                    (1, 0, 1.0, (0,)),
+                    (2, 0, 1.0, (1,)),
+                    (3, 0, 0.5, ()),
+                ]
+            },
+            grouped_colmap={0: {0: 0, 1: 1}},
+        )
+        metadata = _JobMetadata(pubs=[pub], pub_metadata=[pub_meta], precision=0.01, shots=4)
+
+        evs = BraketEstimator._translate_result(task_result, metadata)[0].data.evs
+        np.testing.assert_allclose(evs, [0.0, 0.5, -0.5, 0.5])
