@@ -35,7 +35,21 @@ from braket.device_schema.standardized_gate_model_qpu_device_properties_v1 impor
 from braket.devices import LocalSimulator
 from braket.experimental_capabilities import EnableExperimentalCapability
 from braket.ir.openqasm import Program
-from braket.parametric import FreeParameter
+from braket.parametric import (
+    FreeParameter,
+    arccos,
+    arcsin,
+    arctan,
+    ceiling,
+    cos,
+    exp,
+    floor,
+    log,
+    mod,
+    sin,
+    sqrt,
+    tan,
+)
 from braket.pulse import PulseSequence
 from braket.registers import QubitSet
 from qiskit_braket_provider import exception, to_braket, to_qiskit
@@ -931,6 +945,54 @@ class TestAdapter(TestCase):
         )
         assert braket_circuit == expected_braket_circuit
 
+    def test_parameter_expression_division(self):
+        """Tests ParameterExpression translation with division."""
+        qiskit_circuit = QuantumCircuit(1)
+        qiskit_circuit.rx(Parameter("alpha") / Parameter("beta"), 0)
+        braket_circuit = to_braket(qiskit_circuit)
+
+        expected_braket_circuit = Circuit().rx(
+            0, FreeParameter("alpha") / FreeParameter("beta")
+        )
+        assert braket_circuit == expected_braket_circuit
+
+    def test_parameter_expression_trig(self):
+        """Tests ParameterExpression translation with transcendental functions."""
+        qiskit_circuit = QuantumCircuit(1)
+        alpha, beta = Parameter("alpha"), Parameter("beta")
+        qiskit_circuit.rx(alpha.sin() + beta.cos(), 0)
+        qiskit_circuit.ry(alpha.arcsin(), 0)
+        qiskit_circuit.rz(alpha**0.5 + beta.log(), 0)
+        braket_circuit = to_braket(qiskit_circuit)
+
+        expected_braket_circuit = (
+            Circuit()
+            .rx(0, sin(FreeParameter("alpha")) + cos(FreeParameter("beta")))
+            .ry(0, arcsin(FreeParameter("alpha")))
+            .rz(0, FreeParameter("alpha") ** 0.5 + log(FreeParameter("beta")))
+        )
+        assert braket_circuit == expected_braket_circuit
+
+    def test_parameter_expression_trig_round_trip(self):
+        """Tests Qiskit to Braket to Qiskit round trip for parameter functions."""
+        qiskit_circuit = QuantumCircuit(1)
+        alpha, beta = Parameter("alpha"), Parameter("beta")
+        qiskit_circuit.rx(alpha.sin() + beta / alpha, 0)
+        qiskit_circuit.ry(alpha.arcsin(), 0)
+
+        qiskit_back = to_qiskit(to_braket(qiskit_circuit), add_measurements=False)
+
+        inputs = {"alpha": 0.3, "beta": 0.7}
+        original_angles = [
+            qiskit_circuit.assign_parameters(inputs).data[index].operation.params[0]
+            for index in range(2)
+        ]
+        round_trip_angles = [
+            qiskit_back.assign_parameters(inputs).data[index].operation.params[0]
+            for index in range(2)
+        ]
+        assert np.allclose(original_angles, round_trip_angles)
+
     def test_name_conflict_with_parameter_vector(self):
         """Tests ParameterExpression translation."""
         qiskit_circuit = QuantumCircuit(1)
@@ -1488,6 +1550,190 @@ class TestFromBraket(TestCase):
         expected_qiskit_circuit.measure_all()
         self.assertEqual(qiskit_circuit, expected_qiskit_circuit)
 
+    def test_parametric_symbolic_power_rejected(self):
+        """Tests Braket to Qiskit conversion rejects non-numeric exponents."""
+        braket_circuit = Circuit().rx(0, FreeParameter("alpha") ** FreeParameter("beta"))
+
+        with pytest.raises(
+            TypeError,
+            match=r"unrecognized parameter type in conversion: ",
+        ):
+            to_qiskit(braket_circuit)
+
+    def test_parametric_unary_functions(self):
+        """Tests Braket to Qiskit conversion with unary parameter functions."""
+        alpha = FreeParameter("alpha")
+        unary_methods = {
+            sin: "sin",
+            cos: "cos",
+            tan: "tan",
+            exp: "exp",
+            log: "log",
+            arcsin: "arcsin",
+            arccos: "arccos",
+            arctan: "arctan",
+        }
+
+        for braket_fn, qiskit_method in unary_methods.items():
+            with self.subTest(braket_fn=braket_fn.__name__):
+                braket_circuit = Circuit().rx(0, braket_fn(alpha))
+                qiskit_circuit = to_qiskit(braket_circuit)
+
+                uuid = qiskit_circuit.parameters[0].uuid
+
+                expected_qiskit_circuit = QuantumCircuit(1)
+                qiskit_alpha = Parameter("alpha", uuid=uuid)
+                expected_qiskit_circuit.rx(getattr(qiskit_alpha, qiskit_method)(), 0)
+                expected_qiskit_circuit.measure_all()
+
+                self.assertEqual(qiskit_circuit, expected_qiskit_circuit)
+
+        braket_circuit = Circuit().rx(0, sqrt(alpha))
+        qiskit_circuit = to_qiskit(braket_circuit)
+
+        uuid = qiskit_circuit.parameters[0].uuid
+
+        expected_qiskit_circuit = QuantumCircuit(1)
+        expected_qiskit_circuit.rx(Parameter("alpha", uuid=uuid) ** 0.5, 0)
+        expected_qiskit_circuit.measure_all()
+
+        self.assertEqual(qiskit_circuit, expected_qiskit_circuit)
+
+    def test_parametric_nested_expression(self):
+        """Tests Braket to Qiskit conversion with nested function and arithmetic."""
+        braket_circuit = Circuit().rx(
+            0, sqrt(sin(FreeParameter("alpha")) + FreeParameter("beta") ** 2)
+        )
+        qiskit_circuit = to_qiskit(braket_circuit, add_measurements=False)
+
+        alpha = next(
+            parameter for parameter in qiskit_circuit.parameters if parameter.name == "alpha"
+        )
+        beta = next(
+            parameter for parameter in qiskit_circuit.parameters if parameter.name == "beta"
+        )
+        expected_angle = (alpha.sin() + beta**2) ** 0.5
+
+        inputs = {"alpha": 0.2, "beta": 0.5}
+        braket_angle = braket_circuit(**inputs).instructions[0].operator.angle
+        qiskit_angle = qiskit_circuit.assign_parameters(inputs).data[0].operation.params[0]
+
+        self.assertTrue(np.isclose(braket_angle, qiskit_angle))
+        self.assertEqual(qiskit_circuit.data[0].operation.params[0], expected_angle)
+
+    def test_parametric_arithmetic_expressions(self):
+        """Tests Braket to Qiskit conversion with arithmetic parameter expressions."""
+        braket_circuit = (
+            Circuit()
+            .rx(0, FreeParameter("alpha") / FreeParameter("beta"))
+            .ry(0, 2 * FreeParameter("alpha") - FreeParameter("beta"))
+            .rz(0, FreeParameter("alpha") ** 2 + FreeParameter("beta") ** 0.5)
+        )
+        qiskit_circuit = to_qiskit(braket_circuit, add_measurements=False)
+
+        inputs = {"alpha": 0.7, "beta": 0.3}
+        braket_angles = [
+            braket_circuit(**inputs).instructions[index].operator.angle
+            for index in range(3)
+        ]
+        qiskit_angles = [
+            qiskit_circuit.assign_parameters(inputs)
+            .data[index]
+            .operation.params[0]
+            for index in range(3)
+        ]
+        self.assertTrue(np.allclose(braket_angles, qiskit_angles))
+
+    def test_parametric_transcendental_expressions(self):
+        """Tests Braket to Qiskit conversion with transcendental parameter expressions."""
+        braket_circuit = (
+            Circuit()
+            .rx(
+                0,
+                sin(FreeParameter("alpha"))
+                + cos(FreeParameter("beta"))
+                + tan(FreeParameter("gamma")),
+            )
+            .ry(
+                0,
+                exp(FreeParameter("delta"))
+                + log(FreeParameter("epsilon"))
+                + sqrt(FreeParameter("zeta")),
+            )
+            .rz(
+                0,
+                arcsin(FreeParameter("eta"))
+                + arccos(FreeParameter("theta"))
+                + arctan(FreeParameter("iota")),
+            )
+        )
+        qiskit_circuit = to_qiskit(braket_circuit, add_measurements=False)
+
+        params = {param.name: param for param in qiskit_circuit.parameters}
+
+        expected_qiskit_circuit = QuantumCircuit(1)
+        expected_qiskit_circuit.rx(
+            params["alpha"].sin()
+            + params["beta"].cos()
+            + params["gamma"].tan(),
+            0,
+        )
+        expected_qiskit_circuit.ry(
+            params["delta"].exp()
+            + params["epsilon"].log()
+            + params["zeta"] ** 0.5,
+            0,
+        )
+        expected_qiskit_circuit.rz(
+            params["eta"].arcsin()
+            + params["theta"].arccos()
+            + params["iota"].arctan(),
+            0,
+        )
+
+        self.assertEqual(qiskit_circuit, expected_qiskit_circuit)
+
+    def test_openqasm3_parametric_expressions(self):
+        """Tests OpenQASM 3 gate angles with composite parameter expressions."""
+        braket_circuit = (
+            Circuit()
+            .rx(
+                0,
+                sin(FreeParameter("theta"))
+                + FreeParameter("alpha") / FreeParameter("beta"),
+            )
+            .ry(0, sqrt(FreeParameter("gamma")))
+        )
+        qiskit_circuit = to_qiskit(braket_circuit.to_ir().source, add_measurements=False)
+
+        inputs = {"theta": 0.4, "alpha": 1.0, "beta": 2.0, "gamma": 0.25}
+        braket_angles = [
+            braket_circuit(**inputs).instructions[index].operator.angle
+            for index in range(2)
+        ]
+        qiskit_angles = [
+            qiskit_circuit.assign_parameters(inputs)
+            .data[index]
+            .operation.params[0]
+            for index in range(2)
+        ]
+        self.assertTrue(np.allclose(braket_angles, qiskit_angles))
+
+    def test_unsupported_openqasm_functions(self):
+        """Tests if TypeError is raised for unsupported OpenQASM 3 functions."""
+        unsupported_expressions = [
+            mod(FreeParameter("alpha"), 2),
+            ceiling(FreeParameter("alpha")),
+            floor(FreeParameter("alpha")),
+        ]
+        for expression in unsupported_expressions:
+            braket_circuit = Circuit().rx(0, expression)
+            with pytest.raises(
+                TypeError,
+                match=r"OpenQASM 3 function '.+' has no Qiskit ParameterExpression equivalent",
+            ):
+                to_qiskit(braket_circuit)
+
     def test_unsupported_parameter_division(self):
         """Tests if TypeError is raised for parameter division."""
         braket_circuit = Circuit().rx(0, 1j * FreeParameter("alpha"))
@@ -1706,6 +1952,38 @@ class TestThereAndBackAgain(TestCase):
             to_braket(to_qiskit(circ, add_measurements=False)), add_measurements=False
         )  # fails
         assert np.allclose(Operator(stayed_home).data, Operator(lonely_mountain_and_back).data)
+
+    def test_parameter_expression_round_trip(self):
+        """Tests numeric equivalence for Braket to Qiskit parameter expression conversion."""
+        braket_circuit = (
+            Circuit()
+            .rx(
+                0,
+                sin(FreeParameter("alpha"))
+                + FreeParameter("beta") / FreeParameter("gamma"),
+            )
+            .ry(0, FreeParameter("delta") ** 2 + sqrt(FreeParameter("epsilon")))
+        )
+        qiskit_circuit = to_qiskit(braket_circuit, add_measurements=False)
+
+        inputs = {
+            "alpha": 0.3,
+            "beta": 1.0,
+            "gamma": 2.0,
+            "delta": 0.4,
+            "epsilon": 0.25,
+        }
+        braket_angles = [
+            braket_circuit(**inputs).instructions[index].operator.angle
+            for index in range(2)
+        ]
+        qiskit_angles = [
+            qiskit_circuit.assign_parameters(inputs)
+            .data[index]
+            .operation.params[0]
+            for index in range(2)
+        ]
+        assert np.allclose(braket_angles, qiskit_angles)
 
     def test_missing_qubit_in_properties_handled_gracefully(self):
         """Tests that missing qubits in topology are handled gracefully with warnings."""

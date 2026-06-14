@@ -46,7 +46,7 @@ from qiskit.transpiler import (
     TransformationPass,
 )
 from qiskit_ionq import add_equivalences, ionq_gates
-from sympy import Add, Expr, Mul, Pow, Symbol
+from sympy import Add, Expr, Function, Mul, Pow, Symbol
 
 from braket import experimental_capabilities as braket_expcaps
 from braket.aws import AwsDevice, AwsDeviceType
@@ -300,6 +300,27 @@ _PAULI_MAP = {
     "Y": braket_observables.Y,
     "Z": braket_observables.Z,
 }
+
+_SYMPY_UNARY_TO_QISKIT_METHOD: dict[str, str] = {
+    "sin": "sin",
+    "cos": "cos",
+    "tan": "tan",
+    "exp": "exp",
+    "log": "log",
+    "asin": "arcsin",
+    "acos": "arccos",
+    "atan": "arctan",
+}
+
+_UNSUPPORTED_SYMPY_FUNCTIONS = frozenset({
+    "Mod",
+    "ceiling",
+    "floor",
+    "Abs",
+    "re",
+    "im",
+    "conjugate",
+})
 
 _BRAKET_VERBATIM_BOX_NAME = "verbatim"
 
@@ -1798,7 +1819,7 @@ def _translate_to_braket(
     if has_nonzero_phase:
         if (target and "global_phase" in target) or (basis_gates and "global_phase" in basis_gates):
             if isinstance(global_phase, ParameterExpression):
-                global_phase = FreeParameterExpression(rename_parameter(global_phase))
+                global_phase = _parameter_expression_to_braket(global_phase)
             braket_circuit.gphase(global_phase)
         else:
             warnings.warn(
@@ -1842,7 +1863,7 @@ def _create_free_parameters(operation: QiskitInstruction) -> list[Any]:
             case Parameter() | ParameterVectorElement():
                 params[i] = FreeParameter(rename_parameter(param))
             case ParameterExpression():
-                params[i] = FreeParameterExpression(rename_parameter(param))
+                params[i] = _parameter_expression_to_braket(param)
     return params
 
 
@@ -1901,6 +1922,24 @@ def rename_parameter(parameter: Parameter) -> str:
         str: The Braket-compatible parameter name.
     """
     return str(parameter).replace("[", "_").replace("]", "")
+
+
+def _rename_sympy_symbols(expr: Expr) -> Expr:
+    renames = {
+        symbol: Symbol(str(symbol).replace("[", "_").replace("]", ""))
+        for symbol in expr.free_symbols
+        if "[" in str(symbol) or "]" in str(symbol)
+    }
+    return expr.subs(renames) if renames else expr
+
+
+def _parameter_expression_to_braket(
+    parameter_expression: ParameterExpression,
+) -> FreeParameterExpression:
+    try:
+        return FreeParameterExpression(rename_parameter(parameter_expression))
+    except ValueError:
+        return FreeParameterExpression(_rename_sympy_symbols(parameter_expression.sympify()))
 
 
 def _validate_name_conflicts(parameters: Collection[Parameter]) -> None:
@@ -2063,6 +2102,12 @@ def _create_qiskit_kraus(gate_params: list[np.ndarray]) -> Instruction:
     return qiskit_qi.Kraus(gate_params)
 
 
+def _numeric_exponent(exp: Expr) -> int | float:
+    if not getattr(exp, "is_number", False) or not getattr(exp, "is_real", False):
+        raise TypeError(f"unrecognized parameter type in conversion: {type(exp)}")
+    return int(exp) if getattr(exp, "is_integer", False) else float(exp)
+
+
 def _sympy_to_qiskit(
     expr: Expr, param_map: dict[str, Parameter]
 ) -> ParameterExpression | Parameter:
@@ -2077,8 +2122,22 @@ def _sympy_to_qiskit(
         case Mul(args=args):
             return prod(_sympy_to_qiskit(arg, param_map) for arg in args)
         case Pow(base=base, exp=exp):
-            return _sympy_to_qiskit(base, param_map) ** int(exp)
-        case obj if getattr(obj, "is_real", False):
+            return _sympy_to_qiskit(base, param_map) ** _numeric_exponent(exp)
+        case obj if isinstance(obj, Function):
+            fn_name = obj.func.__name__
+            if fn_name in _UNSUPPORTED_SYMPY_FUNCTIONS:
+                raise TypeError(
+                    f"OpenQASM 3 function '{fn_name}' has no Qiskit ParameterExpression equivalent"
+                )
+            if fn_name == "sqrt":
+                if len(obj.args) != 1:
+                    raise TypeError(f"unrecognized parameter type in conversion: {fn_name}")
+                return _sympy_to_qiskit(obj.args[0], param_map) ** 0.5
+            if fn_name not in _SYMPY_UNARY_TO_QISKIT_METHOD or len(obj.args) != 1:
+                raise TypeError(f"unrecognized parameter type in conversion: {fn_name}")
+            qiskit_arg = _sympy_to_qiskit(obj.args[0], param_map)
+            return getattr(qiskit_arg, _SYMPY_UNARY_TO_QISKIT_METHOD[fn_name])()
+        case obj if getattr(obj, "is_number", False) and getattr(obj, "is_real", False):
             return float(obj)
     raise TypeError(f"unrecognized parameter type in conversion: {type(expr)}")
 
