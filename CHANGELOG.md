@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.14.4 (2026-05-19)
+
+### Bug Fixes and Other Changes
+
+ * use new default simulator interface
+
 ## v0.14.3 (2026-05-06)
 
 ### Bug Fixes and Other Changes
