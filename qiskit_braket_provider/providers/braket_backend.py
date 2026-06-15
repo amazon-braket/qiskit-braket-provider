@@ -18,6 +18,8 @@ from braket.aws.queue_information import QueueDepthInfo
 from braket.circuits import Circuit
 from braket.device_schema import DeviceActionType
 from braket.devices import Device, LocalSimulator
+from braket.emulation.emulator import Emulator
+from braket.emulation.passes.generic import ProgramSetValidator
 from braket.program_sets import ProgramSet
 from braket.tasks.local_quantum_task import LocalQuantumTask
 
@@ -44,6 +46,20 @@ logger = logging.getLogger(__name__)
 _TASK_ID_DIVIDER = ";"
 
 T = TypeVar("T", bound=Device, covariant=True)  # noqa: PLC0105
+
+
+def _emulator_supports_program_sets(emulator: Emulator) -> bool:
+    """Whether the device emulated by ``emulator`` accepts OpenQASM program sets.
+
+    An emulator exposes no ``properties`` of its own. It mirrors the source device's
+    restrictions through validation passes, so its ``ProgramSetValidator`` carries the
+    source device's actions and tells us whether program sets are supported.
+    """
+    return any(
+        isinstance(emulator_pass, ProgramSetValidator)
+        and DeviceActionType.OPENQASM_PROGRAM_SET in emulator_pass.device_actions
+        for emulator_pass in emulator._pass_manager._passes
+    )
 
 
 class BraketBackend(BackendV2, ABC, Generic[T]):
@@ -111,9 +127,7 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
     By default the backend wraps a local :class:`~braket.devices.LocalSimulator`
     selected by ``name``. Passing a pre-built ``device``, such as the emulator
     returned by :meth:`~braket.aws.AwsDevice.emulator`, runs circuits on that device
-    instead. An emulator mimics the gate set, connectivity and noise of an
-    ``AwsDevice`` while executing locally; it exposes no device properties of its own,
-    so the ``target`` and ``qubit_labels`` of the source device are passed in.
+    instead.
     """
 
     def __init__(
@@ -136,25 +150,26 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
 
         Args:
             name (str): Name of backend. Default: ``default``.
-            device (Device | None): A pre-built local device to run on, such as the
+            device (Device | None): A pre-built local device to run on, for example the
                 emulator returned by ``AwsDevice.emulator()``. When omitted, a
                 ``LocalSimulator`` is selected by ``name``. Default: ``None``.
             target (Target | None): Target for the backend. Built from the local
-                simulator when omitted, and required for an emulator, which exposes no
-                device properties of its own. Default: ``None``.
-            qubit_labels (tuple[int, ...] | None): Qubit labels of the emulated device,
-                in ascending order. Default: ``None``.
+                simulator when omitted, and required when ``device`` is supplied and
+                exposes no target of its own. Default: ``None``.
+            qubit_labels (tuple[int, ...] | None): Qubit labels of the device, in
+                ascending order. Default: ``None``.
             **fields: Extra arguments.
         """
-        self._is_emulator = device is not None
+        self._is_emulator = isinstance(device, Emulator)
         if device is None:
             device = LocalSimulator(backend=name)
             target = target or local_simulator_to_target(device)
         BackendV2.__init__(self, name=name or device.name, **fields)
         self._device = device
         self._supports_program_sets = (
-            not self._is_emulator
-            and DeviceActionType.OPENQASM_PROGRAM_SET in device.properties.action
+            _emulator_supports_program_sets(device)
+            if self._is_emulator
+            else DeviceActionType.OPENQASM_PROGRAM_SET in device.properties.action
         )
         self._target = target
         self._qubit_labels = qubit_labels
@@ -213,7 +228,12 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
         convert_input = [run_input] if isinstance(run_input, QuantumCircuit) else list(run_input)
         verbatim = options.pop("verbatim", False)
         circuits: list[Circuit] = [
-            to_braket(circ, target=self._target if not verbatim else None, verbatim=verbatim)
+            to_braket(
+                circ,
+                target=self._target if not verbatim else None,
+                qubit_labels=self._qubit_labels,
+                verbatim=verbatim,
+            )
             for circ in convert_input
         ]
 
@@ -328,7 +348,6 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
             tasks=[AwsQuantumTask(arn=task_id) for task_id in task_ids],
         )
 
-    @property
     def emulator(self) -> BraketLocalBackend:
         """Return a local emulator backend for this device.
 
@@ -342,7 +361,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
 
         Example:
             >>> backend = BraketProvider().get_backend("Aria 1")
-            >>> emulator_backend = backend.emulator
+            >>> emulator_backend = backend.emulator()
             >>> emulator_backend.run(transpiled_circuit, shots=10).result().get_counts()
             {"100": 6, "001": 4}
         """

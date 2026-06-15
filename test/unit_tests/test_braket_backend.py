@@ -34,6 +34,7 @@ from qiskit_braket_provider import (
     exception,
 )
 from qiskit_braket_provider.providers.adapter import native_gate_connectivity
+from qiskit_braket_provider.providers.braket_sampler import BraketSampler
 from test.unit_tests.mocks import (
     MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES,
     MOCK_RIGETTI_M_3_QPU_CAPABILITIES,
@@ -604,20 +605,20 @@ class TestBraketAwsBackend(TestCase):
         self.assertEqual(deep_target.operation_names, target.operation_names)
         self.assertNotEqual(deep, backend)
 
-    def test_emulator_property(self):
-        """Tests that ``BraketAwsBackend.emulator`` returns a local emulator backend."""
+    def test_emulator_method(self):
+        """Tests that ``BraketAwsBackend.emulator()`` returns a local emulator backend."""
         device = _mock_emulator_device()
         backend = BraketAwsBackend(device=device)
-        emulator_backend = backend.emulator
+        emulator_backend = backend.emulator()
         self.assertIsInstance(emulator_backend, BraketLocalBackend)
         self.assertTrue(emulator_backend.emulator)
         self.assertIsNone(emulator_backend.provider)
         self.assertIsInstance(emulator_backend._device, Emulator)
 
 
-def _mock_emulator_device() -> Mock:
+def _mock_emulator_device(*, program_sets: bool = False) -> Mock:
     """Build a mock ``AwsDevice`` whose ``emulator()`` returns a real local emulator."""
-    capabilities = mock_emulator_capabilities()
+    capabilities = mock_emulator_capabilities(program_sets=program_sets)
     device = Mock(spec=AwsDevice)
     device.name = "Emulated-QPU"
     device.properties = capabilities
@@ -629,11 +630,11 @@ def _mock_emulator_device() -> Mock:
 
 
 class TestEmulatorBackend(TestCase):
-    """Tests the local emulator backend returned by ``BraketAwsBackend.emulator``."""
+    """Tests the local emulator backend returned by ``BraketAwsBackend.emulator()``."""
 
     @staticmethod
-    def _emulator_backend() -> BraketLocalBackend:
-        return BraketAwsBackend(device=_mock_emulator_device()).emulator
+    def _emulator_backend(*, program_sets: bool = False) -> BraketLocalBackend:
+        return BraketAwsBackend(device=_mock_emulator_device(program_sets=program_sets)).emulator()
 
     def test_emulator_backend(self):
         """Tests the emulator backend attributes."""
@@ -642,8 +643,13 @@ class TestEmulatorBackend(TestCase):
         self.assertIsInstance(backend.target, Target)
         self.assertIsNone(backend.max_circuits)
         self.assertTrue(backend.emulator)
-        self.assertEqual(backend.qubit_labels, (0, 1))
+        self.assertEqual(backend.qubit_labels, (1, 2))
         self.assertIn("Emulator for AWS Device", backend.description)
+
+    def test_emulator_backend_program_set_support(self):
+        """Tests that program-set support tracks the emulated device."""
+        self.assertFalse(self._emulator_backend()._supports_program_sets)
+        self.assertTrue(self._emulator_backend(program_sets=True)._supports_program_sets)
 
     def test_emulator_backend_run(self):
         """Tests running a circuit on the emulator backend."""
@@ -677,4 +683,17 @@ class TestEmulatorBackend(TestCase):
 
         job = sampler.run([transpiled], shots=100)
         counts = job.result()[0].data.meas.get_counts()
+        self.assertEqual(sum(counts.values()), 100)
+
+    def test_emulator_backend_with_braket_sampler(self):
+        """Tests sampling a program set on an emulator that supports program sets."""
+        backend = self._emulator_backend(program_sets=True)
+        sampler = BraketSampler(backend)
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        circuit.measure_all()
+        transpiled = transpile(circuit, backend=backend, seed_transpiler=42)
+
+        counts = sampler.run([transpiled], shots=100).result()[0].data.meas.get_counts()
         self.assertEqual(sum(counts.values()), 100)

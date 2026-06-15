@@ -371,7 +371,9 @@ def _emulator_one_qubit_properties() -> dict:
 # A small, self-consistent set of capabilities (2 qubits, fully connected) that
 # satisfies the validation performed by ``LocalEmulator.from_device_properties``,
 # which a plain QPU mock does not (it requires ``standardized`` per-qubit metrics,
-# supported result types and qubit counts that all agree).
+# supported result types and qubit counts that all agree). The qubits are labelled
+# 1 and 2 rather than 0 and 1 so the tests exercise the non-contiguous qubit labels
+# of a real QPU, which a 0-based device would not catch.
 MOCK_EMULATOR_CAPABILITIES_JSON = {
     "braketSchemaHeader": {
         "name": "braket.device_schema.rigetti.rigetti_device_capabilities",
@@ -403,7 +405,7 @@ MOCK_EMULATOR_CAPABILITIES_JSON = {
         "nativeGateSet": ["rx", "rz", "cz"],
         "connectivity": {
             "fullyConnected": True,
-            "connectivityGraph": {"0": ["1"], "1": ["0"]},
+            "connectivityGraph": {"1": ["2"], "2": ["1"]},
         },
     },
     "deviceParameters": {},
@@ -414,14 +416,14 @@ MOCK_EMULATOR_STANDARDIZED_PROPERTIES = StandardizedGateModelQpuDeviceProperties
         "version": "1",
     },
     "oneQubitProperties": {
-        "0": _emulator_one_qubit_properties(),
         "1": _emulator_one_qubit_properties(),
+        "2": _emulator_one_qubit_properties(),
     },
     "twoQubitProperties": {
-        "0-1": {
+        "1-2": {
             "twoQubitGateFidelity": [
                 {
-                    "direction": {"control": 0, "target": 1},
+                    "direction": {"control": 1, "target": 2},
                     "gateName": "CZ",
                     "fidelity": 0.9,
                     "fidelityType": {"name": "INTERLEAVED_RANDOMIZED_BENCHMARKING"},
@@ -432,19 +434,40 @@ MOCK_EMULATOR_STANDARDIZED_PROPERTIES = StandardizedGateModelQpuDeviceProperties
 })
 
 
-def mock_emulator_capabilities() -> RigettiDeviceCapabilities:
-    """Return device capabilities that a Braket ``LocalEmulator`` can be built from."""
-    capabilities = RigettiDeviceCapabilities.parse_obj(
-        copy.deepcopy(MOCK_EMULATOR_CAPABILITIES_JSON)
-    )
-    capabilities.standardized = MOCK_EMULATOR_STANDARDIZED_PROPERTIES
-    return capabilities
-
-
 def mock_emulator_topology() -> DiGraph:
     """Return the topology graph matching ``mock_emulator_capabilities``."""
-    graph = from_dict_of_lists({"0": [1], "1": [0]}, create_using=DiGraph())
+    graph = from_dict_of_lists({"1": [2], "2": [1]}, create_using=DiGraph())
     return relabel_nodes(graph, {n: int(n) for n in graph.nodes})
+
+
+# Program-set action for a source device that supports OpenQASM program sets. The
+# emulator carries this through, so its backend reports program-set support too.
+MOCK_EMULATOR_PROGRAM_SET_ACTION = {
+    "actionType": "braket.ir.openqasm.program_set",
+    "version": ["1"],
+    "supportedOperations": ["RX", "RZ", "CZ"],
+    "supportedResultTypes": [
+        {"name": "Probability", "observables": None, "minShots": 1, "maxShots": 100000},
+    ],
+    "maximumExecutables": 100,
+    "maximumTotalShots": 1000000,
+}
+
+
+def mock_emulator_capabilities(*, program_sets: bool = False) -> RigettiDeviceCapabilities:
+    """Return device capabilities that a Braket ``LocalEmulator`` can be built from.
+
+    When ``program_sets`` is true the source device also advertises program-set support,
+    which the emulator carries through to its validation passes.
+    """
+    capabilities_json: dict = copy.deepcopy(MOCK_EMULATOR_CAPABILITIES_JSON)
+    if program_sets:
+        capabilities_json["action"]["braket.ir.openqasm.program_set"] = copy.deepcopy(
+            MOCK_EMULATOR_PROGRAM_SET_ACTION
+        )
+    capabilities = RigettiDeviceCapabilities.parse_obj(capabilities_json)
+    capabilities.standardized = MOCK_EMULATOR_STANDARDIZED_PROPERTIES
+    return capabilities
 
 
 class MockBraketBackend(BraketBackend):

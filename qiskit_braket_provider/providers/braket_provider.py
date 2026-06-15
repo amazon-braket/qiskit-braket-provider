@@ -1,7 +1,6 @@
 """Amazon Braket provider."""
 
 import warnings
-from typing import cast
 
 from qiskit.providers.exceptions import QiskitBackendNotFoundError
 
@@ -54,7 +53,8 @@ class BraketProvider:
             raise QiskitBackendNotFoundError("No backend matches the criteria")
         backend = backends[0]
         if emulator:
-            return cast("BraketAwsBackend", backend).emulator
+            assert isinstance(backend, BraketAwsBackend)  # only QPUs have emulators
+            return backend.emulator()
         return backend
 
     def backends(
