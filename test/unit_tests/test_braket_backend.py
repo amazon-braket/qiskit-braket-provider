@@ -32,6 +32,7 @@ from qiskit_braket_provider import (
     exception,
 )
 from qiskit_braket_provider.providers.adapter import native_gate_connectivity, to_braket
+from qiskit_braket_provider.providers.braket_backend import BraketBackend
 from test.unit_tests.mocks import (
     MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES,
     MOCK_RIGETTI_M_3_QPU_CAPABILITIES,
@@ -72,6 +73,34 @@ class TestBraketBackend(TestCase):
         """Test the repr method of BraketBackend."""
         backend = BraketLocalBackend(name="default")
         self.assertEqual(repr(backend), "BraketBackend[default]")
+
+    def test_qubit_labels_default(self):
+        """Tests default qubit labels for generic backend."""
+
+        class ConcreteBraketBackend(BraketBackend):
+            @classmethod
+            def _default_options(cls) -> object:
+                from qiskit.providers import Options
+
+                return Options()
+
+            @property
+            def target(self) -> Target:
+                return Target(num_qubits=1)
+
+            @property
+            def max_circuits(self) -> None:
+                return None
+
+            def run(self, run_input: object, **options) -> object:
+                raise NotImplementedError
+
+        device = Mock()
+        device.properties.action = {}
+
+        backend = ConcreteBraketBackend(device, "test")
+
+        self.assertIsNone(backend.qubit_labels)
 
 
 class TestBraketLocalBackend(TestCase):
