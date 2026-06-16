@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.15.0 (2026-06-16)
+
+### Features
+
+ * support Braket parameter functions in to_qiskit
+
 ## v0.14.4 (2026-05-19)
 
 ### Bug Fixes and Other Changes

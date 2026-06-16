@@ -46,7 +46,7 @@ from qiskit.transpiler import (
     TransformationPass,
 )
 from qiskit_ionq import add_equivalences, ionq_gates
-from sympy import Add, Expr, Mul, Pow, Symbol
+from sympy import Add, Expr, Mul, Pow, Symbol, acos, asin, atan, cos, exp, log, sin, tan
 
 from braket import experimental_capabilities as braket_expcaps
 from braket.aws import AwsDevice, AwsDeviceType
@@ -288,6 +288,17 @@ _BRAKET_SUPPORTED_NOISES = [
     # "twoqubitpaulichannel" no to_openqasm support yet
 ]
 
+_SYMPY_FUNCTION_TO_QISKIT_METHOD = {
+    sin: "sin",
+    cos: "cos",
+    tan: "tan",
+    asin: "arcsin",
+    acos: "arccos",
+    atan: "arctan",
+    exp: "exp",
+    log: "log",
+}
+
 _TRANSPILER_GATE_SUBSTITUTES: dict[tuple[str, tuple[float | str, ...]], Gate] = {
     ("rx", (pi,)): qiskit_gates.XGate(),
     ("rx", (-pi,)): qiskit_gates.XGate(),
@@ -309,6 +320,12 @@ _QubitSet: TypeAlias = set[tuple[int, ...]]
 _ParameterRestrictions: TypeAlias = dict[str, dict[_ParamKey, _QubitSet]]
 
 _T = TypeVar("_T")
+
+
+def _qiskit_numeric_power(exp: Expr) -> int | float:
+    if not getattr(exp, "is_number", False) or not getattr(exp, "is_real", False):
+        raise TypeError(f"unrecognized parameter type in conversion: {type(exp)}")
+    return int(exp) if getattr(exp, "is_integer", False) else float(exp)
 
 
 class _SubstitutedTarget(Target):
@@ -1637,11 +1654,11 @@ def _get_circuits(
     circuit: _Translatable | Iterable[_Translatable] | None,
     add_measurements: bool,
 ) -> tuple[list[QuantumCircuit], bool]:
-    if not (circuits or circuit):
+    if circuit is not None and circuits is not None:
+        raise ValueError("Cannot specify both circuits and circuit")
+    if circuit is None and circuits is None:
         raise ValueError("Must specify circuits to transpile")
-    if circuit:
-        if circuits:
-            raise ValueError("Cannot specify both circuits and circuit")
+    if circuit is not None:
         warnings.warn(
             "circuit is deprecated; use circuits instead.", DeprecationWarning, stacklevel=1
         )
@@ -2077,9 +2094,12 @@ def _sympy_to_qiskit(
         case Mul(args=args):
             return prod(_sympy_to_qiskit(arg, param_map) for arg in args)
         case Pow(base=base, exp=exp):
-            return _sympy_to_qiskit(base, param_map) ** int(exp)
-        case obj if getattr(obj, "is_real", False):
+            return _sympy_to_qiskit(base, param_map) ** _qiskit_numeric_power(exp)
+        case obj if getattr(obj, "is_number", False) and getattr(obj, "is_real", False):
             return float(obj)
+        case obj if obj.func in _SYMPY_FUNCTION_TO_QISKIT_METHOD and len(obj.args) == 1:
+            method_name = _SYMPY_FUNCTION_TO_QISKIT_METHOD[obj.func]
+            return getattr(_sympy_to_qiskit(obj.args[0], param_map), method_name)()
     raise TypeError(f"unrecognized parameter type in conversion: {type(expr)}")
 
 
