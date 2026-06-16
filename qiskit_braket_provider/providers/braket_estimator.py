@@ -42,13 +42,13 @@ _ResultMap: TypeAlias = dict[int, list[_ResultMapEntry]]
 @dataclass
 class _RoutingTarget:
     pauli: Pauli
-    coeff: complex
+    coeff: float
     positions_and_params: list
 
 
 @dataclass
 class _IdentityRouting:
-    coeff: complex
+    coeff: float
     positions_and_params: list
 
 
@@ -371,7 +371,9 @@ class BraketEstimator(BaseEstimatorV2):
                 for p, coeff in zip(op_from_dict.paulis, op_from_dict.coeffs, strict=True):
                     if p in identity_paulis:
                         identity_routing.append(
-                            _IdentityRouting(coeff=coeff, positions_and_params=obs_groups[ok])
+                            _IdentityRouting(
+                                coeff=float(coeff.real), positions_and_params=obs_groups[ok]
+                            )
                         )
 
         bindings_with_meta: list[tuple[CircuitBinding, _QWCBindingMetadata]] = []
@@ -395,7 +397,9 @@ class BraketEstimator(BaseEstimatorV2):
                         if p in obs_group:
                             routing_targets.append(
                                 _RoutingTarget(
-                                    pauli=p, coeff=coeff, positions_and_params=obs_groups[ok]
+                                    pauli=p,
+                                    coeff=float(coeff.real),
+                                    positions_and_params=obs_groups[ok],
                                 )
                             )
 
@@ -531,7 +535,7 @@ class BraketEstimator(BaseEstimatorV2):
             # identity terms have expectation 1, so each adds its coefficient directly (no measurement)
             for term in pub_meta.identity_routing:
                 for position, _ in term.positions_and_params:
-                    evs[np.unravel_index(position, broadcast_shape)] += term.coeff.real
+                    evs[np.unravel_index(position, broadcast_shape)] += term.coeff
 
             for local_binding_idx in range(num_bindings):
                 program_result = task_result[binding_offset + local_binding_idx]
@@ -541,25 +545,37 @@ class BraketEstimator(BaseEstimatorV2):
                     param_idx_map = meta.param_idx_map
                     measured_qubits = list(range(pub.circuit.num_qubits))
 
+                    # Invert the routing to be measurement-first: each covering measurement
+                    # (one per parameter set) is reconstructed into every Pauli routed to it.
+                    paulis_by_param_set = defaultdict(list)
                     for target in meta.routing_targets:
-                        pauli = target.pauli
-                        coeff = target.coeff
-
-                        pauli_str = pauli.to_label()
+                        pauli_str = target.pauli.to_label()
                         targets = [i for i, char in enumerate(reversed(pauli_str)) if char != "I"]
                         braket_z_obs = reduce(operator.matmul, [Z() for _ in range(len(targets))])
 
+                        positions_by_param_set = defaultdict(list)
                         for position, param_indices in target.positions_and_params:
                             param_set_idx = param_idx_map[param_indices] if param_indices else 0
-                            measured_entry = program_result[param_set_idx]
-                            measurements = measured_entry.measurements
+                            positions_by_param_set[param_set_idx].append(position)
 
+                        for param_set_idx, positions in positions_by_param_set.items():
+                            paulis_by_param_set[param_set_idx].append((
+                                target.coeff,
+                                targets,
+                                braket_z_obs,
+                                positions,
+                            ))
+
+                    for param_set_idx, routed_paulis in paulis_by_param_set.items():
+                        measurements = program_result[param_set_idx].measurements
+                        for coeff, targets, braket_z_obs, positions in routed_paulis:
                             term_expectation = expectation_from_measurements(
                                 measurements, measured_qubits, braket_z_obs, targets
                             )
-
-                            flat_idx = np.unravel_index(position, broadcast_shape)
-                            evs[flat_idx] += coeff.real * term_expectation
+                            for position in positions:
+                                evs[np.unravel_index(position, broadcast_shape)] += (
+                                    coeff * term_expectation
+                                )
                 else:
                     num_observables = len(program_result.observables)
                     for position, obs_idx, param_idx in binding_map[local_binding_idx]:
