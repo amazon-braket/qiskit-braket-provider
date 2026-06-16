@@ -495,11 +495,11 @@ def _get_circuits(
     circuit: _Translatable | Iterable[_Translatable] | None,
     add_measurements: bool,
 ) -> tuple[list[QuantumCircuit], bool]:
-    if not (circuits or circuit):
+    if circuit is not None and circuits is not None:
+        raise ValueError("Cannot specify both circuits and circuit")
+    if circuit is None and circuits is None:
         raise ValueError("Must specify circuits to transpile")
-    if circuit:
-        if circuits:
-            raise ValueError("Cannot specify both circuits and circuit")
+    if circuit is not None:
         warnings.warn(
             "circuit is deprecated; use circuits instead.", DeprecationWarning, stacklevel=1
         )

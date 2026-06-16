@@ -60,7 +60,14 @@ from braket.default_simulator.openqasm.program_context import (
 from qiskit_braket_provider.providers.constants import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_VERBATIM_BOX_NAME,
+    _SYMPY_FUNCTION_TO_QISKIT_METHOD,
 )
+
+
+def _qiskit_numeric_power(exp: Expr) -> int | float:
+    if not getattr(exp, "is_number", False) or not getattr(exp, "is_real", False):
+        raise TypeError(f"unrecognized parameter type in conversion: {type(exp)}")
+    return int(exp) if getattr(exp, "is_integer", False) else float(exp)
 
 
 def sympy_to_qiskit(
@@ -77,9 +84,12 @@ def sympy_to_qiskit(
         case Mul(args=args):
             return prod(sympy_to_qiskit(arg, param_map) for arg in args)
         case Pow(base=base, exp=exp):
-            return sympy_to_qiskit(base, param_map) ** int(exp)
-        case obj if getattr(obj, "is_real", False):
+            return sympy_to_qiskit(base, param_map) ** _qiskit_numeric_power(exp)
+        case obj if getattr(obj, "is_number", False) and getattr(obj, "is_real", False):
             return float(obj)
+        case obj if obj.func in _SYMPY_FUNCTION_TO_QISKIT_METHOD and len(obj.args) == 1:
+            method_name = _SYMPY_FUNCTION_TO_QISKIT_METHOD[obj.func]
+            return getattr(sympy_to_qiskit(obj.args[0], param_map), method_name)()
     raise TypeError(f"unrecognized parameter type in conversion: {type(expr)}")
 
 

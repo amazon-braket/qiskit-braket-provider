@@ -25,7 +25,7 @@ from braket.default_simulator.openqasm.parser.openqasm_ast import (
     UnaryOperator,
 )
 from qiskit_braket_provider import to_qiskit
-from qiskit_braket_provider.providers.adapter import _compile, QiskitProgramContext
+from qiskit_braket_provider.providers.adapter import QiskitProgramContext, _compile
 
 
 def _get_if_else_ops(circuit: QuantumCircuit) -> list[CircuitInstruction]:

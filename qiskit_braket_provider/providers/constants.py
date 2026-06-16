@@ -13,6 +13,7 @@ from qiskit.circuit import Gate, Parameter
 from qiskit.circuit import Instruction as QiskitInstruction
 from qiskit.circuit.library import get_standard_gate_name_mapping
 from qiskit_ionq import ionq_gates
+from sympy import acos, asin, atan, cos, exp, log, sin, tan
 
 from braket import experimental_capabilities as braket_expcaps
 from braket.circuits import gates as braket_gates
@@ -200,6 +201,17 @@ _BRAKET_SUPPORTED_NOISES = [
     "twoqubitdephasing",
     # "twoqubitpaulichannel" no to_openqasm support yet
 ]
+
+_SYMPY_FUNCTION_TO_QISKIT_METHOD = {
+    sin: "sin",
+    cos: "cos",
+    tan: "tan",
+    asin: "arcsin",
+    acos: "arccos",
+    atan: "arctan",
+    exp: "exp",
+    log: "log",
+}
 
 _TRANSPILER_GATE_SUBSTITUTES: dict[tuple[str, tuple[float | str, ...]], Gate] = {
     ("rx", (pi,)): qiskit_gates.XGate(),
