@@ -493,6 +493,13 @@ class TestAdapter(TestCase):
         with pytest.raises(ValueError, match="Cannot specify both circuits and circuit"):
             to_braket([circuit], circuit=[circuit])
 
+    def test_op_less_circuit_is_accepted(self):
+        assert isinstance(to_braket(QuantumCircuit(2, 1)), Circuit)
+
+    def test_op_less_circuit_via_circuit_kwarg_is_accepted(self):
+        with pytest.warns(DeprecationWarning, match="circuit is deprecated"):
+            assert isinstance(to_braket(circuit=QuantumCircuit(2, 1)), Circuit)
+
     def test_circuit_deprecated(self):
         """Tests that to_braket raises a DeprecationWarning if circuit is specified."""
         circuit = QuantumCircuit(1, 1)
