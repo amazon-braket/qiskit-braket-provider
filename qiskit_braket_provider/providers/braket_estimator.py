@@ -466,14 +466,13 @@ class BraketEstimator(BaseEstimatorV2):
             for local_binding_idx in range(num_bindings):
                 program_result = task_result[binding_offset + local_binding_idx]
 
-                if local_binding_idx in grouped_binding_map:
+                grouped_result_map_entry = grouped_binding_map.get(local_binding_idx)
+                if grouped_result_map_entry is not None:
                     # Abelian-grouped binding: recover each term's expectation from raw measurements
                     # via the parity of the bitstring on the term's support, then accumulate the
                     # coefficient-weighted contribution to its observable.
                     col_map = grouped_colmap[local_binding_idx]
-                    for position, param_idx, coeff, support in grouped_binding_map[
-                        local_binding_idx
-                    ]:
+                    for position, param_idx, coeff, support in grouped_result_map_entry:
                         if support:
                             measurements = program_result.entries[param_idx].measurements
                             cols = [col_map[qubit] for qubit in support]
