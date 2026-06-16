@@ -101,11 +101,9 @@ class BraketSampler(BaseSamplerV2):
             parameter_indices.append(indices)
         shots_per_executable = pub_shots if pub_shots is not None else shots
         program_set = ProgramSet(circuit_bindings, shots_per_executable=shots_per_executable)
-        # shots live on the program set; pass shots=None so every device (including the
-        # emulator, whose run() defaults to 0) takes its per-executable count from there.
-        run_options = {"shots": None, **self._options}
+        options = {"shots": None, **self._options}
         return BraketPrimitiveTask(
-            self._backend._device.run(program_set, **run_options),
+            self._backend._device.run(program_set, **options),
             lambda result: BraketSampler._translate_result(
                 result,
                 _JobMetadata(

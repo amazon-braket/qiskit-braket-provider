@@ -237,14 +237,7 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
             for circ in convert_input
         ]
 
-        if shots == 0:
-            if self._is_emulator:
-                raise QiskitBraketException(
-                    "The device emulator does not support shots=0. It reproduces QPU "
-                    "behavior, which requires a positive shot count. Use a local simulator "
-                    "BraketLocalBackend (constructed without a device) for exact (state "
-                    "vector) simulation."
-                )
+        if shots == 0 and not self._is_emulator:
             circuits = [x.state_vector() for x in circuits]
         if "meas_level" in options:
             self._validate_meas_level(options["meas_level"])
@@ -349,15 +342,11 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         )
 
     def emulator(self) -> BraketLocalBackend:
-        """Return a local emulator backend for this device.
-
-        The emulator mimics the gate set, connectivity and noise of the device while
-        executing circuits locally, providing a soft check that a program can run on the
-        target device without submitting tasks to the Amazon Braket service. Emulators
-        are only available for QPUs, not for Braket managed simulators.
+        """Return a local backend that emulates this device's gate set, connectivity
+        and noise. Available for QPUs only, not for Braket managed simulators.
 
         Returns:
-            BraketLocalBackend: A local backend that runs circuits on this device's emulator.
+            BraketLocalBackend: A local backend that runs this device's emulator.
 
         Example:
             >>> backend = BraketProvider().get_backend("Aria 1")

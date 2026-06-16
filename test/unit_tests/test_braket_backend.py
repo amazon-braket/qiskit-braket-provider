@@ -664,12 +664,24 @@ class TestEmulatorBackend(TestCase):
         self.assertEqual(sum(result.get_counts().values()), 100)
 
     def test_emulator_backend_run_shots0(self):
-        """Tests that shots=0 is rejected by the emulator backend."""
+        """Tests that shots=0 is forwarded to the device rather than special-cased.
+
+        The emulator is not given a state-vector result type (its density-matrix
+        backend does not support one); shots=0 reaches the device run unchanged, where
+        the SDK validates it.
+        """
         backend = self._emulator_backend()
-        circuit = QuantumCircuit(1)
+        circuit = QuantumCircuit(2)
         circuit.h(0)
-        with self.assertRaises(exception.QiskitBraketException):
-            backend.run(circuit, shots=0)
+        circuit.cx(0, 1)
+        circuit.measure_all()
+        transpiled = transpile(circuit, backend=backend, seed_transpiler=42)
+        with patch.object(backend._device, "run") as mock_run:
+            mock_run.return_value.id = "task-0"
+            backend.run(transpiled, shots=0)
+        self.assertEqual(mock_run.call_args.kwargs["shots"], 0)
+        forwarded = mock_run.call_args.kwargs["task_specification"]
+        self.assertEqual(forwarded.result_types, [])
 
     def test_emulator_backend_with_sampler(self):
         """Tests that the emulator backend works with a Qiskit primitive."""
