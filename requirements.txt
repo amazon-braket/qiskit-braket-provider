@@ -1,7 +1,7 @@
 certifi>=2021.5.30
 qiskit>=2.0.0
 qiskit-ionq>=1.0.0
-amazon-braket-sdk>=1.111.1
+amazon-braket-sdk>=1.112.0
 amazon-braket-default-simulator>=1.39.3
 
 setuptools>=40.1.0
