@@ -402,7 +402,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
             del options["meas_level"]
 
         # Always use target for simulator
-        target, basis_gates, qubit_labels = self._to_braket_args(native, pass_manager)
+        target, basis_gates, qubit_labels = self._resolve_compilation_args(native, pass_manager)
         braket_circuits = (
             to_braket(circuits, qubit_labels=self._qubit_labels, verbatim=True)
             if verbatim
@@ -426,9 +426,12 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
             else self._run_batch(braket_circuits, shots, **options)
         )
 
-    def _to_braket_args(
+    def _resolve_compilation_args(
         self, native: bool, pass_manager: PassManager
-    ) -> tuple[Target | None, set[str] | None, tuple[int] | None]:
+    ) -> tuple[Target | None, set[str] | None, tuple[int, ...] | None]:
+        """
+        Determine multiple compilation args that all come from the same information
+        """
         if pass_manager:
             return None, None, self._qubit_labels
         if native or self._device.type == AwsDeviceType.SIMULATOR:
