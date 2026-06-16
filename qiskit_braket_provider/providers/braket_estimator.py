@@ -329,9 +329,7 @@ class BraketEstimator(BaseEstimatorV2):
             grouped_colmap (dict): Per-binding qubit-to-column maps to populate (mutated in place).
         """
         # Collect every unique Pauli label across observables that share these parameter sets.
-        unique_labels = list({
-            label for ok in matching_obs_keys for label, _ in obs_keys[ok].items()
-        })
+        unique_labels = list({label for ok in matching_obs_keys for label in obs_keys[ok]})
         groups = SparsePauliOp(unique_labels).group_commuting(qubit_wise=True)
 
         # One binding per qubit-wise-commuting group, measured in that group's shared basis.
@@ -339,12 +337,12 @@ class BraketEstimator(BaseEstimatorV2):
         for group in groups:
             basis_label = BraketEstimator._group_basis_label(group)
             representative = translate_sparse_pauli_op(SparsePauliOp(basis_label))
-            support = sorted(BraketEstimator._pauli_support(basis_label))
+            basis_support = sorted(BraketEstimator._pauli_support(basis_label))
             binding_idx = len(bindings)
             bindings.append(
                 CircuitBinding(circuit, input_sets=parameter_sets, observables=[representative])
             )
-            grouped_colmap[binding_idx] = {qubit: col for col, qubit in enumerate(support)}
+            grouped_colmap[binding_idx] = {qubit: col for col, qubit in enumerate(basis_support)}
             grouped_binding_map[binding_idx] = []
             for label in group.paulis.to_labels():
                 label_to_binding[label] = binding_idx

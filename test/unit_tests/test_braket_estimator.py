@@ -448,6 +448,21 @@ class TestBraketEstimator(TestCase):
         task = BraketEstimator(self.backend, abelian_grouping=True).run([pub], precision=0.02)
         self.assert_correct_results(task, [pub])
 
+    def test_abelian_grouping_partial_support_identity_basis(self):
+        """A group acting on only some qubits measures identity on the untouched qubits.
+
+        ``IX`` and ``IZ`` don't qubit-wise commute, so each forms its own single-term group whose
+        shared basis is identity on the qubit no term acts on, exercising the identity branch of
+        the per-qubit basis construction.
+        """
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        observables = [SparsePauliOp("IX"), SparsePauliOp("IZ")]
+        pub = (circuit, observables)
+        task = BraketEstimator(self.backend, abelian_grouping=True).run([pub], precision=0.02)
+        self.assert_correct_results(task, [pub])
+
     def test_abelian_grouping_matches_reference_parameterized(self):
         """Grouped estimates match BackendEstimatorV2 with parameters and broadcasting."""
         circuit = QuantumCircuit(2)
