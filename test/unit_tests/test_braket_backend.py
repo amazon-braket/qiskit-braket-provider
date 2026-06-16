@@ -137,17 +137,20 @@ class TestBraketLocalBackend(TestCase):
         target = Target(num_qubits=2)
         gateset = {"h", "cx"}
         qubit_labels = (3, 5)
+        supports_program_sets = True
 
         backend = BraketLocalBackend(
             name="default",
             target=target,
             gateset=gateset,
             qubit_labels=qubit_labels,
+            supports_program_sets=supports_program_sets,
         )
 
         self.assertIs(backend.target, target)
         self.assertEqual(backend._gateset, gateset)
         self.assertEqual(backend.qubit_labels, qubit_labels)
+        self.assertEqual(backend._supports_program_sets, supports_program_sets)
 
     def test_local_backend_circuit(self):
         """Tests local backend with circuit."""
@@ -349,6 +352,7 @@ class TestBraketAwsBackend(TestCase):
         local_device.properties.action = {}
 
         backend = BraketAwsBackend(device=device)
+        backend._supports_program_sets = True
         emulator = backend.emulator()
 
         device.emulator.assert_called_once()
@@ -357,6 +361,7 @@ class TestBraketAwsBackend(TestCase):
         self.assertIs(emulator.target, backend.target)
         self.assertEqual(emulator._gateset, backend._gateset)
         self.assertEqual(emulator.qubit_labels, backend.qubit_labels)
+        self.assertEqual(emulator._supports_program_sets, backend._supports_program_sets)
 
     def test_emulator_run_uses_aws_target_qubit_labels(self):
         """Tests running a circuit through an AWS backend emulator."""

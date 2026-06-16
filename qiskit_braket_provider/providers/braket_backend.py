@@ -115,6 +115,7 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
         target: Target | None = None,
         gateset: set[str] | None = None,
         qubit_labels: tuple[int, ...] | None = None,
+        supports_program_sets: bool | None = None,
         **fields,
     ) -> None:
         """Initialize the backend.
@@ -128,6 +129,11 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
 
         Args:
             name (str): Name of backend. Default: ``default``.
+            device (LocalSimulator | None): Local simulator device to use for execution.
+            target (Target | None): Qiskit target to use for transpilation and conversion.
+            gateset (set[str] | None): Braket gate set to use for conversion.
+            qubit_labels (tuple[int, ...] | None): Physical qubit labels for conversion.
+            supports_program_sets (bool | None): Program-set support override.
             **fields: Extra arguments.
         """
         simulator = device or LocalSimulator(backend=name)
@@ -135,6 +141,8 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
         self._target = target if target is not None else local_simulator_to_target(self._device)
         self._gateset = gateset if gateset is not None else self.get_gateset()
         self._qubit_labels = qubit_labels
+        if supports_program_sets is not None:
+            self._supports_program_sets = supports_program_sets
         self.status = self._device.status
 
     @property
@@ -318,12 +326,17 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         return Options()
 
     def emulator(self) -> BraketLocalBackend:
-        """Return a local simulator backend using this backend's target."""
+        """Return a local simulator backend configured from this AWS backend.
+
+        The returned backend uses the AWS device emulator for execution while preserving
+        target, gateset, qubit labels, and program-set support metadata from this backend.
+        """
         return BraketLocalBackend(
             device=self._device.emulator(),
             target=self.target,
             gateset=self._gateset,
             qubit_labels=self.qubit_labels,
+            supports_program_sets=self._supports_program_sets,
         )
 
     def qubit_properties(self, qubit: int | list[int]) -> QubitProperties | list[QubitProperties]:
