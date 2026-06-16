@@ -921,7 +921,6 @@ def _create_qiskit_kraus(gate_params: list[np.ndarray]) -> Instruction:
     return qiskit_qi.Kraus(gate_params)
 
 
-
 def _reverse_endianness(matrix: np.ndarray) -> np.ndarray:
     n_q = int(np.log2(matrix.shape[0]))
     # Convert multi-qubit Kraus from little to big endian notation

@@ -70,9 +70,7 @@ def _qiskit_numeric_power(exp: Expr) -> int | float:
     return int(exp) if getattr(exp, "is_integer", False) else float(exp)
 
 
-def sympy_to_qiskit(
-    expr: Expr, param_map: dict[str, Parameter]
-) -> ParameterExpression | Parameter:
+def sympy_to_qiskit(expr: Expr, param_map: dict[str, Parameter]) -> ParameterExpression | Parameter:
     """convert a sympy expression to qiskit Parameters recursively"""
     match expr:
         case Symbol(name=name):
