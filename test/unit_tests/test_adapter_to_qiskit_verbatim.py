@@ -11,7 +11,7 @@ from braket.default_simulator.openqasm.interpreter import VerbatimBoxDelimiter
 from braket.default_simulator.openqasm.parser.openqasm_ast import BitType, Identifier
 from braket.ir.openqasm import Program
 from qiskit_braket_provider import to_qiskit
-from qiskit_braket_provider.providers.adapter import _QiskitProgramContext
+from qiskit_braket_provider.providers.adapter import QiskitProgramContext
 
 
 def _get_box_ops(qiskit_circuit: QuantumCircuit) -> list[CircuitInstruction]:
@@ -279,7 +279,7 @@ def test_no_verbatim_pragma(source: str | Circuit | Program, to_qiskit_kwargs: d
     ids=["nested_start", "end_without_start", "invalid_marker"],
 )
 def test_context_marker_errors(markers: list[VerbatimBoxDelimiter | str], error_match: str):
-    context = _QiskitProgramContext()
+    context = QiskitProgramContext()
     context.add_qubits("q", 2)
 
     with pytest.raises(ValueError, match=error_match):
@@ -288,7 +288,7 @@ def test_context_marker_errors(markers: list[VerbatimBoxDelimiter | str], error_
 
 
 def test_unclosed_verbatim_box_circuit_property_error():
-    context = _QiskitProgramContext()
+    context = QiskitProgramContext()
     context.add_qubits("q", 2)
     context.add_verbatim_marker(VerbatimBoxDelimiter.START_VERBATIM)
 
@@ -346,6 +346,6 @@ box {
 
 
 def test_bit_declaration_with_identifier_size_in_verbatim():
-    ctx = _QiskitProgramContext()
+    ctx = QiskitProgramContext()
     ctx.declare_variable("c", BitType(size=Identifier(name="n")))
     assert ctx.circuit.num_clbits == 0

@@ -25,7 +25,7 @@ from braket.default_simulator.openqasm.parser.openqasm_ast import (
     UnaryOperator,
 )
 from qiskit_braket_provider import to_qiskit
-from qiskit_braket_provider.providers.adapter import _compile, _QiskitProgramContext
+from qiskit_braket_provider.providers.adapter import _compile, QiskitProgramContext
 
 
 def _get_if_else_ops(circuit: QuantumCircuit) -> list[CircuitInstruction]:
@@ -724,7 +724,7 @@ c[0] = measure q[0];
 
 
 def test_resolve_clbit_index_unsupported_type():
-    ctx = _QiskitProgramContext()
+    ctx = QiskitProgramContext()
     with pytest.raises(TypeError, match="Unsupported condition operand type"):
         ctx._resolve_clbit_index(IntegerLiteral(value=0))
 
@@ -799,7 +799,7 @@ def test_is_mcm_dependent_for_loop_set_declarations():
     through ``evaluate_for_range`` (to produce a ``ForLoopOp``) even when
     the range is static.
     """
-    ctx = _QiskitProgramContext()
+    ctx = QiskitProgramContext()
     assert ctx.is_mcm_dependent(
         RangeDefinition(start=IntegerLiteral(0), end=IntegerLiteral(1), step=None)
     )
@@ -808,7 +808,7 @@ def test_is_mcm_dependent_for_loop_set_declarations():
 
 def test_evaluate_expression_unary():
     """UnaryExpression should be handled by _evaluate_expression."""
-    ctx = _QiskitProgramContext()
+    ctx = QiskitProgramContext()
     result = ctx._evaluate_expression(
         UnaryExpression(op=UnaryOperator["!"], expression=BooleanLiteral(value=True))
     )
@@ -817,21 +817,21 @@ def test_evaluate_expression_unary():
 
 def test_evaluate_expression_cast():
     """Cast should be handled by _evaluate_expression."""
-    ctx = _QiskitProgramContext()
+    ctx = QiskitProgramContext()
     result = ctx._evaluate_expression(Cast(type=BoolType(), argument=IntegerLiteral(value=1)))
     assert result.value is True
 
 
 def test_evaluate_expression_unsupported_type():
     """An unsupported expression type should raise TypeError."""
-    ctx = _QiskitProgramContext()
+    ctx = QiskitProgramContext()
     with pytest.raises(TypeError, match="Cannot evaluate expression of type"):
         ctx._evaluate_expression(FunctionCall(name=None, arguments=[]))
 
 
 def test_evaluate_expression_list():
     """A list input should evaluate each element."""
-    ctx = _QiskitProgramContext()
+    ctx = QiskitProgramContext()
     result = ctx._evaluate_expression([IntegerLiteral(value=1), IntegerLiteral(value=2)])
     assert len(result) == 2
     assert result[0].value == 1
@@ -1126,7 +1126,7 @@ if (c == 1) {
 
 
 def test_mark_mcm_dependent_makes_variable_mcm_dependent():
-    context = _QiskitProgramContext()
+    context = QiskitProgramContext()
     context.add_qubits("q", 2)
     context.declare_variable("c", BoolType())
     context.mark_mcm_dependent("c")
@@ -1134,14 +1134,14 @@ def test_mark_mcm_dependent_makes_variable_mcm_dependent():
 
 
 def test_unmarked_variable_is_not_mcm_dependent():
-    context = _QiskitProgramContext()
+    context = QiskitProgramContext()
     context.add_qubits("q", 1)
     context.declare_variable("c", BoolType())
     assert not context.is_mcm_dependent(Identifier("c"))
 
 
 def test_track_mcm_dependency_propagates_from_mcm_variable():
-    context = _QiskitProgramContext()
+    context = QiskitProgramContext()
     context.add_qubits("q", 1)
     context.declare_variable("c", BoolType())
     context.declare_variable("d", BoolType())
@@ -1151,7 +1151,7 @@ def test_track_mcm_dependency_propagates_from_mcm_variable():
 
 
 def test_track_mcm_dependency_clears_when_rvalue_not_mcm():
-    context = _QiskitProgramContext()
+    context = QiskitProgramContext()
     context.add_qubits("q", 1)
     context.declare_variable("c", BoolType())
     context.declare_variable("d", BoolType())
@@ -1162,23 +1162,23 @@ def test_track_mcm_dependency_clears_when_rvalue_not_mcm():
 
 
 def test_iter_classical_scopes_yields_once():
-    context = _QiskitProgramContext()
+    context = QiskitProgramContext()
     count = sum(1 for _ in context.iter_classical_scopes(IntegerLiteral(0)))
     assert count == 1
 
 
 def test_is_mcm_dependent_range_definition():
-    context = _QiskitProgramContext()
+    context = QiskitProgramContext()
     assert context.is_mcm_dependent(RangeDefinition(IntegerLiteral(0), IntegerLiteral(3), None))
 
 
 def test_is_mcm_dependent_discrete_set():
-    context = _QiskitProgramContext()
+    context = QiskitProgramContext()
     assert context.is_mcm_dependent(DiscreteSet([IntegerLiteral(1), IntegerLiteral(2)]))
 
 
 def test_is_mcm_dependent_literal_not_dependent():
-    context = _QiskitProgramContext()
+    context = QiskitProgramContext()
     assert not context.is_mcm_dependent(IntegerLiteral(42))
 
 
@@ -1200,7 +1200,7 @@ if (c[0] == 1) {
 
 def test_classical_assignment_propagates_mcm():
     """Variable assigned from MCM result should be detected as MCM-dependent."""
-    context = _QiskitProgramContext()
+    context = QiskitProgramContext()
     context.add_qubits("q", 2)
     context.declare_variable("c", BoolType())
     context.declare_variable("d", BoolType())

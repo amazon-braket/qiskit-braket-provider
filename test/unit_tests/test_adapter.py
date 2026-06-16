@@ -44,8 +44,8 @@ from qiskit_braket_provider.providers.adapter import (
     _BRAKET_SUPPORTED_NOISES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
     _compile,
-    _get_controlled_gateset,
-    _SubstitutedTarget,
+    get_controlled_gateset,
+    SubstitutedTarget,
     _validate_angle_restrictions,
     aws_device_to_target,
     convert_qiskit_to_braket_circuit,
@@ -953,21 +953,21 @@ class TestAdapter(TestCase):
         with pytest.raises(ValueError):
             to_braket(qiskit_circuit)
 
-    def test_get_controlled_gateset(self):
+    def testget_controlled_gateset(self):
         """Tests that the correct controlled gateset is returned for all maximum qubit counts."""
         full_gateset = {"h", "s", "sdg", "sx", "rx", "ry", "rz", "cx", "cz"}
         restricted_gateset = {"rx", "cx", "sx"}
         max1 = {"ch", "cs", "csdg", "csx", "crx", "cry", "crz", "ccz"}
         max3 = max1.union({"c3sx"})
         unlimited = max3.union({"mcx"})
-        assert _get_controlled_gateset(full_gateset, 0) == set()
-        assert _get_controlled_gateset(full_gateset, 1) == max1
-        assert _get_controlled_gateset(full_gateset, 2) == max1
-        assert _get_controlled_gateset(full_gateset, 3) == max3
-        assert _get_controlled_gateset(full_gateset, 4) == max3
-        assert _get_controlled_gateset(full_gateset) == unlimited
-        assert _get_controlled_gateset(restricted_gateset, 3) == {"crx", "csx", "c3sx"}
-        assert _get_controlled_gateset(restricted_gateset) == {
+        assert get_controlled_gateset(full_gateset, 0) == set()
+        assert get_controlled_gateset(full_gateset, 1) == max1
+        assert get_controlled_gateset(full_gateset, 2) == max1
+        assert get_controlled_gateset(full_gateset, 3) == max3
+        assert get_controlled_gateset(full_gateset, 4) == max3
+        assert get_controlled_gateset(full_gateset) == unlimited
+        assert get_controlled_gateset(restricted_gateset, 3) == {"crx", "csx", "c3sx"}
+        assert get_controlled_gateset(restricted_gateset) == {
             "crx",
             "csx",
             "c3sx",
@@ -1791,8 +1791,8 @@ class TestThereAndBackAgain(TestCase):
         assert compiled.layout is not None
 
     def test_substitute_preserves_layout(self):
-        """_SubstitutedTarget._substitute should not strip layout set by transpile."""
-        target = _SubstitutedTarget(num_qubits=2)
+        """SubstitutedTarget._substitute should not strip layout set by transpile."""
+        target = SubstitutedTarget(num_qubits=2)
         target.add_instruction(
             HGate(), {(0,): InstructionProperties(), (1,): InstructionProperties()}
         )
