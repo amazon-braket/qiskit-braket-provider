@@ -924,6 +924,7 @@ class TestBraketEstimator(TestCase):
     def test_run_local_abelian_grouping_rejects_zero_observable_after_qiskit_simplify(self):
         """Tests that Qiskit container validation rejects zero-simplified observables."""
         circuit = QuantumCircuit(1)
+        circuit.h(0)
         observable = SparsePauliOp(["Z", "Z"], [1.0, -1.0])
         pub = (circuit, observable)
 

@@ -2,7 +2,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import TypeAlias
+from typing import SupportsFloat, SupportsIndex, TypeAlias, cast
 from uuid import uuid4
 
 import numpy as np
@@ -23,7 +23,7 @@ from braket.circuits.observables import Sum
 from braket.program_sets import CircuitBinding, ParameterSets, ProgramSet
 from braket.tasks import ProgramSetQuantumTaskResult, QuantumTask
 from braket.tasks.measurement_utils import samples_from_measurements
-from braket.tasks.program_set_quantum_task_result import MeasuredEntry
+from braket.tasks.program_set_quantum_task_result import CompositeEntry, MeasuredEntry
 from qiskit_braket_provider.providers.adapter import (
     rename_parameter,
     to_braket,
@@ -63,6 +63,9 @@ _ESTIMATOR_OPTION_NAMES = frozenset(BraketEstimatorOptions.__dataclass_fields__)
 
 
 _ParameterIndex: TypeAlias = tuple[int, ...]
+_ObservableValue: TypeAlias = SparsePauliOp | dict[str, complex]
+_TermRoutesByParam: TypeAlias = dict[_ParameterIndex, dict[str, dict[complex, list[int]]]]
+_GroupedPaulis: TypeAlias = list[tuple[str, tuple[str, ...]]]
 
 
 @dataclass(frozen=True)
@@ -395,7 +398,7 @@ class BraketEstimator(BaseEstimatorV2):
         options: BraketEstimatorOptions | dict[str, object] | None,
         run_options: dict[str, object],
     ) -> BraketEstimatorOptions:
-        option_values = (
+        option_values: dict[str, object] = (
             {
                 "default_precision": options.default_precision,
                 "abelian_grouping": options.abelian_grouping,
@@ -418,8 +421,12 @@ class BraketEstimator(BaseEstimatorV2):
         if unknown_options:
             raise ValueError(f"Unsupported estimator options: {unknown_options}")
 
+        default_precision_value = cast(
+            "str | SupportsFloat | SupportsIndex",
+            option_values.pop("default_precision", _DEFAULT_PRECISION),
+        )
         try:
-            default_precision = float(option_values.pop("default_precision", _DEFAULT_PRECISION))
+            default_precision = float(default_precision_value)
         except (TypeError, ValueError) as ex:
             raise TypeError("default_precision must be a positive float") from ex
         abelian_grouping = option_values.pop("abelian_grouping", True)
@@ -519,7 +526,10 @@ class BraketEstimator(BaseEstimatorV2):
         parameter_indices = np.empty(param_values.shape, dtype=object)
         for index in np.ndindex(param_values.shape):
             parameter_indices[index] = index
-        return np.broadcast_arrays(observables, parameter_indices)
+        observables_broadcast, parameter_indices_broadcast = np.broadcast_arrays(
+            observables, parameter_indices
+        )
+        return observables_broadcast, parameter_indices_broadcast
 
     @staticmethod
     def _per_term_bindings(
@@ -619,20 +629,24 @@ class BraketEstimator(BaseEstimatorV2):
         param_indices_broadcast: np.ndarray,
         param_values: BindingsArray,
     ) -> _PubMetadata:
-        term_routes_by_param = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
-        identity_routes = defaultdict(list)
-        for position, (param_indices, obs) in enumerate(
+        term_routes_by_param: _TermRoutesByParam = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(list))
+        )
+        identity_routes: dict[complex, list[int]] = defaultdict(list)
+        for position, (param_indices_value, obs_value) in enumerate(
             zip(param_indices_broadcast.flatten(), observables_broadcast.flatten(), strict=True)
         ):
+            param_indices = cast("_ParameterIndex", param_indices_value)
+            obs = cast("_ObservableValue", obs_value)
             for pauli, coefficient in BraketEstimator._observable_terms(obs):
                 if BraketEstimator._is_identity(pauli):
                     identity_routes[coefficient].append(position)
                 else:
                     term_routes_by_param[param_indices][pauli][coefficient].append(position)
 
-        basis_index_by_param_and_term = {}
-        parameter_indices_by_bases = defaultdict(list)
-        group_cache = {}
+        basis_index_by_param_and_term: dict[_ParameterIndex, dict[str, int]] = {}
+        parameter_indices_by_bases: dict[tuple[str, ...], list[_ParameterIndex]] = defaultdict(list)
+        group_cache: dict[tuple[str, ...], _GroupedPaulis] = {}
         for param_indices, term_routes in sorted(term_routes_by_param.items(), key=str):
             labels_key = tuple(sorted(term_routes))
             if labels_key not in group_cache:
@@ -671,7 +685,7 @@ class BraketEstimator(BaseEstimatorV2):
             )
 
             param_idx_map = {pk: idx for idx, pk in enumerate(matching_param_indices)}
-            routed_terms_by_basis = defaultdict(list)
+            routed_terms_by_basis: dict[int, list[_RoutingTarget]] = defaultdict(list)
             for param_indices in matching_param_indices:
                 for pauli, coefficient_routes in sorted(
                     term_routes_by_param[param_indices].items()
@@ -718,11 +732,11 @@ class BraketEstimator(BaseEstimatorV2):
         )
 
     @staticmethod
-    def _make_obs_key(obs_val: SparsePauliOp | dict[str, float]) -> str:
+    def _make_obs_key(obs_val: _ObservableValue) -> str:
         """Create a hashable key for observable values.
 
         Args:
-            obs_val (SparsePauliOp | dict[str, float]): A SparsePauliOp observable
+            obs_val (SparsePauliOp | dict[str, complex]): A SparsePauliOp observable
                 or dict representation
 
         Returns:
@@ -785,7 +799,7 @@ class BraketEstimator(BaseEstimatorV2):
 
     @staticmethod
     def _group_paulis(paulis: Iterable[str]) -> list[tuple[str, tuple[str, ...]]]:
-        grouped = defaultdict(list)
+        grouped: dict[str, list[str]] = defaultdict(list)
         op = SparsePauliOp.from_list([(pauli, 1.0) for pauli in sorted(paulis)])
         for commuting_group in op.group_commuting(qubit_wise=True):
             terms = tuple(pauli.to_label() for pauli in commuting_group.paulis)
@@ -848,7 +862,7 @@ class BraketEstimator(BaseEstimatorV2):
         return BraketEstimator._standard_error(samples)
 
     @staticmethod
-    def _sum_standard_error(program_result: object, param_idx: int) -> float:
+    def _sum_standard_error(program_result: CompositeEntry, param_idx: int) -> float:
         num_observables = len(program_result.observables)
         start = param_idx * num_observables
         return sum(
@@ -909,9 +923,10 @@ class BraketEstimator(BaseEstimatorV2):
                 binding_location = metadata.binding_locations.get((pub_index, local_binding_idx))
                 if binding_location is None:
                     raise ValueError("No task result location was recorded for estimator binding")
-                program_result = task_results[binding_location.task_index][
-                    binding_location.result_index
-                ]
+                program_result = cast(
+                    "CompositeEntry",
+                    task_results[binding_location.task_index][binding_location.result_index],
+                )
                 num_observables = len(program_result.observables)
 
                 if local_binding_idx in pub_meta.qwc_binding_metadata:
