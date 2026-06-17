@@ -368,12 +368,6 @@ def _emulator_one_qubit_properties() -> dict:
     }
 
 
-# A small, self-consistent set of capabilities (2 qubits, fully connected) that
-# satisfies the validation performed by ``LocalEmulator.from_device_properties``,
-# which a plain QPU mock does not (it requires ``standardized`` per-qubit metrics,
-# supported result types and qubit counts that all agree). The qubits are labelled
-# 1 and 2 rather than 0 and 1 so the tests exercise the non-contiguous qubit labels
-# of a real QPU, which a 0-based device would not catch.
 MOCK_EMULATOR_CAPABILITIES_JSON = {
     "braketSchemaHeader": {
         "name": "braket.device_schema.rigetti.rigetti_device_capabilities",
@@ -440,8 +434,6 @@ def mock_emulator_topology() -> DiGraph:
     return relabel_nodes(graph, {n: int(n) for n in graph.nodes})
 
 
-# Program-set action for a source device that supports OpenQASM program sets. The
-# emulator carries this through, so its backend reports program-set support too.
 MOCK_EMULATOR_PROGRAM_SET_ACTION = {
     "actionType": "braket.ir.openqasm.program_set",
     "version": ["1"],

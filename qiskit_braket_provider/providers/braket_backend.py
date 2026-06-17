@@ -49,11 +49,10 @@ T = TypeVar("T", bound=Device, covariant=True)  # noqa: PLC0105
 
 
 def _emulator_supports_program_sets(emulator: Emulator) -> bool:
-    """Whether the device emulated by ``emulator`` accepts OpenQASM program sets.
+    """Whether the emulated device accepts OpenQASM program sets.
 
-    An emulator exposes no ``properties`` of its own. It mirrors the source device's
-    restrictions through validation passes, so its ``ProgramSetValidator`` carries the
-    source device's actions and tells us whether program sets are supported.
+    An emulator has no ``properties``, so this reads the source device's actions
+    off the emulator's ``ProgramSetValidator`` pass instead.
     """
     return any(
         isinstance(emulator_pass, ProgramSetValidator)
@@ -124,10 +123,8 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
 class BraketLocalBackend(BraketBackend[LocalSimulator]):
     """Runs quantum circuits on a Braket local simulator or device emulator.
 
-    By default the backend wraps a local :class:`~braket.devices.LocalSimulator`
-    selected by ``name``. Passing a pre-built ``device``, such as the emulator
-    returned by :meth:`~braket.aws.AwsDevice.emulator`, runs circuits on that device
-    instead.
+    Wraps a ``LocalSimulator`` selected by ``name``, or a pre-built ``device``
+    such as the emulator from ``AwsDevice.emulator()`` when one is given.
     """
 
     def __init__(
@@ -150,12 +147,12 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
 
         Args:
             name (str): Name of backend. Default: ``default``.
-            device (Device | None): A pre-built local device to run on, for example the
-                emulator returned by ``AwsDevice.emulator()``. When omitted, a
-                ``LocalSimulator`` is selected by ``name``. Default: ``None``.
+            device (Device | None): A pre-built local device to run on, such as the
+                emulator from ``AwsDevice.emulator()``. Defaults to a ``LocalSimulator``
+                selected by ``name``. Default: ``None``.
             target (Target | None): Target for the backend. Built from the local
-                simulator when omitted, and required when ``device`` is supplied and
-                exposes no target of its own. Default: ``None``.
+                simulator when omitted, required when ``device`` is supplied.
+                Default: ``None``.
             qubit_labels (tuple[int, ...] | None): Qubit labels of the device, in
                 ascending order. Default: ``None``.
             **fields: Extra arguments.
@@ -505,9 +502,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
     def _resolve_compilation_args(
         self, native: bool, pass_manager: PassManager
     ) -> tuple[Target | None, set[str] | None, tuple[int, ...] | None]:
-        """
-        Determine multiple compilation args that all come from the same information
-        """
+        """Resolve the target, basis gates and qubit labels for circuit conversion."""
         if pass_manager:
             return None, None, self._qubit_labels
         if native or self._device.type == AwsDeviceType.SIMULATOR:
