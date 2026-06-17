@@ -10,9 +10,11 @@ from collections.abc import Iterable, Mapping
 from math import inf, pi
 from typing import Self, TypeAlias
 
+import qiskit.circuit.library as qiskit_gates
 from qiskit import QuantumCircuit
 from qiskit.circuit import (
     Barrier,
+    Gate,
     Measure,
     Parameter,
 )
@@ -45,14 +47,21 @@ from braket.devices import Device, LocalSimulator
 from braket.ir.openqasm.modifiers import Control
 from braket.parametric import FreeParameter, Parameterizable
 from qiskit_braket_provider.exception import QiskitBraketException
-from qiskit_braket_provider.providers.constants import (
-    _ADDITIONAL_U_GATES,
+from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_TO_QISKIT_NAMES,
     _CONTROLLED_GATES_BY_QUBIT_COUNT,
     _STANDARD_GATE_NAME_MAPPING,
-    _TRANSPILER_GATE_SUBSTITUTES,
 )
+
+_ADDITIONAL_U_GATES = {"u1", "u2", "u3"}
+
+_TRANSPILER_GATE_SUBSTITUTES: dict[tuple[str, tuple[float | str, ...]], Gate] = {
+    ("rx", (pi,)): qiskit_gates.XGate(),
+    ("rx", (-pi,)): qiskit_gates.XGate(),
+    ("rx", (pi / 2,)): qiskit_gates.SXGate(),
+    ("rx", (-pi / 2,)): qiskit_gates.SXdgGate(),
+}
 
 _ParamKey: TypeAlias = tuple[float | str, ...]
 _QubitSet: TypeAlias = set[tuple[int, ...]]
@@ -183,10 +192,10 @@ def gateset_from_properties(properties: OpenQASMDeviceActionProperties) -> set[s
         if isinstance(modifier, Control):
             max_control = modifier.max_qubits
             break
-    return gateset.union(get_controlled_gateset(gateset, max_control))
+    return gateset.union(_get_controlled_gateset(gateset, max_control))
 
 
-def get_controlled_gateset(base_gateset: set[str], max_qubits: int | None = None) -> set[str]:
+def _get_controlled_gateset(base_gateset: set[str], max_qubits: int | None = None) -> set[str]:
     """Returns the Qiskit gates expressible as controlled versions of existing Braket gates
 
     This set can be filtered by the maximum number of control qubits.
@@ -209,7 +218,6 @@ def get_controlled_gateset(base_gateset: set[str], max_qubits: int | None = None
     }
 
 
-# TODO: move target construction to a dedicated file; AwsDevice target construction is getting big
 def local_simulator_to_target(simulator: LocalSimulator) -> Target:
     """Converts properties of a Braket LocalSimulator into a Qiskit Target object.
 
@@ -260,7 +268,7 @@ def _simulator_target(device: Device, description: str) -> Target:
             if isinstance(modifier, Control):
                 max_control = modifier.max_qubits
                 break
-        for gate in get_controlled_gateset(target.keys(), max_control):
+        for gate in _get_controlled_gateset(target.keys(), max_control):
             if gate in _STANDARD_GATE_NAME_MAPPING:
                 target.add_instruction(_STANDARD_GATE_NAME_MAPPING[gate])
     target.add_instruction(Measure())

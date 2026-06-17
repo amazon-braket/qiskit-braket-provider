@@ -25,7 +25,7 @@ from qiskit_ionq import ionq_gates
 
 from braket.aws import AwsDevice
 from braket.circuits import Circuit, Gate, GateCalibrations, Instruction
-from braket.circuits import compiler_directives as braket_compiler_directives
+from braket.circuits import compiler_directives as compile_circuitsr_directives
 from braket.circuits import gates as braket_gates
 from braket.circuits import noises as braket_noises
 from braket.circuits import observables as braket_observables
@@ -45,12 +45,12 @@ from qiskit_braket_provider.providers.adapter import (
     _BRAKET_SUPPORTED_NOISES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
     SubstitutedTarget,
-    _compile,
+    _get_controlled_gateset,
     _validate_angle_restrictions,
     aws_device_to_target,
+    compile_circuits,
     convert_qiskit_to_braket_circuit,
     convert_qiskit_to_braket_circuits,
-    get_controlled_gateset,
     native_angle_restrictions,
     translate_sparse_pauli_op,
 )
@@ -630,8 +630,8 @@ class TestAdapter(TestCase):
             braket_operators.issubset({
                 braket_gates.Rx,
                 braket_gates.Rz,
-                braket_compiler_directives.StartVerbatimBox,
-                braket_compiler_directives.EndVerbatimBox,
+                compile_circuitsr_directives.StartVerbatimBox,
+                compile_circuitsr_directives.EndVerbatimBox,
             })
         )
         self.assertEqual(braket_circuit.qubits, {1})
@@ -950,7 +950,7 @@ class TestAdapter(TestCase):
         with pytest.raises(ValueError, match=r"Please rename your parameters."):
             to_braket(qiskit_circuit)
 
-    @patch("qiskit_braket_provider.providers.adapter.transpile")
+    @patch("qiskit_braket_provider.providers.compilation.transpile")
     def test_invalid_ctrl_state(self, mock_transpile: MagicMock):
         """Tests that control states other than all 1s are rejected."""
         qiskit_circuit = QuantumCircuit(2)
@@ -961,21 +961,21 @@ class TestAdapter(TestCase):
         with pytest.raises(ValueError):
             to_braket(qiskit_circuit)
 
-    def testget_controlled_gateset(self):
+    def test__get_controlled_gateset(self):
         """Tests that the correct controlled gateset is returned for all maximum qubit counts."""
         full_gateset = {"h", "s", "sdg", "sx", "rx", "ry", "rz", "cx", "cz"}
         restricted_gateset = {"rx", "cx", "sx"}
         max1 = {"ch", "cs", "csdg", "csx", "crx", "cry", "crz", "ccz"}
         max3 = max1.union({"c3sx"})
         unlimited = max3.union({"mcx"})
-        assert get_controlled_gateset(full_gateset, 0) == set()
-        assert get_controlled_gateset(full_gateset, 1) == max1
-        assert get_controlled_gateset(full_gateset, 2) == max1
-        assert get_controlled_gateset(full_gateset, 3) == max3
-        assert get_controlled_gateset(full_gateset, 4) == max3
-        assert get_controlled_gateset(full_gateset) == unlimited
-        assert get_controlled_gateset(restricted_gateset, 3) == {"crx", "csx", "c3sx"}
-        assert get_controlled_gateset(restricted_gateset) == {
+        assert _get_controlled_gateset(full_gateset, 0) == set()
+        assert _get_controlled_gateset(full_gateset, 1) == max1
+        assert _get_controlled_gateset(full_gateset, 2) == max1
+        assert _get_controlled_gateset(full_gateset, 3) == max3
+        assert _get_controlled_gateset(full_gateset, 4) == max3
+        assert _get_controlled_gateset(full_gateset) == unlimited
+        assert _get_controlled_gateset(restricted_gateset, 3) == {"crx", "csx", "c3sx"}
+        assert _get_controlled_gateset(restricted_gateset) == {
             "crx",
             "csx",
             "c3sx",
@@ -1841,7 +1841,7 @@ class TestThereAndBackAgain(TestCase):
             to_braket(circuit)
         self.assertIn("Cannot add global barrier to empty circuit", str(context.exception))
 
-    def test_compile_preserves_layout_with_verbatim_boxes(self):
+    def testcompile_circuits_preserves_layout_with_verbatim_boxes(self):
         """Layout from transpilation should be preserved after restoring verbatim boxes."""
         t = Target(num_qubits=2)
         t.add_instruction(HGate(), {(0,): InstructionProperties(), (1,): InstructionProperties()})
@@ -1854,7 +1854,7 @@ class TestThereAndBackAgain(TestCase):
         qc.cx(0, 1)
         qc.h(1)
 
-        result = _compile(qc, target=t)
+        result = compile_circuits(qc, target=t)
         compiled = result.circuits[0]
         assert compiled.layout is not None
 

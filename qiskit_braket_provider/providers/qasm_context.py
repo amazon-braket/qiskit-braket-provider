@@ -23,7 +23,7 @@ from qiskit.circuit import (
     Qubit,
     WhileLoopOp,
 )
-from sympy import Add, Expr, Mul, Pow, Symbol
+from sympy import Add, Expr, Mul, Pow, Symbol, acos, asin, atan, cos, exp, log, sin, tan
 
 from braket.default_simulator.openqasm._helpers.arrays import convert_range_def_to_range
 from braket.default_simulator.openqasm._helpers.casting import cast_to
@@ -31,10 +31,7 @@ from braket.default_simulator.openqasm._helpers.functions import (
     evaluate_binary_expression,
     evaluate_unary_expression,
 )
-from braket.default_simulator.openqasm.interpreter import (  # noqa: F401
-    Interpreter,
-    VerbatimBoxDelimiter,
-)
+from braket.default_simulator.openqasm.interpreter import VerbatimBoxDelimiter
 from braket.default_simulator.openqasm.parser.openqasm_ast import (
     ArrayLiteral,
     BinaryExpression,
@@ -57,11 +54,21 @@ from braket.default_simulator.openqasm.parser.openqasm_ast import (
 from braket.default_simulator.openqasm.program_context import (
     AbstractProgramContext,
 )
-from qiskit_braket_provider.providers.constants import (
+from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_VERBATIM_BOX_NAME,
-    _SYMPY_FUNCTION_TO_QISKIT_METHOD,
 )
+
+_SYMPY_FUNCTION_TO_QISKIT_METHOD = {
+    sin: "sin",
+    cos: "cos",
+    tan: "tan",
+    asin: "arcsin",
+    acos: "arccos",
+    atan: "arctan",
+    exp: "exp",
+    log: "log",
+}
 
 
 def _qiskit_numeric_power(exp: Expr) -> int | float:
@@ -70,7 +77,9 @@ def _qiskit_numeric_power(exp: Expr) -> int | float:
     return int(exp) if getattr(exp, "is_integer", False) else float(exp)
 
 
-def sympy_to_qiskit(expr: Expr, param_map: dict[str, Parameter]) -> ParameterExpression | Parameter:
+def _sympy_to_qiskit(
+    expr: Expr, param_map: dict[str, Parameter]
+) -> ParameterExpression | Parameter:
     """convert a sympy expression to qiskit Parameters recursively"""
     match expr:
         case Symbol(name=name):
@@ -78,16 +87,16 @@ def sympy_to_qiskit(expr: Expr, param_map: dict[str, Parameter]) -> ParameterExp
                 param_map[name] = Parameter(name)
             return param_map[name]
         case Add(args=args):
-            return sum(sympy_to_qiskit(arg, param_map) for arg in args)
+            return sum(_sympy_to_qiskit(arg, param_map) for arg in args)
         case Mul(args=args):
-            return prod(sympy_to_qiskit(arg, param_map) for arg in args)
+            return prod(_sympy_to_qiskit(arg, param_map) for arg in args)
         case Pow(base=base, exp=exp):
-            return sympy_to_qiskit(base, param_map) ** _qiskit_numeric_power(exp)
+            return _sympy_to_qiskit(base, param_map) ** _qiskit_numeric_power(exp)
         case obj if getattr(obj, "is_number", False) and getattr(obj, "is_real", False):
             return float(obj)
         case obj if obj.func in _SYMPY_FUNCTION_TO_QISKIT_METHOD and len(obj.args) == 1:
             method_name = _SYMPY_FUNCTION_TO_QISKIT_METHOD[obj.func]
-            return getattr(sympy_to_qiskit(obj.args[0], param_map), method_name)()
+            return getattr(_sympy_to_qiskit(obj.args[0], param_map), method_name)()
     raise TypeError(f"unrecognized parameter type in conversion: {type(expr)}")
 
 
@@ -217,7 +226,7 @@ class QiskitProgramContext(AbstractProgramContext):
             active.append(CircuitInstruction(gate, target))
 
     def handle_parameter_value(self, value: Number | Expr) -> Number | Parameter:
-        return sympy_to_qiskit(value, self._param_map) if isinstance(value, Expr) else value
+        return _sympy_to_qiskit(value, self._param_map) if isinstance(value, Expr) else value
 
     def add_measure(
         self,

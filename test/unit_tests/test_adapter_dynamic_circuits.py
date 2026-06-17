@@ -25,7 +25,7 @@ from braket.default_simulator.openqasm.parser.openqasm_ast import (
     UnaryOperator,
 )
 from qiskit_braket_provider import to_qiskit
-from qiskit_braket_provider.providers.adapter import QiskitProgramContext, _compile
+from qiskit_braket_provider.providers.adapter import QiskitProgramContext, compile_circuits
 
 
 def _get_if_else_ops(circuit: QuantumCircuit) -> list[CircuitInstruction]:
@@ -502,9 +502,9 @@ if (c[0] == 1) {
         ),
     ],
 )
-def test_compile_preserves_if_else_ops(qasm: str, expected_if_else_count: int, mcm_target: Target):
-    """IfElseOps should survive compilation through _compile."""
-    result = _compile(qasm, target=mcm_target)
+def testcompile_circuits_preserves_if_else_ops(qasm: str, expected_if_else_count: int, mcm_target: Target):
+    """IfElseOps should survive compilation through compile_circuits."""
+    result = compile_circuits(qasm, target=mcm_target)
     compiled_circuit = result.circuits[0]
     if_else_ops = [
         instr for instr in compiled_circuit.data if isinstance(instr.operation, IfElseOp)
@@ -512,7 +512,7 @@ def test_compile_preserves_if_else_ops(qasm: str, expected_if_else_count: int, m
     assert len(if_else_ops) == expected_if_else_count
 
 
-def test_compile_if_else_branch_bodies_intact(mcm_target: Target):
+def testcompile_circuits_if_else_branch_bodies_intact(mcm_target: Target):
     """Branch body gate content and qubit targets should be preserved after compilation."""
     qasm = """
 OPENQASM 3.0;
@@ -525,7 +525,7 @@ if (c[0] == 1) {
     x q[1];
 }
 """
-    result = _compile(qasm, target=mcm_target)
+    result = compile_circuits(qasm, target=mcm_target)
     compiled_circuit = result.circuits[0]
     op = next(
         instr for instr in compiled_circuit.data if isinstance(instr.operation, IfElseOp)
@@ -536,7 +536,7 @@ if (c[0] == 1) {
     assert _get_ops_with_qubits(false_body) == [("x", [1])]
 
 
-def test_compile_if_else_condition_preserved(mcm_target: Target):
+def testcompile_circuits_if_else_condition_preserved(mcm_target: Target):
     """The condition clbit and value should be preserved after compilation."""
     qasm = """
 OPENQASM 3.0;
@@ -547,7 +547,7 @@ if (c[0] == 1) {
     h q[1];
 }
 """
-    result = _compile(qasm, target=mcm_target)
+    result = compile_circuits(qasm, target=mcm_target)
     compiled_circuit = result.circuits[0]
     instr = next(i for i in compiled_circuit.data if isinstance(i.operation, IfElseOp))
     op = instr.operation
