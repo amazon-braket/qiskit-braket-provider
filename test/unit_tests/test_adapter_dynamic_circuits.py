@@ -502,7 +502,9 @@ if (c[0] == 1) {
         ),
     ],
 )
-def testcompile_circuits_preserves_if_else_ops(qasm: str, expected_if_else_count: int, mcm_target: Target):
+def testcompile_circuits_preserves_if_else_ops(
+    qasm: str, expected_if_else_count: int, mcm_target: Target
+):
     """IfElseOps should survive compilation through compile_circuits."""
     result = compile_circuits(qasm, target=mcm_target)
     compiled_circuit = result.circuits[0]
