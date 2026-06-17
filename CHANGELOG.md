@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.16.0 (2026-06-17)
+
+### Features
+
+ * add device emulator support
+
+### Bug Fixes and Other Changes
+
+ * Don't use qubit labels for virtual qubits
+ * allow empty circuit in _get_circuits
+
 ## v0.15.0 (2026-06-16)
 
 ### Features
