@@ -25,7 +25,7 @@ from qiskit_ionq import ionq_gates
 
 from braket.aws import AwsDevice
 from braket.circuits import Circuit, Gate, GateCalibrations, Instruction
-from braket.circuits import compiler_directives as compile_circuitsr_directives
+from braket.circuits import compiler_directives as braket_circuit_directives
 from braket.circuits import gates as braket_gates
 from braket.circuits import noises as braket_noises
 from braket.circuits import observables as braket_observables
@@ -630,8 +630,8 @@ class TestAdapter(TestCase):
             braket_operators.issubset({
                 braket_gates.Rx,
                 braket_gates.Rz,
-                compile_circuitsr_directives.StartVerbatimBox,
-                compile_circuitsr_directives.EndVerbatimBox,
+                braket_circuit_directives.StartVerbatimBox,
+                braket_circuit_directives.EndVerbatimBox,
             })
         )
         self.assertEqual(braket_circuit.qubits, {1})
@@ -961,7 +961,7 @@ class TestAdapter(TestCase):
         with pytest.raises(ValueError):
             to_braket(qiskit_circuit)
 
-    def test__get_controlled_gateset(self):
+    def test_get_controlled_gateset(self):
         """Tests that the correct controlled gateset is returned for all maximum qubit counts."""
         full_gateset = {"h", "s", "sdg", "sx", "rx", "ry", "rz", "cx", "cz"}
         restricted_gateset = {"rx", "cx", "sx"}
@@ -1841,7 +1841,7 @@ class TestThereAndBackAgain(TestCase):
             to_braket(circuit)
         self.assertIn("Cannot add global barrier to empty circuit", str(context.exception))
 
-    def testcompile_circuits_preserves_layout_with_verbatim_boxes(self):
+    def test_compile_circuits_preserves_layout_with_verbatim_boxes(self):
         """Layout from transpilation should be preserved after restoring verbatim boxes."""
         t = Target(num_qubits=2)
         t.add_instruction(HGate(), {(0,): InstructionProperties(), (1,): InstructionProperties()})

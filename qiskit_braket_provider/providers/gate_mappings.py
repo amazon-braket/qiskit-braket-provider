@@ -1,7 +1,7 @@
 """Shared constants and gate mapping tables.
 
 This module contains the gate mapping dictionaries and constants used across
-adapter.py, target.py, and qasm_context.py.
+adapter.py, target.py, qasm_context.py, and compilation.py.
 """
 
 from collections.abc import Callable

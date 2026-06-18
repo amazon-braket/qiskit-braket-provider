@@ -7,16 +7,14 @@ and the run() endpoints, including verbatim box handling and transpilation.
 import warnings
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TypeAlias, TypeVar
+from typing import TypeVar
 
 from qiskit import QuantumCircuit, transpile
 from qiskit.circuit import Barrier, BoxOp, Measure
 from qiskit.transpiler import PassManager, Target
 
 from braket.aws import AwsDevice
-from braket.circuits import Circuit
 from braket.devices import Device
-from braket.ir.openqasm import Program
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_TO_QISKIT_NAMES,
@@ -28,7 +26,6 @@ from qiskit_braket_provider.providers.target import (
     local_simulator_to_target,
 )
 
-_Translatable: TypeAlias = QuantumCircuit | Circuit | Program | str
 _T = TypeVar("_T")
 
 
@@ -123,7 +120,7 @@ def _restore_verbatim_boxes(
     if remaining_boxes:
         raise ValueError(
             f"Compiler error while processing verbatim boxes. Expected {barrier_count} "
-            "verbatim boxes, but found {len(verbatim_boxes)}."
+            f"verbatim boxes, but found {len(verbatim_boxes)}."
         )
 
     return reconstructed_circuit
@@ -134,7 +131,6 @@ class _CompilationContext:
     """Internal result from compile_circuits containing compiled circuits and resolved state."""
 
     circuits: list[QuantumCircuit]
-    single_instance: bool
     target: Target | None
     qubit_labels: Sequence[int] | None
     verbatim: bool | None
@@ -155,7 +151,7 @@ def _default_target(circuits: Iterable[QuantumCircuit]) -> Target:
 
 
 def compile_circuits(
-    circuits: _Translatable | Iterable[_Translatable] = None,
+    circuits: QuantumCircuit | Iterable[QuantumCircuit] = None,
     *args,
     qubit_labels: Sequence[int] | None = None,
     target: Target | None = None,
@@ -168,18 +164,16 @@ def compile_circuits(
     num_processes: int | None = None,
     pass_manager: PassManager | None = None,
     braket_device: Device | None = None,
-    add_measurements: bool = True,
-    circuit: _Translatable | Iterable[_Translatable] | None = None,
     connectivity: list[list[int]] | None = None,
     verbatim_box_name: str = _BRAKET_VERBATIM_BOX_NAME,
     layout_method: str | None = None,
     routing_method: str | None = None,
     seed_transpiler: int | None = None,
 ) -> _CompilationContext:
-    # Import here to avoid circular dependency
-    from qiskit_braket_provider.providers.adapter import to_qiskit
+    if isinstance(circuits, QuantumCircuit):
+        circuits = [circuits]
+    circuits = list(circuits)
 
-    circuits, single_instance = _get_circuits(circuits, circuit, add_measurements, to_qiskit)
     if len(args) > 4:
         raise ValueError(f"Unknown arguments passed: {args[4:]}")
     padded = args + (None,) * max(0, 4 - len(args))
@@ -290,7 +284,6 @@ def compile_circuits(
 
     return _CompilationContext(
         circuits=circuits,
-        single_instance=single_instance,
         target=target,
         qubit_labels=qubit_labels,
         verbatim=verbatim,
@@ -298,32 +291,6 @@ def compile_circuits(
         angle_restrictions=angle_restrictions,
         pass_manager=pass_manager,
     )
-
-
-def _get_circuits(
-    circuits: _Translatable | Iterable[_Translatable] | None,
-    circuit: _Translatable | Iterable[_Translatable] | None,
-    add_measurements: bool,
-    to_qiskit: Callable,
-) -> tuple[list[QuantumCircuit], bool]:
-    if circuit is not None and circuits is not None:
-        raise ValueError("Cannot specify both circuits and circuit")
-    if circuit is None and circuits is None:
-        raise ValueError("Must specify circuits to transpile")
-    if circuit is not None:
-        warnings.warn(
-            "circuit is deprecated; use circuits instead.", DeprecationWarning, stacklevel=1
-        )
-        circuits = circuit
-    single_instance = isinstance(circuits, _Translatable) or not isinstance(circuits, Iterable)
-    if single_instance:
-        circuits = [circuits]
-    return [
-        to_qiskit(c, add_measurements=add_measurements)
-        if isinstance(c, (Circuit, Program, str))
-        else c
-        for c in circuits
-    ], single_instance
 
 
 def _check_positional(pos: _T, kw: _T, name: str) -> _T:

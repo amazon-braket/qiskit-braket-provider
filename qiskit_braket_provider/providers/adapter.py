@@ -8,7 +8,7 @@ sequences that should not be optimized.
 
 import warnings
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
-from typing import Any, overload
+from typing import Any, TypeAlias, overload
 
 import numpy as np
 import qiskit.circuit.library as qiskit_gates
@@ -37,9 +37,7 @@ from qiskit_braket_provider.providers.compilation import (
     _CompilationContext,  # noqa: F401
     _default_target,  # noqa: F401
     _extract_verbatim_boxes,  # noqa: F401
-    _get_circuits,  # noqa: F401
     _restore_verbatim_boxes,  # noqa: F401
-    _Translatable,
     compile_circuits,
 )
 from qiskit_braket_provider.providers.gate_mappings import (
@@ -67,6 +65,8 @@ from qiskit_braket_provider.providers.target import (
 
 add_equivalences()
 
+_Translatable: TypeAlias = QuantumCircuit | Circuit | Program | str
+
 _EPS = 1e-10  # global variable used to chop very small numbers to zero
 
 _BRAKET_SUPPORTED_NOISES = [
@@ -88,6 +88,37 @@ _PAULI_MAP = {
     "Y": braket_observables.Y,
     "Z": braket_observables.Z,
 }
+
+
+def _get_circuits(
+    circuits: _Translatable | Iterable[_Translatable] | None,
+    circuit: _Translatable | Iterable[_Translatable] | None,
+    add_measurements: bool,
+    to_qiskit_fn: Callable,
+) -> tuple[list[QuantumCircuit], bool]:
+    """Normalize circuit inputs to a list of QuantumCircuits.
+
+    Handles deprecated `circuit` kwarg, single vs list detection,
+    and conversion of Circuit/Program/str to QuantumCircuit.
+    """
+    if circuit is not None and circuits is not None:
+        raise ValueError("Cannot specify both circuits and circuit")
+    if circuit is None and circuits is None:
+        raise ValueError("Must specify circuits to transpile")
+    if circuit is not None:
+        warnings.warn(
+            "circuit is deprecated; use circuits instead.", DeprecationWarning, stacklevel=1
+        )
+        circuits = circuit
+    single_instance = isinstance(circuits, _Translatable) or not isinstance(circuits, Iterable)
+    if single_instance:
+        circuits = [circuits]
+    return [
+        to_qiskit_fn(c, add_measurements=add_measurements)
+        if isinstance(c, (Circuit, Program, str))
+        else c
+        for c in circuits
+    ], single_instance
 
 
 @overload
@@ -200,8 +231,10 @@ def to_braket(
     Returns:
         Circuit | list[Circuit]: Braket circuit or circuits
     """
+    qc_circuits, single_instance = _get_circuits(circuits, circuit, add_measurements, to_qiskit)
+
     result = compile_circuits(
-        circuits,
+        qc_circuits,
         *args,
         qubit_labels=qubit_labels,
         target=target,
@@ -214,8 +247,6 @@ def to_braket(
         num_processes=num_processes,
         pass_manager=pass_manager,
         braket_device=braket_device,
-        add_measurements=add_measurements,
-        circuit=circuit,
         connectivity=connectivity,
         verbatim_box_name=verbatim_box_name,
         layout_method=layout_method,
@@ -234,7 +265,7 @@ def to_braket(
         )
         for circ in result.circuits
     ]
-    return translated[0] if result.single_instance else translated
+    return translated[0] if single_instance else translated
 
 
 def _translate_to_braket(
