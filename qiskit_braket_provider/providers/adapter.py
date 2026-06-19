@@ -2063,20 +2063,21 @@ def to_qiskit(
         target = [qiskit_circuit.qubits[qubit_map[i]] for i in control_qubits]
         target += [qiskit_circuit.qubits[qubit_map[i]] for i in instruction.target]
 
-        if gate_name == "measure":
-            qiskit_circuit.append(gate, target, [cbit])
-            cbit += 1
-        elif gate_name == "startverbatimbox":
-            continue
-        elif gate_name == "endverbatimbox":
-            qiskit_circuit = qiskit_circuit.compose(
-                BoxOp(verbatim_buffer, label=_BRAKET_VERBATIM_BOX_NAME)
-            )
-            verbatim_buffer = None
-        elif verbatim_buffer is not None:
-            verbatim_buffer.append(gate, target)
-        else:
-            qiskit_circuit.append(gate, target)
+        match operator, verbatim_buffer is None:
+            case measure.Measure(), _:
+                qiskit_circuit.append(gate, target, [cbit])
+                cbit += 1
+            case compiler_directives.StartVerbatimBox(), _:
+                continue
+            case compiler_directives.EndVerbatimBox(), _:
+                qiskit_circuit = qiskit_circuit.compose(
+                    BoxOp(verbatim_buffer, label=_BRAKET_VERBATIM_BOX_NAME)
+                )
+                verbatim_buffer = None
+            case _, False:
+                verbatim_buffer.append(gate, target)
+            case _, True:
+                qiskit_circuit.append(gate, target)
     if num_measurements == 0 and add_measurements:
         qiskit_circuit.measure_all()
     return qiskit_circuit
