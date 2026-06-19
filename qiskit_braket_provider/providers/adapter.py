@@ -50,7 +50,7 @@ from sympy import Add, Expr, Mul, Pow, Symbol, acos, asin, atan, cos, exp, log, 
 
 from braket import experimental_capabilities as braket_expcaps
 from braket.aws import AwsDevice, AwsDeviceType
-from braket.circuits import Circuit, Instruction, measure
+from braket.circuits import Circuit, Instruction, compiler_directives, measure
 from braket.circuits import Observable as BraketObservable
 from braket.circuits import gates as braket_gates
 from braket.circuits import noises as braket_noises
@@ -2033,28 +2033,27 @@ def to_qiskit(
     for instruction in circuit.instructions:
         operator = instruction.operator
         gate_name = operator.name.lower()
-
-        # Handle barrier separately
-        if gate_name == "barrier":
-            barrier_qubits = [qiskit_circuit.qubits[qubit_map[i]] for i in instruction.target]
-            qiskit_circuit.barrier(barrier_qubits)
-            continue
-        if gate_name in _BRAKET_SUPPORTED_NOISES:
-            gate = _create_qiskit_kraus(operator.to_matrix())
-        elif gate_name == "unitary":
-            gate = _create_qiskit_unitary(operator.to_matrix())
-        elif gate_name == "startverbatimbox":
-            if verbatim_buffer is not None:
-                raise ValueError("Nested verbatim boxes are not supported")
-            verbatim_buffer = QuantumCircuit(circuit.qubit_count, num_measurements)
-        elif gate_name == "endverbatimbox":
-            pass
-        else:
-            gate = _create_qiskit_gate(
-                gate_name,
-                (operator.parameters if isinstance(operator, Parameterizable) else []),
-                parameter_map,
-            )
+        match operator:
+            case compiler_directives.Barrier():
+                barrier_qubits = [qiskit_circuit.qubits[qubit_map[i]] for i in instruction.target]
+                qiskit_circuit.barrier(barrier_qubits)
+                continue
+            case braket_noises.Noise() | braket_noises.Kraus():
+                gate = _create_qiskit_kraus(operator.to_matrix())
+            case braket_gates.Unitary():
+                gate = _create_qiskit_unitary(operator.to_matrix())
+            case compiler_directives.StartVerbatimBox():
+                if verbatim_buffer is not None:
+                    raise ValueError("Nested verbatim boxes are not supported")
+                verbatim_buffer = QuantumCircuit(circuit.qubit_count, num_measurements)
+            case compiler_directives.EndVerbatimBox():
+                pass
+            case _:
+                gate = _create_qiskit_gate(
+                    gate_name,
+                    (operator.parameters if isinstance(operator, Parameterizable) else []),
+                    parameter_map,
+                )
         if (power := instruction.power) != 1:
             gate = gate**power
         if control_qubits := instruction.control:
