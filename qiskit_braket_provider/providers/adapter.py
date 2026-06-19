@@ -50,7 +50,7 @@ from sympy import Add, Expr, Mul, Pow, Symbol, acos, asin, atan, cos, exp, log, 
 
 from braket import experimental_capabilities as braket_expcaps
 from braket.aws import AwsDevice, AwsDeviceType
-from braket.circuits import Circuit, Instruction, measure
+from braket.circuits import Circuit, Instruction, compiler_directives, measure
 from braket.circuits import Observable as BraketObservable
 from braket.circuits import gates as braket_gates
 from braket.circuits import noises as braket_noises
@@ -2026,29 +2026,34 @@ def to_qiskit(
         isinstance(instr.operator, measure.Measure) for instr in circuit.instructions
     )
     qiskit_circuit = QuantumCircuit(circuit.qubit_count, num_measurements)
+    verbatim_buffer: QuantumCircuit | None = None
     qubit_map = {int(qubit): index for index, qubit in enumerate(sorted(circuit.qubits))}
     parameter_map: dict[str, Parameter] = {}
     cbit = 0
     for instruction in circuit.instructions:
         operator = instruction.operator
         gate_name = operator.name.lower()
-
-        # Handle barrier separately
-        if gate_name == "barrier":
-            barrier_qubits = [qiskit_circuit.qubits[qubit_map[i]] for i in instruction.target]
-            qiskit_circuit.barrier(barrier_qubits)
-            continue
-
-        if gate_name in _BRAKET_SUPPORTED_NOISES:
-            gate = _create_qiskit_kraus(operator.to_matrix())
-        elif gate_name == "unitary":
-            gate = _create_qiskit_unitary(operator.to_matrix())
-        else:
-            gate = _create_qiskit_gate(
-                gate_name,
-                (operator.parameters if isinstance(operator, Parameterizable) else []),
-                parameter_map,
-            )
+        match operator:
+            case compiler_directives.Barrier():
+                barrier_qubits = [qiskit_circuit.qubits[qubit_map[i]] for i in instruction.target]
+                qiskit_circuit.barrier(barrier_qubits)
+                continue
+            case braket_noises.Noise() | braket_noises.Kraus():
+                gate = _create_qiskit_kraus(operator.to_matrix())
+            case braket_gates.Unitary():
+                gate = _create_qiskit_unitary(operator.to_matrix())
+            case compiler_directives.StartVerbatimBox():
+                if verbatim_buffer is not None:
+                    raise ValueError("Nested verbatim boxes are not supported")
+                verbatim_buffer = QuantumCircuit(circuit.qubit_count, num_measurements)
+            case compiler_directives.EndVerbatimBox():
+                pass
+            case _:
+                gate = _create_qiskit_gate(
+                    gate_name,
+                    (operator.parameters if isinstance(operator, Parameterizable) else []),
+                    parameter_map,
+                )
         if (power := instruction.power) != 1:
             gate = gate**power
         if control_qubits := instruction.control:
@@ -2058,11 +2063,21 @@ def to_qiskit(
         target = [qiskit_circuit.qubits[qubit_map[i]] for i in control_qubits]
         target += [qiskit_circuit.qubits[qubit_map[i]] for i in instruction.target]
 
-        if gate_name == "measure":
-            qiskit_circuit.append(gate, target, [cbit])
-            cbit += 1
-        else:
-            qiskit_circuit.append(gate, target)
+        match operator, verbatim_buffer is None:
+            case measure.Measure(), _:
+                qiskit_circuit.append(gate, target, [cbit])
+                cbit += 1
+            case compiler_directives.StartVerbatimBox(), _:
+                continue
+            case compiler_directives.EndVerbatimBox(), _:
+                qiskit_circuit = qiskit_circuit.compose(
+                    BoxOp(verbatim_buffer, label=_BRAKET_VERBATIM_BOX_NAME)
+                )
+                verbatim_buffer = None
+            case _, False:
+                verbatim_buffer.append(gate, target)
+            case _, True:
+                qiskit_circuit.append(gate, target)
     if num_measurements == 0 and add_measurements:
         qiskit_circuit.measure_all()
     return qiskit_circuit
