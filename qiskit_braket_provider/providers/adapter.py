@@ -2026,6 +2026,7 @@ def to_qiskit(
         isinstance(instr.operator, measure.Measure) for instr in circuit.instructions
     )
     qiskit_circuit = QuantumCircuit(circuit.qubit_count, num_measurements)
+    verbatim_buffer: QuantumCircuit | None = None
     qubit_map = {int(qubit): index for index, qubit in enumerate(sorted(circuit.qubits))}
     parameter_map: dict[str, Parameter] = {}
     cbit = 0
@@ -2038,11 +2039,16 @@ def to_qiskit(
             barrier_qubits = [qiskit_circuit.qubits[qubit_map[i]] for i in instruction.target]
             qiskit_circuit.barrier(barrier_qubits)
             continue
-
         if gate_name in _BRAKET_SUPPORTED_NOISES:
             gate = _create_qiskit_kraus(operator.to_matrix())
         elif gate_name == "unitary":
             gate = _create_qiskit_unitary(operator.to_matrix())
+        elif gate_name == "startverbatimbox":
+            if verbatim_buffer is not None:
+                raise ValueError("Nested verbatim boxes are not supported")
+            verbatim_buffer = QuantumCircuit(circuit.qubit_count, num_measurements)
+        elif gate_name == "endverbatimbox":
+            pass
         else:
             gate = _create_qiskit_gate(
                 gate_name,
@@ -2061,6 +2067,15 @@ def to_qiskit(
         if gate_name == "measure":
             qiskit_circuit.append(gate, target, [cbit])
             cbit += 1
+        elif gate_name == "startverbatimbox":
+            continue
+        elif gate_name == "endverbatimbox":
+            qiskit_circuit = qiskit_circuit.compose(
+                BoxOp(verbatim_buffer, label=_BRAKET_VERBATIM_BOX_NAME)
+            )
+            verbatim_buffer = None
+        elif verbatim_buffer is not None:
+            verbatim_buffer.append(gate, target)
         else:
             qiskit_circuit.append(gate, target)
     if num_measurements == 0 and add_measurements:
