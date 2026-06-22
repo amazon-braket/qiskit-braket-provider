@@ -538,7 +538,7 @@ if (c[0] == 1) {
     assert _get_ops_with_qubits(false_body) == [("x", [1])]
 
 
-def test_circuits_if_else_condition_preserved(mcm_target: Target):
+def test_compile_circuits_if_else_condition_preserved(mcm_target: Target):
     """The condition clbit and value should be preserved after compilation."""
     qasm = """
 OPENQASM 3.0;

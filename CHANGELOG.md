@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.17.0 (2026-06-22)
+
+### Features
+
+ * add abelian grouping of commuting observables to BraketEstimator
+ * add verbatim support from Circuits to QuantumCircuit
+
 ## v0.16.0 (2026-06-17)
 
 ### Features

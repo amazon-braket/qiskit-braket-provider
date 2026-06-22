@@ -11,7 +11,10 @@ from braket.default_simulator.openqasm.interpreter import VerbatimBoxDelimiter
 from braket.default_simulator.openqasm.parser.openqasm_ast import BitType, Identifier
 from braket.ir.openqasm import Program
 from qiskit_braket_provider import to_qiskit
-from qiskit_braket_provider.providers.adapter import QiskitProgramContext
+from qiskit_braket_provider.providers.adapter import (
+    _BRAKET_VERBATIM_BOX_NAME,
+    QiskitProgramContext,
+)
 
 
 def _get_box_ops(qiskit_circuit: QuantumCircuit) -> list[CircuitInstruction]:
@@ -349,3 +352,25 @@ def test_bit_declaration_with_identifier_size_in_verbatim():
     ctx = QiskitProgramContext()
     ctx.declare_variable("c", BitType(size=Identifier(name="n")))
     assert ctx.circuit.num_clbits == 0
+
+
+def test_braket_to_qiskit_verbatim_instruciton():
+    test = Circuit()
+    test.add_verbatim_box(Circuit().h(0).x(1))
+
+    circuit = QuantumCircuit(
+        2,
+    )
+    circuit.h(0)
+    circuit.x(1)
+    boxed = QuantumCircuit(
+        2,
+    )
+    boxed = boxed.compose(BoxOp(circuit, label=_BRAKET_VERBATIM_BOX_NAME))
+    assert to_qiskit(test, add_measurements=False) == boxed
+
+
+def test_nested_error():
+    test = Circuit().add_verbatim_box(Circuit().add_verbatim_box(Circuit().h(0).x(1)))
+    with pytest.raises(ValueError, match="Nested verbatim boxes are not supported"):
+        assert to_qiskit(test)

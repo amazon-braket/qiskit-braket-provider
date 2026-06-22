@@ -1,6 +1,6 @@
 """OpenQASM 3 to Qiskit circuit context.
 
-This module provides _QiskitProgramContext which interprets OpenQASM 3 programs
+This module provides QiskitProgramContext which interprets OpenQASM 3 programs
 into Qiskit circuits, handling conditions, loops, verbatim markers, and
 mid-circuit measurement.
 """
