@@ -69,6 +69,14 @@ _ParameterRestrictions: TypeAlias = dict[str, dict[_ParamKey, _QubitSet]]
 
 
 class SubstitutedTarget(Target):
+    """A transpiler target that applies qubit-specific gate substitutions after transpilation.
+
+    This extends Qiskit's :class:`~qiskit.transpiler.Target` to support devices where
+    certain gates must be replaced with hardware-specific equivalents on particular qubits
+    (e.g. IonQ's GPi/GPi2/MS gate decompositions). The substitutions are applied as a
+    post-transpilation pass.
+    """
+
     def __new__(cls, *args, **kwargs) -> Self:
         out = super().__new__(cls, *args, **kwargs)
         gate_substitutes: dict[str, dict[tuple[int, ...], QiskitInstruction]] = {}

@@ -34,7 +34,7 @@ from braket.ir.openqasm import Program
 from braket.parametric import FreeParameter, FreeParameterExpression, Parameterizable
 from qiskit_braket_provider.providers.compilation import (
     _T,  # noqa: F401
-    _CompilationContext,  # noqa: F401
+    CompilationContext,  # noqa: F401
     _default_target,  # noqa: F401
     _extract_verbatim_boxes,  # noqa: F401
     _restore_verbatim_boxes,  # noqa: F401
@@ -94,7 +94,6 @@ def _get_circuits(
     circuits: _Translatable | Iterable[_Translatable] | None,
     circuit: _Translatable | Iterable[_Translatable] | None,
     add_measurements: bool,
-    to_qiskit_fn: Callable,
 ) -> tuple[list[QuantumCircuit], bool]:
     """Normalize circuit inputs to a list of QuantumCircuits.
 
@@ -114,7 +113,7 @@ def _get_circuits(
     if single_instance:
         circuits = [circuits]
     return [
-        to_qiskit_fn(c, add_measurements=add_measurements)
+        to_qiskit(c, add_measurements=add_measurements)
         if isinstance(c, (Circuit, Program, str))
         else c
         for c in circuits
@@ -231,7 +230,7 @@ def to_braket(
     Returns:
         Circuit | list[Circuit]: Braket circuit or circuits
     """
-    qc_circuits, single_instance = _get_circuits(circuits, circuit, add_measurements, to_qiskit)
+    qc_circuits, single_instance = _get_circuits(circuits, circuit, add_measurements)
 
     result = compile_circuits(
         qc_circuits,

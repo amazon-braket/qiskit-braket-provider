@@ -127,8 +127,18 @@ def _restore_verbatim_boxes(
 
 
 @dataclass(frozen=True)
-class _CompilationContext:
-    """Internal result from compile_circuits containing compiled circuits and resolved state."""
+class CompilationContext:
+    """Result of :func:`compile_circuits` containing compiled circuits and resolved state.
+
+    Attributes:
+        circuits: The compiled Qiskit QuantumCircuits.
+        target: The resolved transpiler target, if any.
+        qubit_labels: Physical qubit indices on the target device.
+        verbatim: Whether verbatim mode was requested.
+        basis_gates: The basis gate set used for compilation.
+        angle_restrictions: Per-gate angle constraints from the device.
+        pass_manager: The custom PassManager used, if any.
+    """
 
     circuits: list[QuantumCircuit]
     target: Target | None
@@ -151,7 +161,7 @@ def _default_target(circuits: Iterable[QuantumCircuit]) -> Target:
 
 
 def compile_circuits(
-    circuits: QuantumCircuit | Iterable[QuantumCircuit] = None,
+    circuits: QuantumCircuit | Iterable[QuantumCircuit],
     *args,
     qubit_labels: Sequence[int] | None = None,
     target: Target | None = None,
@@ -169,7 +179,42 @@ def compile_circuits(
     layout_method: str | None = None,
     routing_method: str | None = None,
     seed_transpiler: int | None = None,
-) -> _CompilationContext:
+) -> CompilationContext:
+    """Compile Qiskit circuits for execution on a Braket device.
+
+    This is the compilation pipeline used by :func:`to_braket`. It handles
+    verbatim box extraction/restoration, transpilation via Qiskit's pass infrastructure,
+    and device-specific gate substitutions.
+
+    Args:
+        circuits: One or more Qiskit QuantumCircuits to compile.
+        qubit_labels: Physical qubit indices on the target device. If not supplied,
+            contiguous indices are assumed.
+        target: A Qiskit transpiler target describing device constraints.
+        verbatim: If ``True``, skip transpilation (pass circuits through unchanged).
+        basis_gates: Set of gate names supported by the target device.
+        coupling_map: Qubit connectivity as a list of ``[control, target]`` pairs.
+        angle_restrictions: Per-gate angle constraints from the device.
+        optimization_level: Transpiler optimization level (0-3). Default: 0.
+        callback: Callback function passed to the transpiler.
+        num_processes: Number of parallel processes for transpilation.
+        pass_manager: A custom Qiskit PassManager. Mutually exclusive with other
+            transpilation options.
+        braket_device: A Braket Device to derive target and qubit labels from.
+        connectivity: Deprecated alias for ``coupling_map``.
+        verbatim_box_name: Label identifying verbatim BoxOp nodes.
+        layout_method: Layout method for the transpiler.
+        routing_method: Routing method for the transpiler.
+        seed_transpiler: Seed for reproducible transpilation.
+
+    Returns:
+        A :class:`CompilationContext` containing the compiled circuits and resolved
+        compilation state.
+
+    Raises:
+        ValueError: If mutually exclusive options are specified together.
+        TypeError: If inputs are not QuantumCircuits.
+    """
     if isinstance(circuits, QuantumCircuit):
         circuits = [circuits]
     circuits = list(circuits)
@@ -282,7 +327,7 @@ def compile_circuits(
             for circ, verbatim_boxes in zip(circuits, all_verbatim_boxes, strict=False)
         ]
 
-    return _CompilationContext(
+    return CompilationContext(
         circuits=circuits,
         target=target,
         qubit_labels=qubit_labels,
