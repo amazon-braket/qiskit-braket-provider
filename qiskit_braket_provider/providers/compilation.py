@@ -7,7 +7,6 @@ and the run() endpoints, including verbatim box handling and transpilation.
 import warnings
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TypeVar
 
 from qiskit import QuantumCircuit, transpile
 from qiskit.circuit import Barrier, BoxOp, Measure
@@ -25,8 +24,6 @@ from qiskit_braket_provider.providers.target import (
     aws_device_to_target,
     local_simulator_to_target,
 )
-
-_T = TypeVar("_T")
 
 
 def _extract_verbatim_boxes(
@@ -162,7 +159,7 @@ def _default_target(circuits: Iterable[QuantumCircuit]) -> Target:
 
 def compile_circuits(
     circuits: QuantumCircuit | Iterable[QuantumCircuit],
-    *args,
+    *,
     qubit_labels: Sequence[int] | None = None,
     target: Target | None = None,
     verbatim: bool | None = None,
@@ -219,13 +216,6 @@ def compile_circuits(
         circuits = [circuits]
     circuits = list(circuits)
 
-    if len(args) > 4:
-        raise ValueError(f"Unknown arguments passed: {args[4:]}")
-    padded = args + (None,) * max(0, 4 - len(args))
-    basis_gates = _check_positional(padded[0], basis_gates, "basis_gates")
-    verbatim = _check_positional(padded[1], verbatim, "verbatim")
-    connectivity = _check_positional(padded[2], connectivity, "connectivity")
-    angle_restrictions = _check_positional(padded[3], angle_restrictions, "angle_restrictions")
     _validate_arguments(
         circuits, target, basis_gates, coupling_map, connectivity, pass_manager, braket_device
     )
@@ -336,19 +326,6 @@ def compile_circuits(
         angle_restrictions=angle_restrictions,
         pass_manager=pass_manager,
     )
-
-
-def _check_positional(pos: _T, kw: _T, name: str) -> _T:
-    if pos is None:
-        return kw
-    if kw is not None:
-        raise TypeError(f"Multiple values for {name}: {pos, kw}")
-    warnings.warn(
-        f"Passing {name} as a positional argument is deprecated.",
-        DeprecationWarning,
-        stacklevel=1,
-    )
-    return pos
 
 
 def _validate_arguments(

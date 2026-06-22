@@ -8,7 +8,7 @@ sequences that should not be optimized.
 
 import warnings
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
-from typing import Any, TypeAlias, overload
+from typing import Any, TypeAlias, TypeVar, overload
 
 import numpy as np
 import qiskit.circuit.library as qiskit_gates
@@ -38,7 +38,6 @@ from braket.devices import Device
 from braket.ir.openqasm import Program
 from braket.parametric import FreeParameter, FreeParameterExpression, Parameterizable
 from qiskit_braket_provider.providers.compilation import (
-    _T,  # noqa: F401
     CompilationContext,  # noqa: F401
     _default_target,  # noqa: F401
     _extract_verbatim_boxes,  # noqa: F401
@@ -123,6 +122,23 @@ def _get_circuits(
         else c
         for c in circuits
     ], single_instance
+
+
+_T = TypeVar("_T")
+
+
+def _check_positional(pos: _T, kw: _T, name: str) -> _T:
+    """Deprecation shim for legacy positional arguments."""
+    if pos is None:
+        return kw
+    if kw is not None:
+        raise TypeError(f"Multiple values for {name}: {pos, kw}")
+    warnings.warn(
+        f"Passing {name} as a positional argument is deprecated.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    return pos
 
 
 @overload
@@ -237,9 +253,16 @@ def to_braket(
     """
     qc_circuits, single_instance = _get_circuits(circuits, circuit, add_measurements)
 
+    if len(args) > 4:
+        raise ValueError(f"Unknown arguments passed: {args[4:]}")
+    padded = args + (None,) * max(0, 4 - len(args))
+    basis_gates = _check_positional(padded[0], basis_gates, "basis_gates")
+    verbatim = _check_positional(padded[1], verbatim, "verbatim")
+    connectivity = _check_positional(padded[2], connectivity, "connectivity")
+    angle_restrictions = _check_positional(padded[3], angle_restrictions, "angle_restrictions")
+
     result = compile_circuits(
         qc_circuits,
-        *args,
         qubit_labels=qubit_labels,
         target=target,
         verbatim=verbatim,
