@@ -20,7 +20,7 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_VERBATIM_BOX_NAME,
 )
 from qiskit_braket_provider.providers.target import (
-    SubstitutedTarget,
+    _SubstitutedTarget,
     aws_device_to_target,
     local_simulator_to_target,
 )
@@ -124,8 +124,8 @@ def _restore_verbatim_boxes(
 
 
 @dataclass(frozen=True)
-class CompilationContext:
-    """Result of :func:`compile_circuits` containing compiled circuits and resolved state.
+class _CompilationContext:
+    """Result of :func:`_compile` containing compiled circuits and resolved state.
 
     Attributes:
         circuits: The compiled Qiskit QuantumCircuits.
@@ -157,7 +157,7 @@ def _default_target(circuits: Iterable[QuantumCircuit]) -> Target:
     return target
 
 
-def compile_circuits(
+def _compile(
     circuits: QuantumCircuit | Iterable[QuantumCircuit],
     *,
     qubit_labels: Sequence[int] | None = None,
@@ -176,7 +176,7 @@ def compile_circuits(
     layout_method: str | None = None,
     routing_method: str | None = None,
     seed_transpiler: int | None = None,
-) -> CompilationContext:
+) -> _CompilationContext:
     """Compile Qiskit circuits for execution on a Braket device.
 
     This is the compilation pipeline used by :func:`to_braket`. It handles
@@ -205,7 +205,7 @@ def compile_circuits(
         seed_transpiler: Seed for reproducible transpilation.
 
     Returns:
-        A :class:`CompilationContext` containing the compiled circuits and resolved
+        A :class:`_CompilationContext` containing the compiled circuits and resolved
         compilation state.
 
     Raises:
@@ -306,7 +306,7 @@ def compile_circuits(
                 routing_method=effective_routing_method,
                 seed_transpiler=seed_transpiler,
             )
-    if isinstance(target, SubstitutedTarget):
+    if isinstance(target, _SubstitutedTarget):
         circuits = target._substitute(circuits)
 
     if has_verbatim_boxes:
@@ -317,7 +317,7 @@ def compile_circuits(
             for circ, verbatim_boxes in zip(circuits, all_verbatim_boxes, strict=False)
         ]
 
-    return CompilationContext(
+    return _CompilationContext(
         circuits=circuits,
         target=target,
         qubit_labels=qubit_labels,

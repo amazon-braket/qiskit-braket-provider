@@ -68,7 +68,7 @@ _QubitSet: TypeAlias = set[tuple[int, ...]]
 _ParameterRestrictions: TypeAlias = dict[str, dict[_ParamKey, _QubitSet]]
 
 
-class SubstitutedTarget(Target):
+class _SubstitutedTarget(Target):
     """A transpiler target that applies qubit-specific gate substitutions after transpilation.
 
     This extends Qiskit's :class:`~qiskit.transpiler.Target` to support devices where
@@ -343,7 +343,7 @@ def _qpu_target(device: AwsDevice, description: str) -> Target:
         instruction_props_1q.update(default_props_1q)
 
     parameter_restrictions = _get_parameter_restrictions(device, indices)
-    target = SubstitutedTarget(
+    target = _SubstitutedTarget(
         description=description,
         num_qubits=len(qubit_properties or indices),
         qubit_properties=qubit_properties or None,
@@ -433,7 +433,7 @@ def _get_parameter_restrictions(
 
 
 def _add_instructions_parameter_restrictions(
-    target: SubstitutedTarget,
+    target: _SubstitutedTarget,
     parameter_restrictions: Mapping[str, Mapping[_ParamKey, _QubitSet]],
     instruction_props_1q: Mapping[tuple[int, ...], InstructionProperties],
     instruction_props_2q: Mapping[str, Mapping[tuple[int, ...], InstructionProperties]],
@@ -468,7 +468,7 @@ def _add_instructions_parameter_restrictions(
 
 
 def _add_single_instruction_parameter_restriction(
-    target: SubstitutedTarget,
+    target: _SubstitutedTarget,
     instruction: QiskitInstruction,
     braket_name: str,
     restrictions: Mapping[_ParamKey, _QubitSet],
@@ -497,7 +497,7 @@ def _add_single_instruction_parameter_restriction(
 
 
 def _add_instructions_no_parameter_restrictions(
-    target: SubstitutedTarget,
+    target: _SubstitutedTarget,
     native_gateset: set[str],
     instruction_props_1q: Mapping[tuple[int, ...], InstructionProperties],
     instruction_props_2q: Mapping[str, Mapping[tuple[int, ...], InstructionProperties]],

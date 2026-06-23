@@ -25,7 +25,7 @@ from qiskit_ionq import ionq_gates
 
 from braket.aws import AwsDevice
 from braket.circuits import Circuit, Gate, GateCalibrations, Instruction
-from braket.circuits import compiler_directives as braket_circuit_directives
+from braket.circuits import compiler_directives as braket_compiler_directives
 from braket.circuits import gates as braket_gates
 from braket.circuits import noises as braket_noises
 from braket.circuits import observables as braket_observables
@@ -44,11 +44,11 @@ from qiskit_braket_provider.providers.adapter import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_SUPPORTED_NOISES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
-    SubstitutedTarget,
+    _compile,
     _get_controlled_gateset,
+    _SubstitutedTarget,
     _validate_angle_restrictions,
     aws_device_to_target,
-    compile_circuits,
     convert_qiskit_to_braket_circuit,
     convert_qiskit_to_braket_circuits,
     native_angle_restrictions,
@@ -630,8 +630,8 @@ class TestAdapter(TestCase):
             braket_operators.issubset({
                 braket_gates.Rx,
                 braket_gates.Rz,
-                braket_circuit_directives.StartVerbatimBox,
-                braket_circuit_directives.EndVerbatimBox,
+                braket_compiler_directives.StartVerbatimBox,
+                braket_compiler_directives.EndVerbatimBox,
             })
         )
         self.assertEqual(braket_circuit.qubits, {1})
@@ -1841,7 +1841,7 @@ class TestThereAndBackAgain(TestCase):
             to_braket(circuit)
         self.assertIn("Cannot add global barrier to empty circuit", str(context.exception))
 
-    def test_compile_circuits_preserves_layout_with_verbatim_boxes(self):
+    def test_compile_preserves_layout_with_verbatim_boxes(self):
         """Layout from transpilation should be preserved after restoring verbatim boxes."""
         t = Target(num_qubits=2)
         t.add_instruction(HGate(), {(0,): InstructionProperties(), (1,): InstructionProperties()})
@@ -1854,13 +1854,13 @@ class TestThereAndBackAgain(TestCase):
         qc.cx(0, 1)
         qc.h(1)
 
-        result = compile_circuits(qc, target=t)
+        result = _compile(qc, target=t)
         compiled = result.circuits[0]
         assert compiled.layout is not None
 
     def test_substitute_preserves_layout(self):
-        """SubstitutedTarget._substitute should not strip layout set by transpile."""
-        target = SubstitutedTarget(num_qubits=2)
+        """_SubstitutedTarget._substitute should not strip layout set by transpile."""
+        target = _SubstitutedTarget(num_qubits=2)
         target.add_instruction(
             HGate(), {(0,): InstructionProperties(), (1,): InstructionProperties()}
         )

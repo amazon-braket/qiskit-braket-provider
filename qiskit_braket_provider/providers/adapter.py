@@ -38,11 +38,11 @@ from braket.devices import Device
 from braket.ir.openqasm import Program
 from braket.parametric import FreeParameter, FreeParameterExpression, Parameterizable
 from qiskit_braket_provider.providers.compilation import (
-    CompilationContext,  # noqa: F401
+    _CompilationContext,  # noqa: F401
+    _compile,
     _default_target,  # noqa: F401
     _extract_verbatim_boxes,  # noqa: F401
     _restore_verbatim_boxes,  # noqa: F401
-    compile_circuits,
 )
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
@@ -57,8 +57,8 @@ from qiskit_braket_provider.providers.qasm_context import (
     _sympy_to_qiskit,
 )
 from qiskit_braket_provider.providers.target import (
-    SubstitutedTarget,  # noqa: F401
     _get_controlled_gateset,  # noqa: F401
+    _SubstitutedTarget,  # noqa: F401
     aws_device_to_target,  # noqa: F401
     gateset_from_properties,  # noqa: F401
     local_simulator_to_target,  # noqa: F401
@@ -261,7 +261,7 @@ def to_braket(
     connectivity = _check_positional(padded[2], connectivity, "connectivity")
     angle_restrictions = _check_positional(padded[3], angle_restrictions, "angle_restrictions")
 
-    result = compile_circuits(
+    result = _compile(
         qc_circuits,
         qubit_labels=qubit_labels,
         target=target,
