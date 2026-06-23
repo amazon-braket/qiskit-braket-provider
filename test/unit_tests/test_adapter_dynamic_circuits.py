@@ -1256,3 +1256,42 @@ if (mcm[0] == 1) {
     qc = to_qiskit(qasm)
     if_else_ops = _get_if_else_ops(qc)
     assert len(if_else_ops) == 1
+
+
+@pytest.mark.parametrize(
+    "qasm",
+    [
+        """
+        OPENQASM 3.0;
+        bit[1] b;
+        qubit[1] q;
+        b[0] = measure q[0];
+        if (b[0] == 1) { x q[0]; } else { h q[0]; }
+        """,
+        """
+        OPENQASM 3.0;
+        bit[1] b;
+        qubit[1] q;
+        b[0] = measure q[0];
+        while (b[0] == 0) { x q[0]; b[0] = measure q[0]; }
+        """,
+        """
+        OPENQASM 3.0;
+        bit[1] b;
+        qubit[1] q;
+        for int i in [0:2] { h q[0]; b[0] = measure q[0]; }
+        """,
+    ],
+    ids=["if-else", "while", "for"],
+)
+def test_control_flow_body_circuit_is_drawable(qasm: str):
+    """Control-flow body sub-circuits share the parent's bit objects so the drawer works."""
+    qc = to_qiskit(qasm)
+    print(qc)
+
+    ctrl_op = next(
+        inst for inst in qc.data if isinstance(inst.operation, (IfElseOp, ForLoopOp, WhileLoopOp))
+    )
+    for block in ctrl_op.operation.blocks:
+        assert list(block.qubits) == list(qc.qubits)
+        assert list(block.clbits) == list(qc.clbits)
