@@ -115,7 +115,6 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._circuit_stack: list[QuantumCircuit] = [QuantumCircuit()]
         self._param_map: dict[str, Parameter] = {}
         self._in_verbatim_box = False
-        self._verbatim_circuit: QuantumCircuit | None = None
         self._verbatim_box_name = verbatim_box_name
         self._clbit_offset: dict[str, int] = {}
 
@@ -218,13 +217,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         active.add_bits([Qubit() for _ in range(num_missing_qubits)])
         self.num_qubits = max(self.num_qubits, active.num_qubits)
 
-        if self._in_verbatim_box:
-            # Ensure verbatim circuit also has enough qubits by adding missing qubits
-            num_missing_qubits = max_qubits - self._verbatim_circuit.num_qubits
-            self._verbatim_circuit.add_bits([Qubit() for _ in range(num_missing_qubits)])
-            self._verbatim_circuit.append(CircuitInstruction(gate, target))
-        else:
-            active.append(CircuitInstruction(gate, target))
+        active.append(CircuitInstruction(gate, target))
 
     def handle_parameter_value(self, value: Number | Expr) -> Number | Parameter:
         return _sympy_to_qiskit(value, self._param_map) if isinstance(value, Expr) else value
@@ -246,44 +239,23 @@ class _QiskitProgramContext(AbstractProgramContext):
             active.measure(qubit, index)
 
     def add_verbatim_marker(self, marker: VerbatimBoxDelimiter) -> None:
-        """Handle verbatim box start/end markers.
-
-        When START_VERBATIM is received:
-        - Create a new QuantumCircuit to collect verbatim gates
-        - Set _in_verbatim_box flag to True
-
-        When END_VERBATIM is received:
-        - Wrap the collected gates in a BoxOp
-        - Append the BoxOp to the main circuit
-        - Reset verbatim state
-
-        Args:
-            marker: VerbatimBoxDelimiter indicating START_VERBATIM or END_VERBATIM
-
-        Raises:
-            ValueError: If nested verbatim boxes are encountered or if END_VERBATIM is called without START_VERBATIM
-        """
-
+        """Handle verbatim box start/end markers by scoping body construction on the stack."""
         if marker == VerbatimBoxDelimiter.START_VERBATIM:
             if self._in_verbatim_box:
                 raise ValueError("Nested verbatim boxes are not supported")
 
-            self._verbatim_circuit = QuantumCircuit()
+            self._push_scoped_circuit()
             self._in_verbatim_box = True
 
         elif marker == VerbatimBoxDelimiter.END_VERBATIM:
             if not self._in_verbatim_box:
                 raise ValueError("Verbatim box end marker without matching start")
 
-            box_op = BoxOp(self._verbatim_circuit, label=self._verbatim_box_name)
-
-            active = self._active_circuit
-            # Append BoxOp to active circuit with all qubits (convert indices to Qubit objects)
-            qubit_objects = [active.qubits[i] for i in range(self._verbatim_circuit.num_qubits)]
-            active.append(box_op, qubit_objects)
-
+            body = self._circuit_stack.pop()
+            parent = self._active_circuit
+            self._extend_bits(parent, body)
+            parent.append(BoxOp(body, label=self._verbatim_box_name), parent.qubits, parent.clbits)
             self._in_verbatim_box = False
-            self._verbatim_circuit = None
 
         else:
             raise ValueError("Verbatim box created using invalid marker")
@@ -506,14 +478,14 @@ class _QiskitProgramContext(AbstractProgramContext):
         else:
             clbit_index = self._resolve_clbit_index(condition.rhs)
             value = condition.lhs.value
-        return (self.circuit.clbits[clbit_index], int(value))
+        return (self._active_circuit.clbits[clbit_index], int(value))
 
     def _resolve_condition_from_identifier(
         self, condition: Identifier | IndexExpression
     ) -> tuple[Clbit, int]:
         """Convert a bare identifier condition (e.g., `c` or `c[0]`) to (Clbit, 1)."""
         clbit_index = self._resolve_clbit_index(condition)
-        return (self.circuit.clbits[clbit_index], 1)
+        return (self._active_circuit.clbits[clbit_index], 1)
 
     def _resolve_clbit_index(self, node: Identifier | IndexExpression) -> int:
         """Resolve an identifier or indexed identifier to a classical bit index."""
