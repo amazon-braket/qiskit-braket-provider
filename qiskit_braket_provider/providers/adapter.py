@@ -46,9 +46,12 @@ from qiskit_braket_provider.providers.compilation import (
 )
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
+    _BRAKET_SUPPORTED_NOISES,  # noqa: F401
     _BRAKET_TO_QISKIT_NAMES,  # noqa: F401
     _BRAKET_VERBATIM_BOX_NAME,
     _CONTROLLED_GATES_BY_QUBIT_COUNT,  # noqa: F401
+    _EPS,
+    _PAULI_MAP,
     _QISKIT_CONTROLLED_GATE_NAMES_TO_BRAKET_GATES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
 )
@@ -70,28 +73,7 @@ from qiskit_braket_provider.providers.target import (
 add_equivalences()
 
 _Translatable: TypeAlias = QuantumCircuit | Circuit | Program | str
-
-_EPS = 1e-10  # global variable used to chop very small numbers to zero
-
-_BRAKET_SUPPORTED_NOISES = [
-    "kraus",
-    "bitflip",
-    "depolarizing",
-    "amplitudedamping",
-    "generalizedamplitudedamping",
-    "phasedamping",
-    "phaseflip",
-    "paulichannel",
-    "twoqubitdepolarizing",
-    "twoqubitdephasing",
-    # "twoqubitpaulichannel" no to_openqasm support yet
-]
-
-_PAULI_MAP = {
-    "X": braket_observables.X,
-    "Y": braket_observables.Y,
-    "Z": braket_observables.Z,
-}
+_T = TypeVar("_T")
 
 
 def _get_circuits(
@@ -122,9 +104,6 @@ def _get_circuits(
         else c
         for c in circuits
     ], single_instance
-
-
-_T = TypeVar("_T")
 
 
 def _check_positional(pos: _T, kw: _T, name: str) -> _T:

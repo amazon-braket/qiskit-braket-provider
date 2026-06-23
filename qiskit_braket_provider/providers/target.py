@@ -10,11 +10,9 @@ from collections.abc import Iterable, Mapping
 from math import inf, pi
 from typing import Self, TypeAlias
 
-import qiskit.circuit.library as qiskit_gates
 from qiskit import QuantumCircuit
 from qiskit.circuit import (
     Barrier,
-    Gate,
     Measure,
     Parameter,
 )
@@ -48,20 +46,13 @@ from braket.ir.openqasm.modifiers import Control
 from braket.parametric import FreeParameter, Parameterizable
 from qiskit_braket_provider.exception import QiskitBraketException
 from qiskit_braket_provider.providers.gate_mappings import (
+    _ADDITIONAL_U_GATES,
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_TO_QISKIT_NAMES,
     _CONTROLLED_GATES_BY_QUBIT_COUNT,
     _STANDARD_GATE_NAME_MAPPING,
+    _TRANSPILER_GATE_SUBSTITUTES,
 )
-
-_ADDITIONAL_U_GATES = {"u1", "u2", "u3"}
-
-_TRANSPILER_GATE_SUBSTITUTES: dict[tuple[str, tuple[float | str, ...]], Gate] = {
-    ("rx", (pi,)): qiskit_gates.XGate(),
-    ("rx", (-pi,)): qiskit_gates.XGate(),
-    ("rx", (pi / 2,)): qiskit_gates.SXGate(),
-    ("rx", (-pi / 2,)): qiskit_gates.SXdgGate(),
-}
 
 _ParamKey: TypeAlias = tuple[float | str, ...]
 _QubitSet: TypeAlias = set[tuple[int, ...]]

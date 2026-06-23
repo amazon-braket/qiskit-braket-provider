@@ -13,10 +13,12 @@ from qiskit.circuit import Instruction as QiskitInstruction
 from qiskit.circuit import Parameter
 from qiskit.circuit.library import get_standard_gate_name_mapping
 from qiskit_ionq import ionq_gates
+from sympy import acos, asin, atan, cos, exp, log, sin, tan
 
 from braket import experimental_capabilities as braket_expcaps
 from braket.circuits import gates as braket_gates
 from braket.circuits import noises as braket_noises
+from braket.circuits import observables as braket_observables
 from qiskit_braket_provider.providers import braket_instructions
 
 _BRAKET_TO_QISKIT_NAMES = {
@@ -184,3 +186,45 @@ _BRAKET_GATE_NAME_TO_QISKIT_GATE: dict[str, QiskitInstruction | None] = {
 }
 
 _BRAKET_VERBATIM_BOX_NAME = "verbatim"
+
+_EPS = 1e-10  # global variable used to chop very small numbers to zero
+
+_BRAKET_SUPPORTED_NOISES = [
+    "kraus",
+    "bitflip",
+    "depolarizing",
+    "amplitudedamping",
+    "generalizedamplitudedamping",
+    "phasedamping",
+    "phaseflip",
+    "paulichannel",
+    "twoqubitdepolarizing",
+    "twoqubitdephasing",
+    # "twoqubitpaulichannel" no to_openqasm support yet
+]
+
+_PAULI_MAP = {
+    "X": braket_observables.X,
+    "Y": braket_observables.Y,
+    "Z": braket_observables.Z,
+}
+
+_ADDITIONAL_U_GATES = {"u1", "u2", "u3"}
+
+_SYMPY_FUNCTION_TO_QISKIT_METHOD = {
+    sin: "sin",
+    cos: "cos",
+    tan: "tan",
+    asin: "arcsin",
+    acos: "arccos",
+    atan: "arctan",
+    exp: "exp",
+    log: "log",
+}
+
+_TRANSPILER_GATE_SUBSTITUTES: dict[tuple[str, tuple[float | str, ...]], "QiskitInstruction"] = {
+    ("rx", (pi,)): qiskit_gates.XGate(),
+    ("rx", (-pi,)): qiskit_gates.XGate(),
+    ("rx", (pi / 2,)): qiskit_gates.SXGate(),
+    ("rx", (-pi / 2,)): qiskit_gates.SXdgGate(),
+}

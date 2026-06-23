@@ -23,7 +23,7 @@ from qiskit.circuit import (
     Qubit,
     WhileLoopOp,
 )
-from sympy import Add, Expr, Mul, Pow, Symbol, acos, asin, atan, cos, exp, log, sin, tan
+from sympy import Add, Expr, Mul, Pow, Symbol
 
 from braket.default_simulator.openqasm._helpers.arrays import convert_range_def_to_range
 from braket.default_simulator.openqasm._helpers.casting import cast_to
@@ -57,18 +57,8 @@ from braket.default_simulator.openqasm.program_context import (
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_VERBATIM_BOX_NAME,
+    _SYMPY_FUNCTION_TO_QISKIT_METHOD,
 )
-
-_SYMPY_FUNCTION_TO_QISKIT_METHOD = {
-    sin: "sin",
-    cos: "cos",
-    tan: "tan",
-    asin: "arcsin",
-    acos: "arccos",
-    atan: "arctan",
-    exp: "exp",
-    log: "log",
-}
 
 
 def _qiskit_numeric_power(exp: Expr) -> int | float:
