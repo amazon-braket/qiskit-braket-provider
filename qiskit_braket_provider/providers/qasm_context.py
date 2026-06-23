@@ -1,6 +1,6 @@
 """OpenQASM 3 to Qiskit circuit context.
 
-This module provides QiskitProgramContext which interprets OpenQASM 3 programs
+This module provides _QiskitProgramContext which interprets OpenQASM 3 programs
 into Qiskit circuits, handling conditions, loops, verbatim markers, and
 mid-circuit measurement.
 """
@@ -90,7 +90,7 @@ def _sympy_to_qiskit(
     raise TypeError(f"unrecognized parameter type in conversion: {type(expr)}")
 
 
-class QiskitProgramContext(AbstractProgramContext):
+class _QiskitProgramContext(AbstractProgramContext):
     """Program context for converting OpenQASM 3 programs to Qiskit circuits.
 
     This context extends AbstractProgramContext to build Qiskit QuantumCircuits from

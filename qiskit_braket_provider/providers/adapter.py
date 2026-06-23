@@ -56,7 +56,7 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
 )
 from qiskit_braket_provider.providers.qasm_context import (
-    QiskitProgramContext,
+    _QiskitProgramContext,
     _sympy_to_qiskit,
 )
 from qiskit_braket_provider.providers.target import (
@@ -555,12 +555,12 @@ def to_qiskit(
     """
     if isinstance(circuit, Program):
         return (
-            Interpreter(QiskitProgramContext(verbatim_box_name))
+            Interpreter(_QiskitProgramContext(verbatim_box_name))
             .run(circuit.source, inputs=circuit.inputs)
             .circuit
         )
     if isinstance(circuit, str):
-        return Interpreter(QiskitProgramContext(verbatim_box_name)).run(circuit).circuit
+        return Interpreter(_QiskitProgramContext(verbatim_box_name)).run(circuit).circuit
     if not isinstance(circuit, Circuit):
         raise TypeError(f"Expected a Circuit, got {type(circuit)} instead.")
 
