@@ -504,7 +504,7 @@ if (c[0] == 1) {
 )
 def test_compile_preserves_if_else_ops(qasm: str, expected_if_else_count: int, mcm_target: Target):
     """IfElseOps should survive compilation through _compile."""
-    result = _compile(qasm, target=mcm_target)
+    result = _compile(to_qiskit(qasm), target=mcm_target)
     compiled_circuit = result.circuits[0]
     if_else_ops = [
         instr for instr in compiled_circuit.data if isinstance(instr.operation, IfElseOp)
@@ -525,7 +525,7 @@ if (c[0] == 1) {
     x q[1];
 }
 """
-    result = _compile(qasm, target=mcm_target)
+    result = _compile(to_qiskit(qasm), target=mcm_target)
     compiled_circuit = result.circuits[0]
     op = next(
         instr for instr in compiled_circuit.data if isinstance(instr.operation, IfElseOp)
@@ -547,7 +547,7 @@ if (c[0] == 1) {
     h q[1];
 }
 """
-    result = _compile(qasm, target=mcm_target)
+    result = _compile(to_qiskit(qasm), target=mcm_target)
     compiled_circuit = result.circuits[0]
     instr = next(i for i in compiled_circuit.data if isinstance(i.operation, IfElseOp))
     op = instr.operation
