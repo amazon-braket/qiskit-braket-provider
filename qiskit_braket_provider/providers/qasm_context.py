@@ -230,6 +230,10 @@ class _QiskitProgramContext(AbstractProgramContext):
         classical_destination: Identifier | IndexedIdentifier | None = None,  # noqa: ARG002
     ) -> None:
         active = self._active_circuit
+        max_qubits = (max(target) + 1) if target else -1
+        num_missing_qubits = max_qubits - active.num_qubits
+        active.add_bits([Qubit() for _ in range(num_missing_qubits)])
+        self.num_qubits = max(self.num_qubits, active.num_qubits)
         # this is to cover the edge case where a user measures a qubit without assigning it to a classical register
         if active.num_clbits < len(target):
             num_missing_clbits = len(target) - active.num_clbits

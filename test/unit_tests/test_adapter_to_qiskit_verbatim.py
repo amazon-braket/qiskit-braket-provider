@@ -405,3 +405,22 @@ def test_if_statement_inside_verbatim_box():
     if_body = if_inst.operation.blocks[0]
     assert [i.operation.name for i in if_body.data] == ["x"]
     assert if_body.data[0].qubits[0] == qc.qubits[0]
+
+
+def test_to_qiskit_physical_qubit_only_measurement():
+    """Physical-qubit refs ($N) appearing only in a measurement get lazy qubit allocation."""
+    qc = to_qiskit("OPENQASM 3.0;\nbit[1] b;\nb[0] = measure $14;\n")
+    assert qc.num_qubits == 15
+    assert qc.num_clbits == 1
+    assert [i.operation.name for i in qc.data] == ["measure"]
+
+
+def test_to_qiskit_measure_inside_verbatim_box():
+    """Measurement on $N inside a verbatim box lands in the BoxOp body."""
+    qc = to_qiskit("OPENQASM 3.0;\nbit b;\n#pragma braket verbatim\nbox{ b = measure $1; }\n")
+    assert [i.operation.name for i in qc.data] == ["box"]
+    body = qc.data[0].operation.body
+    assert [i.operation.name for i in body.data] == ["measure"]
+    measure = body.data[0]
+    assert body.find_bit(measure.qubits[0]).index == 1
+    assert body.find_bit(measure.clbits[0]).index == 0
