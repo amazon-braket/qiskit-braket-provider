@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.17.1 (2026-06-25)
+
+### Bug Fixes and Other Changes
+
+ * classical bit in box
+
 ## v0.17.0 (2026-06-22)
 
 ### Features
