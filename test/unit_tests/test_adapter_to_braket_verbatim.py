@@ -501,3 +501,19 @@ box {
     assert info[x_idx][1] == [1]
     assert info[cnot_indices[0]][1] == QUBIT_PAIR
     assert info[cnot_indices[1]][1] == [1, 2]
+
+
+def test_to_braket_handles_verbatim_box_with_clbits():
+    """to_braket on a verbatim BoxOp carrying clbits succeeds."""
+    body = QuantumCircuit(1, 1)
+    body.h(0)
+    body.measure(0, 0)  # gives the body a clbit, which propagates to the BoxOp
+
+    qc = QuantumCircuit(1, 1)
+    qc.append(BoxOp(body, label=VERBATIM_LABEL), qc.qubits, qc.clbits)
+
+    bc = to_braket(qc, verbatim=True)
+
+    source = bc.to_ir(ir_type="OPENQASM").source
+    assert "bit[1] b;" in source
+    assert "b[0] = measure $0;" in source
