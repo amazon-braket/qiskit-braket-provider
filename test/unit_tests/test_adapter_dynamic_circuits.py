@@ -1,5 +1,7 @@
 """Tests for dynamic circuit support (if/else, for loops, while loops) in the Qiskit adapter."""
 
+import math
+
 import pytest
 from qiskit.circuit import (
     CircuitInstruction,
@@ -1295,3 +1297,33 @@ def test_control_flow_body_circuit_is_drawable(qasm: str):
     for block in ctrl_op.operation.blocks:
         assert list(block.qubits) == list(qc.qubits)
         assert list(block.clbits) == list(qc.clbits)
+
+
+@pytest.mark.parametrize(
+    "parent_gphase,expected_parent,body_gphase,expected_body",
+    [
+        ("", 0, "", 0),
+        ("gphase(pi/4);", math.pi / 4, "", math.pi / 4),
+        ("", 0, "gphase(pi/2);", math.pi / 2),
+        ("gphase(pi/4);", math.pi / 4, "gphase(pi/2);", math.pi / 4 + math.pi / 2),
+    ],
+    ids=["no-phase", "parent-only", "body-only", "both"],
+)
+def test_control_flow_body_global_phase_behavior(
+    parent_gphase: str, expected_parent: float, body_gphase: str, expected_body: float
+):
+    """Document the full global_phase behavior across control-flow scope boundaries."""
+    qasm = f"""
+    OPENQASM 3.0;
+    bit[1] b;
+    qubit[1] q;
+    {parent_gphase}
+    b[0] = measure q[0];
+    if (b[0] == 1) {{ {body_gphase} x q[0]; }}
+    """
+    qc = to_qiskit(qasm)
+    if_op = next(inst for inst in qc.data if isinstance(inst.operation, IfElseOp))
+    [body] = if_op.operation.blocks
+
+    assert qc.global_phase == pytest.approx(expected_parent)
+    assert body.global_phase == pytest.approx(expected_body)
