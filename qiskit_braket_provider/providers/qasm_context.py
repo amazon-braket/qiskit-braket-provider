@@ -133,6 +133,17 @@ class _QiskitProgramContext(AbstractProgramContext):
             )
         return self._circuit_stack[0]
 
+    def _push_scoped_circuit(self) -> QuantumCircuit:
+        """Push an empty body circuit onto the stack that shares the parent's bit objects."""
+        body = self._active_circuit.copy_empty_like()
+        self._circuit_stack.append(body)
+        return body
+
+    def _extend_bits(self, target: QuantumCircuit, source: QuantumCircuit) -> None:
+        """Add to target any bits that source has beyond target's current bit list."""
+        target.add_bits(source.qubits[target.num_qubits :])
+        target.add_bits(source.clbits[target.num_clbits :])
+
     def add_qubits(self, name: str, num_qubits: int | None = 1) -> None:
         super().add_qubits(name, num_qubits)
         self._active_circuit.add_register(num_qubits)
@@ -322,15 +333,11 @@ class _QiskitProgramContext(AbstractProgramContext):
                 f"Only Identifier, IndexExpression, and BinaryExpression (==) are supported."
             )
 
-        true_body = QuantumCircuit(main.num_qubits, main.num_clbits)
-        self._circuit_stack.append(true_body)
+        true_body = self._push_scoped_circuit()
         yield True
         self._circuit_stack.pop()
 
-        # Push circuit for else-block (the interpreter always consumes this yield
-        # even for if-only blocks; the empty circuit is discarded below)
-        false_body = QuantumCircuit(main.num_qubits, main.num_clbits)
-        self._circuit_stack.append(false_body)
+        false_body = self._push_scoped_circuit()
         yield False
         self._circuit_stack.pop()
 
@@ -342,18 +349,14 @@ class _QiskitProgramContext(AbstractProgramContext):
                 "Both if and else branches contain no quantum operations."
             )
 
-        # Sync main circuit dimensions if branch bodies grew
-        max_qubits = max(true_body.num_qubits, false_body.num_qubits)
-        max_clbits = max(true_body.num_clbits, false_body.num_clbits)
-        if max_qubits > main.num_qubits:
-            main.add_bits([Qubit() for _ in range(max_qubits - main.num_qubits)])
-        if max_clbits > main.num_clbits:
-            main.add_bits([Clbit() for _ in range(max_clbits - main.num_clbits)])
+        # Sync parent and both bodies to the same bit layout (IfElseOp requires it).
+        self._extend_bits(main, true_body)
+        self._extend_bits(main, false_body)
+        self._extend_bits(true_body, main)
+        self._extend_bits(false_body, main)
 
         if_else_op = IfElseOp(resolved_condition, true_body, actual_false)
-        qubits = list(range(max_qubits))
-        clbits = list(range(max_clbits))
-        main.append(if_else_op, qubits, clbits)
+        main.append(if_else_op, main.qubits, main.clbits)
 
     def evaluate_for_range(
         self, set_declaration: Expression, loop_var: str, loop_type: ClassicalType
@@ -377,8 +380,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         # First pass: capture with concrete value to detect classical vs quantum body
         # Snapshot outer scope variables to detect classical side effects
         outer_vars = dict(self.variable_table.current_scope)
-        probe = QuantumCircuit(main.num_qubits, main.num_clbits)
-        self._circuit_stack.append(probe)
+        probe = self._push_scoped_circuit()
         with self.enter_scope():
             self.declare_variable(loop_var, loop_type, index_values[0])
             yield
@@ -407,8 +409,7 @@ class _QiskitProgramContext(AbstractProgramContext):
             )
 
         # Second pass: re-capture with symbolic loop variable for correct ForLoopOp binding
-        body = QuantumCircuit(main.num_qubits, main.num_clbits)
-        self._circuit_stack.append(body)
+        body = self._push_scoped_circuit()
         with self.enter_scope():
             self.declare_variable(loop_var, loop_type, SymbolLiteral(Symbol(loop_var)))
             yield
@@ -417,13 +418,8 @@ class _QiskitProgramContext(AbstractProgramContext):
         indexset = tuple(iv.value for iv in index_values)
         loop_param = self._param_map.get(loop_var) or Parameter(loop_var)
         for_op = ForLoopOp(indexset, loop_param, body)
-        max_qubits = max(body.num_qubits, main.num_qubits)
-        max_clbits = max(body.num_clbits, main.num_clbits)
-        if max_qubits > main.num_qubits:
-            main.add_bits([Qubit() for _ in range(max_qubits - main.num_qubits)])
-        if max_clbits > main.num_clbits:
-            main.add_bits([Clbit() for _ in range(max_clbits - main.num_clbits)])
-        main.append(for_op, list(range(max_qubits)), list(range(max_clbits)))
+        self._extend_bits(main, body)
+        main.append(for_op, main.qubits, main.clbits)
 
     def handle_loop_break(self):
         """Reject break statements since Qiskit's ForLoopOp/WhileLoopOp do not support them."""
@@ -452,8 +448,7 @@ class _QiskitProgramContext(AbstractProgramContext):
                 f"Only Identifier, IndexExpression, and BinaryExpression (==) are supported."
             )
 
-        body = QuantumCircuit(main.num_qubits, main.num_clbits)
-        self._circuit_stack.append(body)
+        body = self._push_scoped_circuit()
         yield True
         self._circuit_stack.pop()
 
@@ -463,15 +458,9 @@ class _QiskitProgramContext(AbstractProgramContext):
                 "This would result in an infinite loop."
             )
 
-        max_qubits = max(body.num_qubits, main.num_qubits)
-        max_clbits = max(body.num_clbits, main.num_clbits)
-        if max_qubits > main.num_qubits:
-            main.add_bits([Qubit() for _ in range(max_qubits - main.num_qubits)])
-        if max_clbits > main.num_clbits:
-            main.add_bits([Clbit() for _ in range(max_clbits - main.num_clbits)])
-
+        self._extend_bits(main, body)
         while_op = WhileLoopOp(resolved_condition, body)
-        main.append(while_op, list(range(max_qubits)), list(range(max_clbits)))
+        main.append(while_op, main.qubits, main.clbits)
 
     def _evaluate_expression(self, expression: Expression | list[Expression]) -> Any:  # noqa: ANN401
         """Lightweight expression evaluator for loop conditions and ranges."""
