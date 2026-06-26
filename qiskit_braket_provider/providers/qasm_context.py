@@ -260,7 +260,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         Raises:
             ValueError: On nested verbatim boxes, an unmatched END_VERBATIM, or an invalid marker
         """
-        
+
         if marker == VerbatimBoxDelimiter.START_VERBATIM:
             if self._in_verbatim_box:
                 raise ValueError("Nested verbatim boxes are not supported")
