@@ -239,7 +239,24 @@ class _QiskitProgramContext(AbstractProgramContext):
             active.measure(qubit, index)
 
     def add_verbatim_marker(self, marker: VerbatimBoxDelimiter) -> None:
-        """Handle verbatim box start/end markers by scoping body construction on the stack."""
+        """Handle verbatim box start/end markers.
+
+        When START_VERBATIM is received:
+        - Push a scoped body circuit onto the stack that shares the parent's bits
+        - Set _in_verbatim_box flag to True
+
+        When END_VERBATIM is received:
+        - Pop the scoped body and propagate any new qubits/clbits back to the parent
+        - Wrap the body in a BoxOp and append it to the parent circuit
+        - Reset verbatim state
+
+        Args:
+            marker: VerbatimBoxDelimiter indicating START_VERBATIM or END_VERBATIM
+
+        Raises:
+            ValueError: On nested verbatim boxes, an unmatched END_VERBATIM, or an invalid marker
+        """
+
         if marker == VerbatimBoxDelimiter.START_VERBATIM:
             if self._in_verbatim_box:
                 raise ValueError("Nested verbatim boxes are not supported")
