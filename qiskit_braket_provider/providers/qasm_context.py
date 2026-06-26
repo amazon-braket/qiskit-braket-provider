@@ -143,6 +143,14 @@ class _QiskitProgramContext(AbstractProgramContext):
         target.add_bits(source.qubits[target.num_qubits :])
         target.add_bits(source.clbits[target.num_clbits :])
 
+    def _ensure_qubit_capacity(self, target: Sequence[int]) -> None:
+        """Grow the active circuit so it can address every index in target."""
+        active = self._active_circuit
+        max_qubits = (max(target) + 1) if target else -1
+        num_missing_qubits = max_qubits - active.num_qubits
+        active.add_bits([Qubit() for _ in range(num_missing_qubits)])
+        self.num_qubits = max(self.num_qubits, active.num_qubits)
+
     def add_qubits(self, name: str, num_qubits: int | None = 1) -> None:
         super().add_qubits(name, num_qubits)
         self._active_circuit.add_register(num_qubits)
@@ -210,12 +218,7 @@ class _QiskitProgramContext(AbstractProgramContext):
             )
 
         active = self._active_circuit
-        # Ensure circuit has enough qubits for the target indices by adding missing qubits
-        # This is needed when using physical qubits ($0, $1, etc.) where no qubit register is declared
-        max_qubits = (max(target) + 1) if target else -1
-        num_missing_qubits = max_qubits - active.num_qubits
-        active.add_bits([Qubit() for _ in range(num_missing_qubits)])
-        self.num_qubits = max(self.num_qubits, active.num_qubits)
+        self._ensure_qubit_capacity(target)
 
         active.append(CircuitInstruction(gate, target))
 
@@ -230,10 +233,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         classical_destination: Identifier | IndexedIdentifier | None = None,  # noqa: ARG002
     ) -> None:
         active = self._active_circuit
-        max_qubits = (max(target) + 1) if target else -1
-        num_missing_qubits = max_qubits - active.num_qubits
-        active.add_bits([Qubit() for _ in range(num_missing_qubits)])
-        self.num_qubits = max(self.num_qubits, active.num_qubits)
+        self._ensure_qubit_capacity(target)
         # this is to cover the edge case where a user measures a qubit without assigning it to a classical register
         if active.num_clbits < len(target):
             num_missing_clbits = len(target) - active.num_clbits
