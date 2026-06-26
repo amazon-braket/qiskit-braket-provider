@@ -535,7 +535,6 @@ def test_to_braket_round_trip_preserves_verbatim_box_with_measurement():
     qc = to_qiskit(src)
     bc = to_braket(qc, verbatim=True)
     out = bc.to_ir(ir_type="OPENQASM").source
-
     assert "#pragma braket verbatim" in out
     assert "h $0;" in out
     assert "cnot $0, $1;" in out
