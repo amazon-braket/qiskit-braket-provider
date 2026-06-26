@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 from qiskit import QuantumCircuit
-from qiskit.circuit import BoxOp, CircuitInstruction
+from qiskit.circuit import BoxOp, CircuitInstruction, IfElseOp
 
 from braket.circuits import Circuit
 from braket.default_simulator.openqasm.interpreter import VerbatimBoxDelimiter
@@ -374,3 +374,34 @@ def test_nested_error():
     test = Circuit().add_verbatim_box(Circuit().add_verbatim_box(Circuit().h(0).x(1)))
     with pytest.raises(ValueError, match="Nested verbatim boxes are not supported"):
         assert to_qiskit(test)
+
+
+def test_if_statement_inside_verbatim_box():
+    """An if-statement inside a verbatim box is preserved as IfElseOp in the BoxOp body."""
+    qasm = """
+    OPENQASM 3.0;
+    bit b;
+    #pragma braket verbatim
+    box {
+        h $0;
+        b = measure $0;
+        if (b == 1) { x $0; }
+    }
+    """
+    qc = to_qiskit(qasm)
+
+    box_inst = qc.data[0]
+    assert isinstance(box_inst.operation, BoxOp)
+    assert box_inst.operation.label == _BRAKET_VERBATIM_BOX_NAME
+
+    body = box_inst.operation.blocks[0]
+    assert [i.operation.name for i in body.data] == ["h", "measure", "if_else"]
+
+    if_inst = next(i for i in body.data if isinstance(i.operation, IfElseOp))
+    cond_bit, cond_val = if_inst.operation.condition
+    assert cond_bit == qc.clbits[0]
+    assert cond_val == 1
+
+    if_body = if_inst.operation.blocks[0]
+    assert [i.operation.name for i in if_body.data] == ["x"]
+    assert if_body.data[0].qubits[0] == qc.qubits[0]
