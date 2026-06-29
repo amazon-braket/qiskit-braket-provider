@@ -517,3 +517,26 @@ def test_to_braket_handles_verbatim_box_with_clbits():
     source = bc.to_ir(ir_type="OPENQASM").source
     assert "bit[1] b;" in source
     assert "b[0] = measure $0;" in source
+
+
+def test_to_braket_round_trip_preserves_verbatim_box_with_measurement():
+    """QASM → Qiskit → Braket QASM preserves verbatim gates and non-identity clbit mapping."""
+    src = """
+    OPENQASM 3.0;
+    bit[2] b;
+    #pragma braket verbatim
+    box {
+        h $0;
+        cnot $0, $1;
+        b[1] = measure $0;
+        b[0] = measure $1;
+    }
+    """
+    qc = to_qiskit(src)
+    bc = to_braket(qc, verbatim=True)
+    out = bc.to_ir(ir_type="OPENQASM").source
+    assert "#pragma braket verbatim" in out
+    assert "h $0;" in out
+    assert "cnot $0, $1;" in out
+    assert "b[0] = measure $1;" in out
+    assert "b[1] = measure $0;" in out
