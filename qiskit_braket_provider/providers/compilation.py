@@ -7,7 +7,6 @@ and the run() endpoints, including verbatim box handling and transpilation.
 import warnings
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TypeVar
 
 from qiskit import QuantumCircuit, generate_preset_pass_manager
 from qiskit.circuit import Barrier, BoxOp, Measure
@@ -30,12 +29,20 @@ from qiskit_braket_provider.providers.target import (
     local_simulator_to_target,
 )
 
-_T = TypeVar("_T")
-
 
 @dataclass(frozen=True)
 class _CompilationContext:
-    """Internal result from _compile containing compiled circuits and resolved state."""
+    """Result of :func:`_compile` containing compiled circuits and resolved state.
+
+    Attributes:
+        circuits: The compiled Qiskit QuantumCircuits.
+        target: The resolved transpiler target, if any.
+        qubit_labels: Physical qubit indices on the target device.
+        verbatim: Whether verbatim mode was requested.
+        basis_gates: The basis gate set used for compilation.
+        angle_restrictions: Per-gate angle constraints from the device.
+        pass_manager: The custom PassManager used, if any.
+    """
 
     circuits: list[QuantumCircuit]
     target: Target | None
@@ -58,8 +65,8 @@ def _default_target(circuits: Iterable[QuantumCircuit]) -> Target:
 
 
 def _compile(
-    circuits: QuantumCircuit | Iterable[QuantumCircuit] = None,
-    *args,
+    circuits: QuantumCircuit | Iterable[QuantumCircuit],
+    *,
     qubit_labels: Sequence[int] | None = None,
     target: Target | None = None,
     verbatim: bool | None = None,
@@ -77,35 +84,63 @@ def _compile(
     routing_method: str | None = None,
     seed_transpiler: int | None = None,
 ) -> _CompilationContext:
+    """Compile Qiskit circuits for execution on a Braket device.
+
+    This is the compilation pipeline used by :func:`to_braket`. It handles
+    verbatim box extraction/restoration, transpilation via Qiskit's pass infrastructure,
+    and device-specific gate substitutions.
+
+    Args:
+        circuits: One or more Qiskit QuantumCircuits to compile.
+        qubit_labels: Physical qubit indices on the target device. If not supplied,
+            contiguous indices are assumed.
+        target: A Qiskit transpiler target describing device constraints.
+        verbatim: If ``True``, skip transpilation (pass circuits through unchanged).
+        basis_gates: Set of gate names supported by the target device.
+        coupling_map: Qubit connectivity as a list of ``[control, target]`` pairs.
+        angle_restrictions: Per-gate angle constraints from the device.
+        optimization_level: Transpiler optimization level (0-3). Default: 0.
+        callback: Callback function passed to the transpiler.
+        num_processes: Number of parallel processes for transpilation.
+        pass_manager: A custom Qiskit PassManager. Mutually exclusive with other
+            transpilation options.
+        braket_device: A Braket Device to derive target and qubit labels from.
+        connectivity: Deprecated alias for ``coupling_map``.
+        verbatim_box_name: Label identifying verbatim BoxOp nodes.
+        layout_method: Layout method for the transpiler.
+        routing_method: Routing method for the transpiler.
+        seed_transpiler: Seed for reproducible transpilation.
+
+    Returns:
+        A :class:`_CompilationContext` containing the compiled circuits and resolved
+        compilation state.
+
+    Raises:
+        ValueError: If mutually exclusive options are specified together.
+        TypeError: If inputs are not QuantumCircuits.
+    """
     if isinstance(circuits, QuantumCircuit):
         circuits = [circuits]
     circuits = list(circuits)
 
-    if len(args) > 4:
-        raise ValueError(f"Unknown arguments passed: {args[4:]}")
-    padded = args + (None,) * max(0, 4 - len(args))
-    basis_gates = _check_positional(padded[0], basis_gates, "basis_gates")
-    verbatim = _check_positional(padded[1], verbatim, "verbatim")
-    connectivity = _check_positional(padded[2], connectivity, "connectivity")
-    angle_restrictions = _check_positional(padded[3], angle_restrictions, "angle_restrictions")
     _validate_arguments(
         circuits, target, basis_gates, coupling_map, connectivity, pass_manager, braket_device
     )
     coupling_map = coupling_map or connectivity
 
-    has_verbatim_boxes = any(
-        isinstance(instr.operation, BoxOp)
-        and getattr(instr.operation, "label", None) == verbatim_box_name
-        for circ in circuits
-        for instr in circ.data
-    )
+    has_barriers_named_verbatim = False
+    has_verbatim_boxes = False
 
-    if any(
-        isinstance(instr.operation, Barrier)
-        and getattr(instr.operation, "label", None) == verbatim_box_name
-        for circ in circuits
-        for instr in circ.data
-    ):
+    for circ in circuits:
+        for instr in circ.data:
+            label = getattr(instr.operation, "label", None)
+            if label == verbatim_box_name:
+                if isinstance(instr.operation, Barrier):
+                    has_barriers_named_verbatim = True
+                elif isinstance(instr.operation, BoxOp):
+                    has_verbatim_boxes = True
+
+    if has_barriers_named_verbatim:
         raise ValueError(
             "Cannot have a Barrier labeled with the same label used for verbatim boxes"
         )
@@ -200,19 +235,6 @@ def _compile(
         angle_restrictions=angle_restrictions,
         pass_manager=pass_manager,
     )
-
-
-def _check_positional(pos: _T, kw: _T, name: str) -> _T:
-    if pos is None:
-        return kw
-    if kw is not None:
-        raise TypeError(f"Multiple values for {name}: {pos, kw}")
-    warnings.warn(
-        f"Passing {name} as a positional argument is deprecated.",
-        DeprecationWarning,
-        stacklevel=1,
-    )
-    return pos
 
 
 def _validate_arguments(
