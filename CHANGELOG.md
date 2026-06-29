@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.17.2 (2026-06-29)
+
+### Bug Fixes and Other Changes
+
+ * allocate missing qubits in add_measure for physical-qubit refs
+ * Preserve if/measure inside verbatim box in to_qiskit
+ * Share parent bits in control-flow body circuits in to_qiskit
+
+## v0.17.1 (2026-06-25)
+
+### Bug Fixes and Other Changes
+
+ * classical bit in box
+
 ## v0.17.0 (2026-06-22)
 
 ### Features

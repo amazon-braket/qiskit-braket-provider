@@ -49,14 +49,14 @@ def _extract_verbatim_boxes(
         operation = instruction.operation
 
         qubit_indices = [circuit.find_bit(q).index for q in instruction.qubits]
-        clbit_indices = [circuit.find_bit(q).index for q in instruction.clbits]
 
         if isinstance(operation, BoxOp) and getattr(operation, "label", None) == verbatim_box_name:
             box_circuit = operation.blocks[0]
             verbatim_boxes.append((box_circuit, qubit_indices))
             barrier = Barrier(len(instruction.qubits), label=verbatim_box_name)
-            modified_circuit.append(barrier, qubit_indices, clbit_indices)
+            modified_circuit.append(barrier, qubit_indices)
         else:
+            clbit_indices = [circuit.find_bit(c).index for c in instruction.clbits]
             modified_circuit.append(operation, qubit_indices, clbit_indices)
 
     return modified_circuit, verbatim_boxes

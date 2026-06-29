@@ -115,7 +115,6 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._circuit_stack: list[QuantumCircuit] = [QuantumCircuit()]
         self._param_map: dict[str, Parameter] = {}
         self._in_verbatim_box = False
-        self._verbatim_circuit: QuantumCircuit | None = None
         self._verbatim_box_name = verbatim_box_name
         self._clbit_offset: dict[str, int] = {}
 
@@ -132,6 +131,25 @@ class _QiskitProgramContext(AbstractProgramContext):
                 "Every verbatim box start marker must have a matching end marker."
             )
         return self._circuit_stack[0]
+
+    def _push_scoped_circuit(self) -> QuantumCircuit:
+        """Push an empty body circuit onto the stack that shares the parent's bit objects."""
+        body = self._active_circuit.copy_empty_like()
+        self._circuit_stack.append(body)
+        return body
+
+    def _extend_bits(self, target: QuantumCircuit, source: QuantumCircuit) -> None:
+        """Add to target any bits that source has beyond target's current bit list."""
+        target.add_bits(source.qubits[target.num_qubits :])
+        target.add_bits(source.clbits[target.num_clbits :])
+
+    def _ensure_qubit_capacity(self, target: Sequence[int]) -> None:
+        """Grow the active circuit so it can address every index in target."""
+        active = self._active_circuit
+        max_qubits = (max(target) + 1) if target else -1
+        num_missing_qubits = max_qubits - active.num_qubits
+        active.add_bits([Qubit() for _ in range(num_missing_qubits)])
+        self.num_qubits = max(self.num_qubits, active.num_qubits)
 
     def add_qubits(self, name: str, num_qubits: int | None = 1) -> None:
         super().add_qubits(name, num_qubits)
@@ -200,20 +218,9 @@ class _QiskitProgramContext(AbstractProgramContext):
             )
 
         active = self._active_circuit
-        # Ensure circuit has enough qubits for the target indices by adding missing qubits
-        # This is needed when using physical qubits ($0, $1, etc.) where no qubit register is declared
-        max_qubits = (max(target) + 1) if target else -1
-        num_missing_qubits = max_qubits - active.num_qubits
-        active.add_bits([Qubit() for _ in range(num_missing_qubits)])
-        self.num_qubits = max(self.num_qubits, active.num_qubits)
+        self._ensure_qubit_capacity(target)
 
-        if self._in_verbatim_box:
-            # Ensure verbatim circuit also has enough qubits by adding missing qubits
-            num_missing_qubits = max_qubits - self._verbatim_circuit.num_qubits
-            self._verbatim_circuit.add_bits([Qubit() for _ in range(num_missing_qubits)])
-            self._verbatim_circuit.append(CircuitInstruction(gate, target))
-        else:
-            active.append(CircuitInstruction(gate, target))
+        active.append(CircuitInstruction(gate, target))
 
     def handle_parameter_value(self, value: Number | Expr) -> Number | Parameter:
         return _sympy_to_qiskit(value, self._param_map) if isinstance(value, Expr) else value
@@ -226,6 +233,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         classical_destination: Identifier | IndexedIdentifier | None = None,  # noqa: ARG002
     ) -> None:
         active = self._active_circuit
+        self._ensure_qubit_capacity(target)
         # this is to cover the edge case where a user measures a qubit without assigning it to a classical register
         if active.num_clbits < len(target):
             num_missing_clbits = len(target) - active.num_clbits
@@ -238,41 +246,37 @@ class _QiskitProgramContext(AbstractProgramContext):
         """Handle verbatim box start/end markers.
 
         When START_VERBATIM is received:
-        - Create a new QuantumCircuit to collect verbatim gates
+        - Push a scoped body circuit onto the stack that shares the parent's bits
         - Set _in_verbatim_box flag to True
 
         When END_VERBATIM is received:
-        - Wrap the collected gates in a BoxOp
-        - Append the BoxOp to the main circuit
+        - Pop the scoped body and propagate any new qubits/clbits back to the parent
+        - Wrap the body in a BoxOp and append it to the parent circuit
         - Reset verbatim state
 
         Args:
             marker: VerbatimBoxDelimiter indicating START_VERBATIM or END_VERBATIM
 
         Raises:
-            ValueError: If nested verbatim boxes are encountered or if END_VERBATIM is called without START_VERBATIM
+            ValueError: On nested verbatim boxes, an unmatched END_VERBATIM, or an invalid marker
         """
 
         if marker == VerbatimBoxDelimiter.START_VERBATIM:
             if self._in_verbatim_box:
                 raise ValueError("Nested verbatim boxes are not supported")
 
-            self._verbatim_circuit = QuantumCircuit()
+            self._push_scoped_circuit()
             self._in_verbatim_box = True
 
         elif marker == VerbatimBoxDelimiter.END_VERBATIM:
             if not self._in_verbatim_box:
                 raise ValueError("Verbatim box end marker without matching start")
 
-            box_op = BoxOp(self._verbatim_circuit, label=self._verbatim_box_name)
-
-            active = self._active_circuit
-            # Append BoxOp to active circuit with all qubits (convert indices to Qubit objects)
-            qubit_objects = [active.qubits[i] for i in range(self._verbatim_circuit.num_qubits)]
-            active.append(box_op, qubit_objects)
-
+            body = self._circuit_stack.pop()
+            parent = self._active_circuit
+            self._extend_bits(parent, body)
+            parent.append(BoxOp(body, label=self._verbatim_box_name), parent.qubits, parent.clbits)
             self._in_verbatim_box = False
-            self._verbatim_circuit = None
 
         else:
             raise ValueError("Verbatim box created using invalid marker")
@@ -322,15 +326,11 @@ class _QiskitProgramContext(AbstractProgramContext):
                 f"Only Identifier, IndexExpression, and BinaryExpression (==) are supported."
             )
 
-        true_body = QuantumCircuit(main.num_qubits, main.num_clbits)
-        self._circuit_stack.append(true_body)
+        true_body = self._push_scoped_circuit()
         yield True
         self._circuit_stack.pop()
 
-        # Push circuit for else-block (the interpreter always consumes this yield
-        # even for if-only blocks; the empty circuit is discarded below)
-        false_body = QuantumCircuit(main.num_qubits, main.num_clbits)
-        self._circuit_stack.append(false_body)
+        false_body = self._push_scoped_circuit()
         yield False
         self._circuit_stack.pop()
 
@@ -342,18 +342,14 @@ class _QiskitProgramContext(AbstractProgramContext):
                 "Both if and else branches contain no quantum operations."
             )
 
-        # Sync main circuit dimensions if branch bodies grew
-        max_qubits = max(true_body.num_qubits, false_body.num_qubits)
-        max_clbits = max(true_body.num_clbits, false_body.num_clbits)
-        if max_qubits > main.num_qubits:
-            main.add_bits([Qubit() for _ in range(max_qubits - main.num_qubits)])
-        if max_clbits > main.num_clbits:
-            main.add_bits([Clbit() for _ in range(max_clbits - main.num_clbits)])
+        # Sync parent and both bodies to the same bit layout (IfElseOp requires it).
+        self._extend_bits(main, true_body)
+        self._extend_bits(main, false_body)
+        self._extend_bits(true_body, main)
+        self._extend_bits(false_body, main)
 
         if_else_op = IfElseOp(resolved_condition, true_body, actual_false)
-        qubits = list(range(max_qubits))
-        clbits = list(range(max_clbits))
-        main.append(if_else_op, qubits, clbits)
+        main.append(if_else_op, main.qubits, main.clbits)
 
     def evaluate_for_range(
         self, set_declaration: Expression, loop_var: str, loop_type: ClassicalType
@@ -377,8 +373,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         # First pass: capture with concrete value to detect classical vs quantum body
         # Snapshot outer scope variables to detect classical side effects
         outer_vars = dict(self.variable_table.current_scope)
-        probe = QuantumCircuit(main.num_qubits, main.num_clbits)
-        self._circuit_stack.append(probe)
+        probe = self._push_scoped_circuit()
         with self.enter_scope():
             self.declare_variable(loop_var, loop_type, index_values[0])
             yield
@@ -407,8 +402,7 @@ class _QiskitProgramContext(AbstractProgramContext):
             )
 
         # Second pass: re-capture with symbolic loop variable for correct ForLoopOp binding
-        body = QuantumCircuit(main.num_qubits, main.num_clbits)
-        self._circuit_stack.append(body)
+        body = self._push_scoped_circuit()
         with self.enter_scope():
             self.declare_variable(loop_var, loop_type, SymbolLiteral(Symbol(loop_var)))
             yield
@@ -417,13 +411,8 @@ class _QiskitProgramContext(AbstractProgramContext):
         indexset = tuple(iv.value for iv in index_values)
         loop_param = self._param_map.get(loop_var) or Parameter(loop_var)
         for_op = ForLoopOp(indexset, loop_param, body)
-        max_qubits = max(body.num_qubits, main.num_qubits)
-        max_clbits = max(body.num_clbits, main.num_clbits)
-        if max_qubits > main.num_qubits:
-            main.add_bits([Qubit() for _ in range(max_qubits - main.num_qubits)])
-        if max_clbits > main.num_clbits:
-            main.add_bits([Clbit() for _ in range(max_clbits - main.num_clbits)])
-        main.append(for_op, list(range(max_qubits)), list(range(max_clbits)))
+        self._extend_bits(main, body)
+        main.append(for_op, main.qubits, main.clbits)
 
     def handle_loop_break(self):
         """Reject break statements since Qiskit's ForLoopOp/WhileLoopOp do not support them."""
@@ -452,8 +441,7 @@ class _QiskitProgramContext(AbstractProgramContext):
                 f"Only Identifier, IndexExpression, and BinaryExpression (==) are supported."
             )
 
-        body = QuantumCircuit(main.num_qubits, main.num_clbits)
-        self._circuit_stack.append(body)
+        body = self._push_scoped_circuit()
         yield True
         self._circuit_stack.pop()
 
@@ -463,15 +451,9 @@ class _QiskitProgramContext(AbstractProgramContext):
                 "This would result in an infinite loop."
             )
 
-        max_qubits = max(body.num_qubits, main.num_qubits)
-        max_clbits = max(body.num_clbits, main.num_clbits)
-        if max_qubits > main.num_qubits:
-            main.add_bits([Qubit() for _ in range(max_qubits - main.num_qubits)])
-        if max_clbits > main.num_clbits:
-            main.add_bits([Clbit() for _ in range(max_clbits - main.num_clbits)])
-
+        self._extend_bits(main, body)
         while_op = WhileLoopOp(resolved_condition, body)
-        main.append(while_op, list(range(max_qubits)), list(range(max_clbits)))
+        main.append(while_op, main.qubits, main.clbits)
 
     def _evaluate_expression(self, expression: Expression | list[Expression]) -> Any:  # noqa: ANN401
         """Lightweight expression evaluator for loop conditions and ranges."""
@@ -517,14 +499,14 @@ class _QiskitProgramContext(AbstractProgramContext):
         else:
             clbit_index = self._resolve_clbit_index(condition.rhs)
             value = condition.lhs.value
-        return (self.circuit.clbits[clbit_index], int(value))
+        return (self._active_circuit.clbits[clbit_index], int(value))
 
     def _resolve_condition_from_identifier(
         self, condition: Identifier | IndexExpression
     ) -> tuple[Clbit, int]:
         """Convert a bare identifier condition (e.g., `c` or `c[0]`) to (Clbit, 1)."""
         clbit_index = self._resolve_clbit_index(condition)
-        return (self.circuit.clbits[clbit_index], 1)
+        return (self._active_circuit.clbits[clbit_index], 1)
 
     def _resolve_clbit_index(self, node: Identifier | IndexExpression) -> int:
         """Resolve an identifier or indexed identifier to a classical bit index."""
