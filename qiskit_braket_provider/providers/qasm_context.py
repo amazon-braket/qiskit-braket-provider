@@ -1,8 +1,10 @@
 """OpenQASM 3 to Qiskit circuit context.
 
 This module provides _QiskitProgramContext which interprets OpenQASM 3 programs
-into Qiskit circuits, handling conditions, loops, verbatim markers, and
-mid-circuit measurement.
+into Qiskit circuits, handling conditions, loops, verbatim markers,
+mid-circuit measurement, and parametric transcendental function expressions
+(sin, cos, exp, etc.) in both direct ``input float`` style and user-defined
+gate definitions.
 """
 
 from collections.abc import Iterator, Sequence
@@ -24,6 +26,7 @@ from qiskit.circuit import (
     WhileLoopOp,
 )
 from sympy import Add, Expr, Mul, Pow, Symbol
+from sympy import sympify as _sympify
 
 from braket.default_simulator.openqasm._helpers.arrays import convert_range_def_to_range
 from braket.default_simulator.openqasm._helpers.casting import cast_to
@@ -117,6 +120,10 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._in_verbatim_box = False
         self._verbatim_box_name = verbatim_box_name
         self._clbit_offset: dict[str, int] = {}
+        # Maps sympy Symbol objects introduced as gate formal-parameter placeholders
+        # to their actual values (sympy Expr) when the gate is called.  Used by
+        # handle_parameter_value to substitute them before _sympy_to_qiskit runs.
+        self._gate_param_bindings: dict[Symbol, Expr] = {}
 
     @property
     def _active_circuit(self) -> QuantumCircuit:
@@ -162,30 +169,75 @@ class _QiskitProgramContext(AbstractProgramContext):
         value: Any = None,  # noqa: ANN401
         const: bool = False,
     ) -> None:
-        """Override to add classical bits to the Qiskit circuit when declared.
+        """Override to handle gate formal parameters and classical bit declarations.
 
-        When a classical bit array is declared (e.g., bit[2] c;), we need to add
-        the corresponding classical bits to the Qiskit circuit.
+        Three distinct behaviours are added on top of the base class:
 
-        Note: This only adds classical bits when the size is known at declaration time.
-        For function parameters with variable sizes (e.g., bit[n] where n is a parameter),
-        the classical bits are not added since the size is not yet determined.
+        1. **Gate formal-parameter promotion** - when the interpreter registers a
+           gate's formal parameter at *definition* time it calls
+           ``declare_variable(name, Identifier, Identifier(name))``.  The base
+           implementation stores the raw ``Identifier`` node; because OpenQASM
+           built-in functions (``sin``, ``cos``, ``exp``, ...) only know how to
+           operate on ``SymbolLiteral`` nodes (which carry a SymPy expression as
+           their ``.value``), calling ``sin(Identifier)`` raises an
+           ``AttributeError``.  We therefore convert the placeholder to
+           ``SymbolLiteral(Symbol(name))`` so that function calls inside the gate
+           body can be evaluated symbolically during ``inline_gate_def_body``.
+
+        2. **Gate formal-parameter binding at call time** - when the same gate is
+           *called*, the interpreter issues
+           ``declare_variable(name, FloatLiteral, actual_value)`` to bind the
+           formal parameter to the supplied argument.  We record this mapping in
+           ``_gate_param_bindings`` so that :meth:`handle_parameter_value` can
+           substitute SymPy symbols that were introduced during step 1 with their
+           concrete or symbolic values.
+
+        3. **Classical bit registration** - when a ``bit[n]`` variable is declared
+           the corresponding ``Clbit`` objects are added to the active Qiskit
+           circuit (unchanged from the previous implementation).
+
+        Note: The size of classical bits is only added when known at declaration
+        time.  For function parameters with variable sizes (e.g., ``bit[n]`` where
+        ``n`` is a parameter) the classical bits are not added since the size is
+        not yet determined.
         """
+        # --- Gate formal-parameter promotion (definition time) --------------------
+        # symbol_type is the *class* Identifier (not an instance) when the
+        # interpreter registers a formal gate parameter placeholder.
+        if symbol_type is Identifier and isinstance(value, Identifier):
+            # Replace the bare Identifier with a SymbolLiteral so that built-in
+            # transcendental functions (sin, cos, exp, ...) can operate on it
+            # symbolically during gate body inlining.
+            value = SymbolLiteral(Symbol(name))
+
+        # --- Gate formal-parameter binding (call time) ----------------------------
+        # symbol_type is the *class* FloatLiteral when the interpreter binds a
+        # formal gate parameter to the actual argument at call time.
+        elif symbol_type is FloatLiteral:
+            actual = value
+            if isinstance(actual, SymbolLiteral):
+                # Actual argument is a free input parameter; record the sympy mapping.
+                self._gate_param_bindings[Symbol(name)] = actual.value
+            elif isinstance(actual, FloatLiteral):
+                self._gate_param_bindings[Symbol(name)] = _sympify(actual.value)
+            # IntegerLiteral and other concrete literals are handled by sympy
+            # substitution in handle_parameter_value if they appear in expressions.
+
         super().declare_variable(name, symbol_type, value, const)
 
-        # If this is a bit type declaration, add classical bits to the circuit
+        # --- Classical bit registration -------------------------------------------
         if isinstance(symbol_type, BitType):
             if symbol_type.size is not None:
                 if isinstance(symbol_type.size, IntegerLiteral):
                     size = symbol_type.size.value
                 else:
-                    # Size is an Identifier or expression, can't determine size yet
-                    # This happens for function parameters like bit[n] where n is a variable
+                    # Size is an Identifier or expression, can't determine size yet.
+                    # This happens for function parameters like bit[n] where n is a variable.
                     return
             else:
                 size = 1
 
-            # this is used to deal with Qiskit's QuantumCircuit storing all classical bits in a flat list
+            # Track flat Clbit offsets (Qiskit stores all classical bits in one list).
             self._clbit_offset[name] = self._active_circuit.num_clbits
             self._active_circuit.add_bits([Clbit() for _ in range(size)])
 
@@ -223,7 +275,25 @@ class _QiskitProgramContext(AbstractProgramContext):
         active.append(CircuitInstruction(gate, target))
 
     def handle_parameter_value(self, value: Number | Expr) -> Number | Parameter:
-        return _sympy_to_qiskit(value, self._param_map) if isinstance(value, Expr) else value
+        """Convert an OpenQASM 3 parameter value to a Qiskit-compatible type.
+
+        For concrete numeric values the value is returned unchanged.  For SymPy
+        expressions the method first substitutes any gate formal-parameter symbols
+        (recorded in ``_gate_param_bindings`` when the gate was called) and then
+        delegates to :func:`_sympy_to_qiskit`.
+
+        This enables transcendental functions of gate parameters (e.g.
+        ``gate mygate(a) q { rx(sin(a)) q; }``) to round-trip correctly from
+        OpenQASM 3 into Qiskit ``ParameterExpression`` objects regardless of
+        whether the gate is called with a concrete float or a free input parameter.
+        """
+        if not isinstance(value, Expr):
+            return value
+        # Substitute any gate-formal-parameter symbols with their call-time values
+        # before converting the remaining free symbols to Qiskit Parameters.
+        if self._gate_param_bindings:
+            value = value.subs(self._gate_param_bindings)
+        return _sympy_to_qiskit(value, self._param_map)
 
     def add_measure(
         self,
