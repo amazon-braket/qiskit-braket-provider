@@ -41,8 +41,6 @@ from qiskit_braket_provider.providers.compilation import (
     _CompilationContext,  # noqa: F401
     _compile,
     _default_target,  # noqa: F401
-    _extract_verbatim_boxes,  # noqa: F401
-    _restore_verbatim_boxes,  # noqa: F401
 )
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
@@ -145,7 +143,7 @@ def to_braket(
     basis_gates: Collection[str] | None = None,
     coupling_map: list[list[int]] | None = None,
     angle_restrictions: Mapping[str, Mapping[int, set[float] | tuple[float, float]]] | None = None,
-    optimization_level: int = 0,
+    optimization_level: int | None = 0,
     callback: Callable | None = None,
     num_processes: int | None = None,
     pass_manager: PassManager | None = None,

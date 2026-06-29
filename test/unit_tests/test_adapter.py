@@ -950,14 +950,16 @@ class TestAdapter(TestCase):
         with pytest.raises(ValueError, match=r"Please rename your parameters."):
             to_braket(qiskit_circuit)
 
-    @patch("qiskit_braket_provider.providers.compilation.transpile")
-    def test_invalid_ctrl_state(self, mock_transpile: MagicMock):
+    @patch("qiskit_braket_provider.providers.compilation.generate_preset_pass_manager")
+    def test_invalid_ctrl_state(self, mock_gen_pm: MagicMock):
         """Tests that control states other than all 1s are rejected."""
         qiskit_circuit = QuantumCircuit(2)
         qiskit_circuit.h(0)
         qiskit_circuit.cx(0, 1, ctrl_state=0)
 
-        mock_transpile.return_value = [qiskit_circuit]
+        mock_pm = MagicMock()
+        mock_pm.run.return_value = [qiskit_circuit]
+        mock_gen_pm.return_value = mock_pm
         with pytest.raises(ValueError):
             to_braket(qiskit_circuit)
 
