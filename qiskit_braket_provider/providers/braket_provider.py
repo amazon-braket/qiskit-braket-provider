@@ -26,7 +26,6 @@ class BraketProvider:
          BraketBackend[Harmony],
          BraketBackend[Lucy],
          BraketBackend[SV1],
-         BraketBackend[TN1],
          BraketBackend[dm1]]
     """
 

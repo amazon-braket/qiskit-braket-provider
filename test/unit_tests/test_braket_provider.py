@@ -25,8 +25,8 @@ from qiskit_braket_provider import (
 )
 from qiskit_braket_provider.providers.braket_backend import BraketBackend
 from test.unit_tests.mocks import (
+    MOCK_GATE_MODEL_SIMULATOR_DM,
     MOCK_GATE_MODEL_SIMULATOR_SV,
-    MOCK_GATE_MODEL_SIMULATOR_TN,
     MOCK_RIGETTI_GATE_MODEL_M_3_QPU,
     MOCK_RIGETTI_M_3_QPU_CAPABILITIES,
     SIMULATOR_REGION,
@@ -40,7 +40,7 @@ class TestBraketProvider(TestCase):
 
     def setUp(self):
         self.mock_session = Mock()
-        simulators = [MOCK_GATE_MODEL_SIMULATOR_SV, MOCK_GATE_MODEL_SIMULATOR_TN]
+        simulators = [MOCK_GATE_MODEL_SIMULATOR_SV, MOCK_GATE_MODEL_SIMULATOR_DM]
         self.mock_session.get_device.side_effect = simulators
         self.mock_session.region = SIMULATOR_REGION
         self.mock_session.boto_session.region_name = SIMULATOR_REGION
@@ -103,7 +103,7 @@ class TestBraketProvider(TestCase):
         ) as mock_get_devices:
             mock_get_devices.get_devices.return_value = [
                 AwsDevice(MOCK_GATE_MODEL_SIMULATOR_SV["deviceArn"], self.mock_session),
-                AwsDevice(MOCK_GATE_MODEL_SIMULATOR_TN["deviceArn"], self.mock_session),
+                AwsDevice(MOCK_GATE_MODEL_SIMULATOR_DM["deviceArn"], self.mock_session),
             ]
             provider = BraketProvider()
             backends = provider.backends()
