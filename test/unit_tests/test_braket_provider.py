@@ -14,6 +14,7 @@ from qiskit.providers.exceptions import QiskitBackendNotFoundError
 from braket.aws import AwsDevice, AwsDeviceType, AwsQuantumTaskBatch, AwsSession
 from braket.aws.queue_information import QuantumTaskQueueInfo, QueueType
 from braket.circuits import Circuit
+from braket.emulation.local_emulator import LocalEmulator
 from qiskit_braket_provider import (
     AWSBraketProvider,
     BraketAwsBackend,
@@ -24,11 +25,13 @@ from qiskit_braket_provider import (
 )
 from qiskit_braket_provider.providers.braket_backend import BraketBackend
 from test.unit_tests.mocks import (
+    MOCK_GATE_MODEL_SIMULATOR_DM,
     MOCK_GATE_MODEL_SIMULATOR_SV,
-    MOCK_GATE_MODEL_SIMULATOR_TN,
     MOCK_RIGETTI_GATE_MODEL_M_3_QPU,
     MOCK_RIGETTI_M_3_QPU_CAPABILITIES,
     SIMULATOR_REGION,
+    mock_emulator_capabilities,
+    mock_emulator_topology,
 )
 
 
@@ -37,7 +40,7 @@ class TestBraketProvider(TestCase):
 
     def setUp(self):
         self.mock_session = Mock()
-        simulators = [MOCK_GATE_MODEL_SIMULATOR_SV, MOCK_GATE_MODEL_SIMULATOR_TN]
+        simulators = [MOCK_GATE_MODEL_SIMULATOR_SV, MOCK_GATE_MODEL_SIMULATOR_DM]
         self.mock_session.get_device.side_effect = simulators
         self.mock_session.region = SIMULATOR_REGION
         self.mock_session.boto_session.region_name = SIMULATOR_REGION
@@ -100,7 +103,7 @@ class TestBraketProvider(TestCase):
         ) as mock_get_devices:
             mock_get_devices.get_devices.return_value = [
                 AwsDevice(MOCK_GATE_MODEL_SIMULATOR_SV["deviceArn"], self.mock_session),
-                AwsDevice(MOCK_GATE_MODEL_SIMULATOR_TN["deviceArn"], self.mock_session),
+                AwsDevice(MOCK_GATE_MODEL_SIMULATOR_DM["deviceArn"], self.mock_session),
             ]
             provider = BraketProvider()
             backends = provider.backends()
@@ -242,3 +245,44 @@ class TestBraketProvider(TestCase):
         assert c.count_ops()["kraus"] == 3
         nq = [ins.operation.num_qubits for ins in c.data if ins.operation.name == "kraus"]
         assert nq == [1, 2, 1]
+
+    @staticmethod
+    def _mock_emulator_device() -> Mock:
+        """Build a mock ``AwsDevice`` exposing a real local emulator."""
+        capabilities = mock_emulator_capabilities()
+        capabilities.service = Mock()
+        capabilities.service.updatedAt = "2023-06-02T17:00:00+00:00"
+        device = Mock()
+        device.name = "Emulated-QPU"
+        device.provider_name = "provider1"
+        device.properties = capabilities
+        device.gate_calibrations = None
+        device.type = "QPU"
+        device.topology_graph = mock_emulator_topology()
+        device.emulator.return_value = LocalEmulator.from_device_properties(capabilities)
+        return device
+
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")
+    def test_get_backend_emulator(self, mock_get_devices: MagicMock):
+        """Tests that ``get_backend(name, emulator=True)`` returns an emulator backend."""
+        mock_get_devices.return_value = [self._mock_emulator_device()]
+        provider = BraketProvider()
+        backend = provider.get_backend("Emulated-QPU", emulator=True)
+        self.assertIsInstance(backend, BraketLocalBackend)
+        self.assertTrue(backend.emulator)
+        self.assertIn("Emulator for AWS Device", backend.description)
+
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")
+    def test_get_backend_emulator_runs(self, mock_get_devices: MagicMock):
+        """Tests that an emulator backend from the provider is runnable."""
+        mock_get_devices.return_value = [self._mock_emulator_device()]
+        provider = BraketProvider()
+        backend = provider.get_backend("Emulated-QPU", emulator=True)
+
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        circuit.measure_all()
+        transpiled = transpile(circuit, backend=backend, seed_transpiler=42)
+        result = backend.run(transpiled, shots=100).result()
+        self.assertEqual(sum(result.get_counts().values()), 100)

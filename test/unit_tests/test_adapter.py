@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
 import pytest
+import sympy
 from qiskit import (
     ClassicalRegister,
     QuantumCircuit,
@@ -35,7 +36,7 @@ from braket.device_schema.standardized_gate_model_qpu_device_properties_v1 impor
 from braket.devices import LocalSimulator
 from braket.experimental_capabilities import EnableExperimentalCapability
 from braket.ir.openqasm import Program
-from braket.parametric import FreeParameter
+from braket.parametric import FreeParameter, FreeParameterExpression
 from braket.pulse import PulseSequence
 from braket.registers import QubitSet
 from qiskit_braket_provider import exception, to_braket, to_qiskit
@@ -492,6 +493,13 @@ class TestAdapter(TestCase):
         with pytest.raises(ValueError, match="Cannot specify both circuits and circuit"):
             to_braket([circuit], circuit=[circuit])
 
+    def test_op_less_circuit_is_accepted(self):
+        assert isinstance(to_braket(QuantumCircuit(2, 1)), Circuit)
+
+    def test_op_less_circuit_via_circuit_kwarg_is_accepted(self):
+        with pytest.warns(DeprecationWarning, match="circuit is deprecated"):
+            assert isinstance(to_braket(circuit=QuantumCircuit(2, 1)), Circuit)
+
     def test_circuit_deprecated(self):
         """Tests that to_braket raises a DeprecationWarning if circuit is specified."""
         circuit = QuantumCircuit(1, 1)
@@ -942,7 +950,7 @@ class TestAdapter(TestCase):
         with pytest.raises(ValueError, match=r"Please rename your parameters."):
             to_braket(qiskit_circuit)
 
-    @patch("qiskit_braket_provider.providers.adapter.transpile")
+    @patch("qiskit_braket_provider.providers.compilation.transpile")
     def test_invalid_ctrl_state(self, mock_transpile: MagicMock):
         """Tests that control states other than all 1s are rejected."""
         qiskit_circuit = QuantumCircuit(2)
@@ -1484,6 +1492,66 @@ class TestFromBraket(TestCase):
 
         expected_qiskit_circuit = QuantumCircuit(1)
         expected_qiskit_circuit.rx(Parameter("alpha", uuid=uuid) ** 2, 0)
+
+        expected_qiskit_circuit.measure_all()
+        self.assertEqual(qiskit_circuit, expected_qiskit_circuit)
+
+    def test_parametric_pow_gate_with_symbolic_power(self):
+        """Tests Braket to Qiskit conversion rejects symbolic powers."""
+        braket_circuit = Circuit().rx(0, FreeParameter("alpha") ** FreeParameter("beta"))
+
+        with pytest.raises(
+            TypeError,
+            match=r"unrecognized parameter type in conversion: <class 'sympy.core.symbol.Symbol'>",
+        ):
+            to_qiskit(braket_circuit)
+
+    def test_parametric_function_gate(self):
+        """Tests Braket to Qiskit conversion with functions of parameters."""
+        alpha = FreeParameter("alpha")
+        function_conversions = {
+            "sin": lambda qiskit_alpha: qiskit_alpha.sin(),
+            "cos": lambda qiskit_alpha: qiskit_alpha.cos(),
+            "tan": lambda qiskit_alpha: qiskit_alpha.tan(),
+            "asin": lambda qiskit_alpha: qiskit_alpha.arcsin(),
+            "acos": lambda qiskit_alpha: qiskit_alpha.arccos(),
+            "atan": lambda qiskit_alpha: qiskit_alpha.arctan(),
+            "exp": lambda qiskit_alpha: qiskit_alpha.exp(),
+            "log": lambda qiskit_alpha: qiskit_alpha.log(),
+            "sqrt": lambda qiskit_alpha: qiskit_alpha**0.5,
+        }
+
+        for braket_name, qiskit_conversion in function_conversions.items():
+            with self.subTest(braket_name=braket_name):
+                expression = FreeParameterExpression(getattr(sympy, braket_name)(alpha.expression))
+                braket_circuit = Circuit().rx(0, expression)
+                qiskit_circuit = to_qiskit(braket_circuit)
+
+                uuid = qiskit_circuit.parameters[0].uuid
+
+                expected_qiskit_circuit = QuantumCircuit(1)
+                qiskit_alpha = Parameter("alpha", uuid=uuid)
+                expected_qiskit_circuit.rx(qiskit_conversion(qiskit_alpha), 0)
+
+                expected_qiskit_circuit.measure_all()
+                self.assertEqual(qiskit_circuit, expected_qiskit_circuit)
+
+    def test_parametric_function_gate_with_composite_expression(self):
+        """Tests Braket to Qiskit conversion with functions in composite expressions."""
+        alpha = FreeParameter("alpha")
+        beta = FreeParameter("beta")
+        expression = FreeParameterExpression(
+            sympy.sqrt(sympy.sin(alpha.expression) + beta.expression**2)
+        )
+        braket_circuit = Circuit().rx(0, expression)
+        qiskit_circuit = to_qiskit(braket_circuit)
+
+        param_uuids = {param.name: param.uuid for param in qiskit_circuit.parameters}
+
+        expected_qiskit_circuit = QuantumCircuit(1)
+        qiskit_alpha = Parameter("alpha", uuid=param_uuids["alpha"])
+        qiskit_beta = Parameter("beta", uuid=param_uuids["beta"])
+        expected_qiskit_circuit.rx((qiskit_alpha.sin() + qiskit_beta**2) ** 0.5, 0)
 
         expected_qiskit_circuit.measure_all()
         self.assertEqual(qiskit_circuit, expected_qiskit_circuit)

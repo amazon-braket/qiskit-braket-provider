@@ -26,18 +26,21 @@ class BraketProvider:
          BraketBackend[Harmony],
          BraketBackend[Lucy],
          BraketBackend[SV1],
-         BraketBackend[TN1],
          BraketBackend[dm1]]
     """
 
-    def get_backend(self, name: str | None = None, **kwargs) -> BraketAwsBackend:
+    def get_backend(
+        self, name: str | None = None, emulator: bool = False, **kwargs
+    ) -> BraketAwsBackend | BraketLocalBackend:
         """Return a single backend matching the specified filters.
 
         Args:
             name (str): name of the selected backend
+            emulator (bool): return a local emulator backend for the selected device
+                instead of the device itself. Only QPUs have emulators. Default: ``False``.
             **kwargs: dict with additional options for filtering and storing aws session
         Returns:
-            BraketAwsBackend: a backend matching the filters.
+            BraketAwsBackend | BraketLocalBackend: a backend matching the filters.
         Raises:
             QiskitBackendNotFoundError: if no backend could be found or
             more than one backend matches the filters.
@@ -47,7 +50,11 @@ class BraketProvider:
             raise QiskitBackendNotFoundError("More than one backend matches the criteria")
         if not backends:
             raise QiskitBackendNotFoundError("No backend matches the criteria")
-        return backends[0]
+        backend = backends[0]
+        if emulator:
+            assert isinstance(backend, BraketAwsBackend)  # only QPUs have emulators
+            return backend.emulator()
+        return backend
 
     def backends(
         self,

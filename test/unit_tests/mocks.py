@@ -22,7 +22,7 @@ from qiskit_braket_provider.providers.braket_backend import BraketBackend
 RIGETTI_ARN = "arn:aws:braket:::device/qpu/rigetti/Aspen-10"
 RIGETTI_ASPEN_ARN = "arn:aws:braket:::device/qpu/rigetti/Aspen-M-3"
 SV1_ARN = "arn:aws:braket:::device/quantum-simulator/amazon/sv1"
-TN1_ARN = "arn:aws:braket:::device/quantum-simulator/amazon/tn1"
+DM1_ARN = "arn:aws:braket:::device/quantum-simulator/amazon/dm1"
 RIGETTI_REGION = "us-west-1"
 SIMULATOR_REGION = "us-west-1"
 
@@ -240,12 +240,12 @@ MOCK_GATE_MODEL_SIMULATOR_SV = {
     "deviceArn": SV1_ARN,
     "deviceCapabilities": MOCK_GATE_MODEL_SIMULATOR_CAPABILITIES.json(),
 }
-MOCK_GATE_MODEL_SIMULATOR_TN = {
-    "deviceName": "tn1",
+MOCK_GATE_MODEL_SIMULATOR_DM = {
+    "deviceName": "dm1",
     "deviceType": "SIMULATOR",
     "providerName": "provider1",
     "deviceStatus": "ONLINE",
-    "deviceArn": TN1_ARN,
+    "deviceArn": DM1_ARN,
     "deviceCapabilities": MOCK_GATE_MODEL_SIMULATOR_CAPABILITIES.json(),
 }
 
@@ -355,6 +355,111 @@ MOCK_PROGRAM_SET_RESULT = ProgramSetQuantumTaskResult.from_object(
     )
 )
 MOCK_PROGRAM_SET_QUANTUM_TASK = LocalQuantumTask(MOCK_PROGRAM_SET_RESULT)
+
+
+def _emulator_one_qubit_properties() -> dict:
+    return {
+        "T1": {"value": 28.9, "unit": "us"},
+        "T2": {"value": 44.5, "unit": "us"},
+        "oneQubitFidelity": [
+            {"fidelityType": {"name": "RANDOMIZED_BENCHMARKING"}, "fidelity": 0.999},
+            {"fidelityType": {"name": "READOUT"}, "fidelity": 0.95},
+        ],
+    }
+
+
+MOCK_EMULATOR_CAPABILITIES_JSON = {
+    "braketSchemaHeader": {
+        "name": "braket.device_schema.rigetti.rigetti_device_capabilities",
+        "version": "1",
+    },
+    "service": {
+        "executionWindows": [
+            {
+                "executionDay": "Everyday",
+                "windowStartHour": "11:00",
+                "windowEndHour": "12:00",
+            }
+        ],
+        "shotsRange": [1, 100000],
+    },
+    "action": {
+        "braket.ir.openqasm.program": {
+            "actionType": "braket.ir.openqasm.program",
+            "version": ["1"],
+            "supportedOperations": ["RX", "RZ", "CZ"],
+            "supportedResultTypes": [
+                {"name": "StateVector", "observables": None, "minShots": 0, "maxShots": 0},
+                {"name": "Probability", "observables": None, "minShots": 1, "maxShots": 100000},
+            ],
+        }
+    },
+    "paradigm": {
+        "qubitCount": 2,
+        "nativeGateSet": ["rx", "rz", "cz"],
+        "connectivity": {
+            "fullyConnected": True,
+            "connectivityGraph": {"1": ["2"], "2": ["1"]},
+        },
+    },
+    "deviceParameters": {},
+}
+MOCK_EMULATOR_STANDARDIZED_PROPERTIES = StandardizedGateModelQpuDeviceProperties.parse_obj({
+    "braketSchemaHeader": {
+        "name": "braket.device_schema.standardized_gate_model_qpu_device_properties",
+        "version": "1",
+    },
+    "oneQubitProperties": {
+        "1": _emulator_one_qubit_properties(),
+        "2": _emulator_one_qubit_properties(),
+    },
+    "twoQubitProperties": {
+        "1-2": {
+            "twoQubitGateFidelity": [
+                {
+                    "direction": {"control": 1, "target": 2},
+                    "gateName": "CZ",
+                    "fidelity": 0.9,
+                    "fidelityType": {"name": "INTERLEAVED_RANDOMIZED_BENCHMARKING"},
+                }
+            ]
+        }
+    },
+})
+
+
+def mock_emulator_topology() -> DiGraph:
+    """Return the topology graph matching ``mock_emulator_capabilities``."""
+    graph = from_dict_of_lists({"1": [2], "2": [1]}, create_using=DiGraph())
+    return relabel_nodes(graph, {n: int(n) for n in graph.nodes})
+
+
+MOCK_EMULATOR_PROGRAM_SET_ACTION = {
+    "actionType": "braket.ir.openqasm.program_set",
+    "version": ["1"],
+    "supportedOperations": ["RX", "RZ", "CZ"],
+    "supportedResultTypes": [
+        {"name": "Probability", "observables": None, "minShots": 1, "maxShots": 100000},
+    ],
+    "maximumExecutables": 100,
+    "maximumTotalShots": 1000000,
+}
+
+
+def mock_emulator_capabilities(*, program_sets: bool = False) -> RigettiDeviceCapabilities:
+    """Return device capabilities that a Braket ``LocalEmulator`` can be built from.
+
+    When ``program_sets`` is true the source device also advertises program-set support,
+    which the emulator carries through to its validation passes.
+    """
+    capabilities_json: dict = copy.deepcopy(MOCK_EMULATOR_CAPABILITIES_JSON)
+    if program_sets:
+        capabilities_json["action"]["braket.ir.openqasm.program_set"] = copy.deepcopy(
+            MOCK_EMULATOR_PROGRAM_SET_ACTION
+        )
+    capabilities = RigettiDeviceCapabilities.parse_obj(capabilities_json)
+    capabilities.standardized = MOCK_EMULATOR_STANDARDIZED_PROPERTIES
+    return capabilities
 
 
 class MockBraketBackend(BraketBackend):

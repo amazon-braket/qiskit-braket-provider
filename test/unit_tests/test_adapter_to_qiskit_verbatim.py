@@ -4,14 +4,17 @@ from typing import Any
 
 import pytest
 from qiskit import QuantumCircuit
-from qiskit.circuit import BoxOp, CircuitInstruction
+from qiskit.circuit import BoxOp, CircuitInstruction, IfElseOp
 
 from braket.circuits import Circuit
 from braket.default_simulator.openqasm.interpreter import VerbatimBoxDelimiter
 from braket.default_simulator.openqasm.parser.openqasm_ast import BitType, Identifier
 from braket.ir.openqasm import Program
 from qiskit_braket_provider import to_qiskit
-from qiskit_braket_provider.providers.adapter import _QiskitProgramContext
+from qiskit_braket_provider.providers.adapter import (
+    _BRAKET_VERBATIM_BOX_NAME,
+    _QiskitProgramContext,
+)
 
 
 def _get_box_ops(qiskit_circuit: QuantumCircuit) -> list[CircuitInstruction]:
@@ -349,3 +352,75 @@ def test_bit_declaration_with_identifier_size_in_verbatim():
     ctx = _QiskitProgramContext()
     ctx.declare_variable("c", BitType(size=Identifier(name="n")))
     assert ctx.circuit.num_clbits == 0
+
+
+def test_braket_to_qiskit_verbatim_instruciton():
+    test = Circuit()
+    test.add_verbatim_box(Circuit().h(0).x(1))
+
+    circuit = QuantumCircuit(
+        2,
+    )
+    circuit.h(0)
+    circuit.x(1)
+    boxed = QuantumCircuit(
+        2,
+    )
+    boxed = boxed.compose(BoxOp(circuit, label=_BRAKET_VERBATIM_BOX_NAME))
+    assert to_qiskit(test, add_measurements=False) == boxed
+
+
+def test_nested_error():
+    test = Circuit().add_verbatim_box(Circuit().add_verbatim_box(Circuit().h(0).x(1)))
+    with pytest.raises(ValueError, match="Nested verbatim boxes are not supported"):
+        assert to_qiskit(test)
+
+
+def test_if_statement_inside_verbatim_box():
+    """An if-statement inside a verbatim box is preserved as IfElseOp in the BoxOp body."""
+    qasm = """
+    OPENQASM 3.0;
+    bit b;
+    #pragma braket verbatim
+    box {
+        h $0;
+        b = measure $0;
+        if (b == 1) { x $0; }
+    }
+    """
+    qc = to_qiskit(qasm)
+
+    box_inst = qc.data[0]
+    assert isinstance(box_inst.operation, BoxOp)
+    assert box_inst.operation.label == _BRAKET_VERBATIM_BOX_NAME
+
+    body = box_inst.operation.blocks[0]
+    assert [i.operation.name for i in body.data] == ["h", "measure", "if_else"]
+
+    if_inst = next(i for i in body.data if isinstance(i.operation, IfElseOp))
+    cond_bit, cond_val = if_inst.operation.condition
+    assert cond_bit == qc.clbits[0]
+    assert cond_val == 1
+
+    if_body = if_inst.operation.blocks[0]
+    assert [i.operation.name for i in if_body.data] == ["x"]
+    assert if_body.data[0].qubits[0] == qc.qubits[0]
+
+
+def test_to_qiskit_physical_qubit_only_measurement():
+    """Physical-qubit refs ($N) appearing only in a measurement get lazy qubit allocation."""
+    qc = to_qiskit("OPENQASM 3.0;\nbit[1] b;\nb[0] = measure $14;\n")
+    assert qc.num_qubits == 15
+    assert qc.num_clbits == 1
+    assert [i.operation.name for i in qc.data] == ["measure"]
+
+
+def test_to_qiskit_measure_inside_verbatim_box():
+    """Measurement on $N inside a verbatim box lands in the BoxOp body."""
+    qc = to_qiskit("OPENQASM 3.0;\nbit b;\n#pragma braket verbatim\nbox{ b = measure $1; }\n")
+    assert [i.operation.name for i in qc.data] == ["box"]
+    body = qc.data[0].operation.body
+    assert [i.operation.name for i in body.data] == ["measure"]
+    measure = body.data[0]
+    assert body.find_bit(measure.qubits[0]).index == 1
+    assert body.find_bit(measure.clbits[0]).index == 0

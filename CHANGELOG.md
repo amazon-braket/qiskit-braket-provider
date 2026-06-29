@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.17.2 (2026-06-29)
+
+### Bug Fixes and Other Changes
+
+ * allocate missing qubits in add_measure for physical-qubit refs
+ * Preserve if/measure inside verbatim box in to_qiskit
+ * Share parent bits in control-flow body circuits in to_qiskit
+
+## v0.17.1 (2026-06-25)
+
+### Bug Fixes and Other Changes
+
+ * classical bit in box
+
+## v0.17.0 (2026-06-22)
+
+### Features
+
+ * add abelian grouping of commuting observables to BraketEstimator
+ * add verbatim support from Circuits to QuantumCircuit
+
+## v0.16.0 (2026-06-17)
+
+### Features
+
+ * add device emulator support
+
+### Bug Fixes and Other Changes
+
+ * Don't use qubit labels for virtual qubits
+ * allow empty circuit in _get_circuits
+
+## v0.15.0 (2026-06-16)
+
+### Features
+
+ * support Braket parameter functions in to_qiskit
+
 ## v0.14.4 (2026-05-19)
 
 ### Bug Fixes and Other Changes
