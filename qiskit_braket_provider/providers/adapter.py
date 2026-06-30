@@ -143,7 +143,7 @@ def to_braket(
     basis_gates: Collection[str] | None = None,
     coupling_map: list[list[int]] | None = None,
     angle_restrictions: Mapping[str, Mapping[int, set[float] | tuple[float, float]]] | None = None,
-    optimization_level: int | None = 0,
+    optimization_level: int = 0,
     callback: Callable | None = None,
     num_processes: int | None = None,
     pass_manager: PassManager | None = None,
@@ -182,7 +182,7 @@ def to_braket(
         angle_restrictions (Mapping[str, Mapping[int, set[float] | tuple[float, float]]] | None):
             Mapping of gate names to parameter angle constraints used to
             validate numeric parameters. Default: ``None``.
-        optimization_level (int | None): The optimization level to pass to ``qiskit.transpile``.
+        optimization_level (int): The optimization level to pass to ``qiskit.transpile``.
             From Qiskit:
 
             * 0: no optimization - basic translation, no optimization, trivial layout

@@ -64,6 +64,20 @@ def _default_target(circuits: Iterable[QuantumCircuit]) -> Target:
     return target
 
 
+def _inline_verbatim_boxes(circuit: QuantumCircuit, verbatim_box_name: str) -> QuantumCircuit:
+    """Replace BoxOps with the given label by their contents at the top level."""
+    out = circuit.copy_empty_like()
+    for instr in circuit.data:
+        op = instr.operation
+        if isinstance(op, BoxOp) and getattr(op, "label", None) == verbatim_box_name:
+            qubit_idx = [circuit.find_bit(q).index for q in instr.qubits]
+            clbit_idx = [circuit.find_bit(c).index for c in instr.clbits]
+            out.compose(op.blocks[0], qubits=qubit_idx, clbits=clbit_idx, inplace=True)
+        else:
+            out.append(instr.operation, instr.qubits, instr.clbits)
+    return out
+
+
 def _compile(
     circuits: QuantumCircuit | Iterable[QuantumCircuit],
     *,
@@ -193,10 +207,7 @@ def _compile(
             )
         ):
             pm = generate_preset_pass_manager(
-                # generate_preset_pass_manager does not accept None unlike transpile().
-                # If user explicitly passes None, default to 2 to match Qiskit's transpile() behavior.
-                # When not passed, the signature default of 0 is used (no optimization).
-                optimization_level=optimization_level if optimization_level is not None else 2,
+                optimization_level=optimization_level,
                 basis_gates=list(basis_gates) if basis_gates else None,
                 coupling_map=coupling_map,
                 target=target,
@@ -209,19 +220,9 @@ def _compile(
                 pm.post_optimization = PassManager([RestoreVerbatimBoxes(verbatim_box_name)])
             circuits = pm.run(circuits, callback=callback, num_processes=num_processes)
         elif has_verbatim_boxes:
-            # No transpilation needed but still need to extract/restore verbatim boxes
-            verbatim_pm = PassManager([
-                ExtractVerbatimBoxes(verbatim_box_name),
-                RestoreVerbatimBoxes(verbatim_box_name),
-            ])
-            circuits = verbatim_pm.run(circuits)
+            circuits = [_inline_verbatim_boxes(circ, verbatim_box_name) for circ in circuits]
     elif has_verbatim_boxes:
-        # verbatim=True: unpack BoxOps without transpilation
-        verbatim_pm = PassManager([
-            ExtractVerbatimBoxes(verbatim_box_name),
-            RestoreVerbatimBoxes(verbatim_box_name),
-        ])
-        circuits = verbatim_pm.run(circuits)
+        circuits = [_inline_verbatim_boxes(circ, verbatim_box_name) for circ in circuits]
 
     if isinstance(target, _SubstitutedTarget):
         circuits = target._substitute(circuits)

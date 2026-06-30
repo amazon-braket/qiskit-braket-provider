@@ -85,7 +85,7 @@ _BRAKET_SUPPORTED_NOISE_INSTANCES = {
 
 
 def check_to_braket_unitary_correct(
-    qiskit_circuit: QuantumCircuit, optimization_level: int | None = None
+    qiskit_circuit: QuantumCircuit, optimization_level: int = 0
 ) -> bool:
     """Checks if endianness-reversed Qiskit circuit matrix matches Braket counterpart"""
     result = to_braket(qiskit_circuit, optimization_level=optimization_level)

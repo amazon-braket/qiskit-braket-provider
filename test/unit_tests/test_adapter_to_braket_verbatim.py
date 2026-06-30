@@ -3,6 +3,7 @@
 import pytest
 from qiskit import QuantumCircuit
 from qiskit.circuit import Barrier, BoxOp
+from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.transpiler import PassManager
 from qiskit.transpiler.passes import Optimize1qGates
 
@@ -12,10 +13,12 @@ from qiskit_braket_provider.providers.adapter import (
     to_braket,
     to_qiskit,
 )
+from qiskit_braket_provider.providers.compilation import _compile
 from qiskit_braket_provider.providers.passes import (
     ExtractVerbatimBoxes,
     RestoreVerbatimBoxes,
 )
+from qiskit_braket_provider.providers.passes.verbatim_passes import _indexed_label
 
 VERBATIM_LABEL = "verbatim"
 NUM_QUBITS = 2
@@ -138,7 +141,6 @@ def test_verbatim_box_extraction(
     box_circuit, _clbits = next(iter(verbatim_boxes.values()))
     assert [d.operation.name for d in box_circuit.data] == expected_gate_names
 
-    # Verify the barrier is on the expected qubits
     barrier_qubits = [modified.find_bit(q).index for q in modified.data[0].qubits]
     assert barrier_qubits == expected_qubits
 
@@ -157,7 +159,6 @@ def test_multiple_verbatim_boxes_extraction(h_circuit: QuantumCircuit, cx_circui
     assert all(b.operation.label.startswith(VERBATIM_LABEL) for b in barriers)
     assert len([i for i in modified.data if i.operation.name == "x"]) == 1
 
-    # Verify barrier qubit indices
     for barrier_instr in barriers:
         barrier_qubits = [modified.find_bit(q).index for q in barrier_instr.qubits]
         assert barrier_qubits == QUBIT_PAIR
@@ -193,11 +194,16 @@ def test_non_verbatim_boxop_not_extracted(h_circuit: QuantumCircuit):
 
 
 def test_single_verbatim_box_restoration(h_cx_circuit: QuantumCircuit):
-    main = QuantumCircuit(NUM_QUBITS)
-    main.append(BoxOp(h_cx_circuit, label=VERBATIM_LABEL), QUBIT_PAIR)
+    """RestoreVerbatimBoxes replaces a labeled barrier with stashed box contents."""
+    label = _indexed_label(VERBATIM_LABEL, 0)
+    transpiled = QuantumCircuit(NUM_QUBITS)
+    transpiled.append(Barrier(NUM_QUBITS, label=label), QUBIT_PAIR)
 
-    pm = PassManager([ExtractVerbatimBoxes(VERBATIM_LABEL), RestoreVerbatimBoxes(VERBATIM_LABEL)])
-    restored = pm.run(main)
+    restore_pass = RestoreVerbatimBoxes(VERBATIM_LABEL)
+    restore_pass.property_set["verbatim_boxes"] = {label: (h_cx_circuit, [])}
+
+    dag = circuit_to_dag(transpiled)
+    restored = dag_to_circuit(restore_pass.run(dag))
 
     assert len(restored.data) == 2
     assert restored.data[0].operation.name == "h"
@@ -208,18 +214,26 @@ def test_single_verbatim_box_restoration(h_cx_circuit: QuantumCircuit):
 
 
 def test_multiple_verbatim_boxes_restoration(h_circuit: QuantumCircuit, cx_circuit: QuantumCircuit):
-    main = QuantumCircuit(NUM_QUBITS)
-    main.append(BoxOp(h_circuit, label=VERBATIM_LABEL), QUBIT_PAIR)
-    main.x(1)
-    main.append(BoxOp(cx_circuit, label=VERBATIM_LABEL), QUBIT_PAIR)
+    """RestoreVerbatimBoxes replaces multiple labeled barriers with stashed box contents."""
+    label_0 = _indexed_label(VERBATIM_LABEL, 0)
+    label_1 = _indexed_label(VERBATIM_LABEL, 1)
+    transpiled = QuantumCircuit(NUM_QUBITS)
+    transpiled.append(Barrier(NUM_QUBITS, label=label_0), QUBIT_PAIR)
+    transpiled.x(1)
+    transpiled.append(Barrier(NUM_QUBITS, label=label_1), QUBIT_PAIR)
 
-    pm = PassManager([ExtractVerbatimBoxes(VERBATIM_LABEL), RestoreVerbatimBoxes(VERBATIM_LABEL)])
-    restored = pm.run(main)
+    restore_pass = RestoreVerbatimBoxes(VERBATIM_LABEL)
+    restore_pass.property_set["verbatim_boxes"] = {
+        label_0: (h_circuit, []),
+        label_1: (cx_circuit, []),
+    }
+
+    dag = circuit_to_dag(transpiled)
+    restored = dag_to_circuit(restore_pass.run(dag))
 
     gate_names = [i.operation.name for i in restored.data]
     assert gate_names == ["h", "x", "cx"]
 
-    # Verify qubit indices
     assert restored.find_bit(restored.data[0].qubits[0]).index == 0  # h on q0
     assert restored.find_bit(restored.data[1].qubits[0]).index == 1  # x on q1
     assert restored.find_bit(restored.data[2].qubits[0]).index == 0  # cx control q0
@@ -235,7 +249,7 @@ def test_extract_raises_on_barrier_labeled_verbatim():
         pm.run(qc)
 
 
-def test_restore_raises_on_missing_box():
+def test_extract_raises_on_conflicting_barrier_label():
     """Test that ExtractVerbatimBoxes raises on conflicting barrier labels."""
     qc = QuantumCircuit(NUM_QUBITS)
     qc.append(Barrier(NUM_QUBITS, label="verbatim__0"), QUBIT_PAIR)
@@ -542,6 +556,23 @@ def test_to_braket_handles_verbatim_box_with_clbits():
     assert "b[0] = measure $0;" in source
 
 
+def test_to_braket_verbatim_box_with_clbits_on_subset_of_qubits():
+    """Verbatim BoxOp on a qubit subset of a larger circuit with measurements."""
+    body = QuantumCircuit(2, 2)
+    body.x(0)
+    body.measure(0, 0)
+    body.measure(1, 1)
+
+    qc = QuantumCircuit(3, 2)
+    qc.append(BoxOp(body, label=VERBATIM_LABEL), [qc.qubits[0], qc.qubits[1]], qc.clbits)
+
+    bc = to_braket(qc, verbatim=True)
+
+    source = bc.to_ir(ir_type="OPENQASM").source
+    assert "bit[2] b;" in source
+    assert "x $0;" in source
+
+
 def test_to_braket_round_trip_preserves_verbatim_box_with_measurement():
     """QASM → Qiskit → Braket QASM preserves verbatim gates and non-identity clbit mapping."""
     src = """
@@ -567,36 +598,30 @@ def test_to_braket_round_trip_preserves_verbatim_box_with_measurement():
 
 def test_verbatim_boxes_without_transpilation_needed():
     """Cover the elif path: verbatim boxes present but no transpilation triggers."""
-    from qiskit_braket_provider.providers.compilation import _compile
 
     body = QuantumCircuit(NUM_QUBITS)
     body.h(0)
 
     qc = QuantumCircuit(NUM_QUBITS)
     qc.append(BoxOp(body, label=VERBATIM_LABEL), QUBIT_PAIR)
-
-    # Provide basis_gates that include all the circuit's gates so no
-    # transpilation is triggered, but verbatim boxes still need handling.
-    # The circuit only has a "box" gate at top level (the BoxOp).
     result = _compile(qc, basis_gates={"h", "cx", "box"})
     assert result.circuits[0].data[0].operation.name == "h"
 
 
 def test_restore_without_extract_is_noop():
-    """RestoreVerbatimBoxes with empty property_set returns dag unchanged (line 120)."""
+    """RestoreVerbatimBoxes with empty property_set returns dag unchanged."""
     qc = QuantumCircuit(NUM_QUBITS)
     qc.h(0)
 
     pm = PassManager([RestoreVerbatimBoxes(VERBATIM_LABEL)])
     result = pm.run(qc)
+    assert len(result.data) == 1
     assert result.data[0].operation.name == "h"
+    assert [result.find_bit(q).index for q in result.data[0].qubits] == [0]
 
 
 def test_restore_raises_on_mismatched_barrier_label():
-    """RestoreVerbatimBoxes raises when a verbatim barrier has no matching box (line 127-129)."""
-    from qiskit.converters import circuit_to_dag
-
-    from qiskit_braket_provider.providers.passes.verbatim_passes import _indexed_label
+    """RestoreVerbatimBoxes raises when a verbatim barrier has no matching box."""
 
     qc = QuantumCircuit(NUM_QUBITS)
     label = _indexed_label(VERBATIM_LABEL, 0)
@@ -615,12 +640,8 @@ def test_restore_raises_on_mismatched_barrier_label():
 
 
 def test_restore_raises_on_leftover_boxes():
-    """RestoreVerbatimBoxes raises when boxes remain after processing (line 153)."""
-    from qiskit.converters import circuit_to_dag
+    """RestoreVerbatimBoxes raises when boxes remain after processing."""
 
-    from qiskit_braket_provider.providers.passes.verbatim_passes import _indexed_label
-
-    # Circuit with no verbatim barriers
     qc = QuantumCircuit(NUM_QUBITS)
     qc.h(0)
 
@@ -632,7 +653,7 @@ def test_restore_raises_on_leftover_boxes():
     restore_pass.property_set["verbatim_boxes"] = {label: (body, [])}
 
     dag = circuit_to_dag(qc)
-    with pytest.raises(RuntimeError, match="verbatim boxes lost during transpilation"):
+    with pytest.raises(RuntimeError, match="stashed verbatim boxes were not restored"):
         restore_pass.run(dag)
 
 

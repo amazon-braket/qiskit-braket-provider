@@ -1,24 +1,4 @@
-"""Transpiler passes for preserving Braket verbatim boxes through compilation.
-
-Braket verbatim boxes (``#pragma braket verbatim``) mark circuit regions that
-must reach hardware unmodified. In Qiskit these are represented as
-:class:`~qiskit.circuit.BoxOp` nodes with a ``"verbatim"`` label.
-
-Since the Qiskit transpiler has no notion of verbatim semantics, these two
-passes bracket the transpilation pipeline:
-
-- :class:`ExtractVerbatimBoxes` (pre-transpilation): swaps each verbatim
-  ``BoxOp`` for a labeled :class:`~qiskit.circuit.Barrier` that the
-  transpiler will leave untouched, and stashes the original circuits in
-  ``property_set["verbatim_boxes"]``.
-
-- :class:`RestoreVerbatimBoxes` (post-transpilation): replaces the labeled
-  barriers with the stashed gate sequences.
-
-Both passes must share a ``property_set``, which happens automatically when
-they live in the same :class:`~qiskit.transpiler.PassManager` or
-:class:`~qiskit.transpiler.StagedPassManager`.
-"""
+"""Transpiler passes for preserving verbatim boxes through compilation."""
 
 from qiskit.circuit import Barrier, BoxOp, QuantumCircuit
 from qiskit.converters import circuit_to_dag
@@ -132,15 +112,13 @@ class RestoreVerbatimBoxes(TransformationPass):
                 )
             box_circuit, clbit_indices = verbatim_boxes.pop(label)
             if clbit_indices:
-                # The barrier only has qubits; build a replacement DAG that
-                # includes the box's clbits so we can substitute correctly.
                 box_dag = circuit_to_dag(box_circuit)
-                # Wire mapping: barrier qubits → box qubits, dag clbits → box clbits
-                qubit_map = dict(zip(node.qargs, box_dag.qubits, strict=True))
+                # Build a replacement DAG that includes the box's clbits.
+                qubit_map = dict(zip(box_dag.qubits, node.qargs, strict=True))
                 clbit_map = dict(
                     zip(
-                        [dag.clbits[i] for i in clbit_indices],
                         box_dag.clbits,
+                        [dag.clbits[i] for i in clbit_indices],
                         strict=True,
                     )
                 )
@@ -151,8 +129,8 @@ class RestoreVerbatimBoxes(TransformationPass):
 
         if verbatim_boxes:
             raise RuntimeError(
-                f"Internal error: verbatim boxes lost during transpilation: "
-                f"{list(verbatim_boxes.keys())}. "
-                f"This is a bug in the verbatim pass pipeline."
+                f"Internal error: stashed verbatim boxes were not restored "
+                f"(no matching barriers found): {list(verbatim_boxes.keys())}. "
+                f"Their barriers may have been removed during transpilation."
             )
         return dag
