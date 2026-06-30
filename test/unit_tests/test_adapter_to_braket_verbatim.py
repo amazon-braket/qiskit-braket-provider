@@ -573,6 +573,42 @@ def test_to_braket_verbatim_box_with_clbits_on_subset_of_qubits():
     assert "x $0;" in source
 
 
+def test_verbatim_box_with_clbits_through_transpilation():
+    """Verbatim BoxOp with clbits goes through the pass pipeline when transpiling."""
+    body = QuantumCircuit(1, 1)
+    body.h(0)
+    body.measure(0, 0)
+
+    qc = QuantumCircuit(2, 1)
+    qc.x(0)
+    qc.append(BoxOp(body, label=VERBATIM_LABEL), [qc.qubits[1]], qc.clbits)
+
+    # Provide basis_gates to trigger transpilation path (not verbatim=True)
+    bc = to_braket(qc, basis_gates=["x", "h", "cx", "measure"])
+
+    source = bc.to_ir(ir_type="OPENQASM").source
+    assert "h q[1];" in source
+    assert "b[0] = measure q[1];" in source
+
+
+def test_verbatim_box_with_clbits_on_subset_through_transpilation():
+    """Verbatim BoxOp with clbits on qubit subset goes through pass pipeline."""
+    body = QuantumCircuit(2, 2)
+    body.x(0)
+    body.measure(0, 0)
+    body.measure(1, 1)
+
+    qc = QuantumCircuit(3, 2)
+    qc.append(BoxOp(body, label=VERBATIM_LABEL), [qc.qubits[0], qc.qubits[1]], qc.clbits)
+
+    bc = to_braket(qc, basis_gates=["x", "h", "cx", "measure"])
+
+    source = bc.to_ir(ir_type="OPENQASM").source
+    assert "bit[2] b;" in source
+    assert "x q[0];" in source
+    assert "b[0] = measure q[0];" in source
+
+
 def test_to_braket_round_trip_preserves_verbatim_box_with_measurement():
     """QASM → Qiskit → Braket QASM preserves verbatim gates and non-identity clbit mapping."""
     src = """
