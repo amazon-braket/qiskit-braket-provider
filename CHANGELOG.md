@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.17.3 (2026-06-30)
+
+### Bug Fixes and Other Changes
+
+ * update tests & tutorials to current Braket devices
+
 ## v0.17.2 (2026-06-29)
 
 ### Bug Fixes and Other Changes
