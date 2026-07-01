@@ -142,7 +142,10 @@ def test_openqasm_round_trip_preserves_name_and_unitary(
     braket_circuit = to_braket(qc)
     braket_cls = getattr(braket_gates, qiskit_cls.__name__)
     assert isinstance(braket_circuit.instructions[0].operator, braket_cls)
-    assert np.allclose(braket_circuit.to_unitary(), Circuit.from_ir(qasm).to_unitary())
+
+    ref = Circuit.from_ir(qasm).to_unitary()
+    assert np.allclose(braket_circuit.to_unitary(), ref)
+    assert np.allclose(Operator(qc).reverse_qargs().data, ref)
 
 
 @pytest.mark.parametrize(
