@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from qiskit import QuantumCircuit, generate_preset_pass_manager
 from qiskit.circuit import Barrier, BoxOp, Measure
-from qiskit.transpiler import PassManager, Target
+from qiskit.transpiler import PassManager, StagedPassManager, Target
 
 from braket.aws import AwsDevice
 from braket.devices import Device
@@ -216,8 +216,12 @@ def _compile(
                 seed_transpiler=seed_transpiler,
             )
             if has_verbatim_boxes:
-                pm.pre_init = PassManager([ExtractVerbatimBoxes(verbatim_box_name)])
-                pm.post_optimization = PassManager([RestoreVerbatimBoxes(verbatim_box_name)])
+                pm = StagedPassManager(
+                    stages=("verbatim_extract", "transpile", "verbatim_restore"),
+                    verbatim_extract=PassManager([ExtractVerbatimBoxes(verbatim_box_name)]),
+                    transpile=pm,
+                    verbatim_restore=PassManager([RestoreVerbatimBoxes(verbatim_box_name)]),
+                )
             circuits = pm.run(circuits, callback=callback, num_processes=num_processes)
         elif has_verbatim_boxes:
             circuits = [_inline_verbatim_boxes(circ, verbatim_box_name) for circ in circuits]

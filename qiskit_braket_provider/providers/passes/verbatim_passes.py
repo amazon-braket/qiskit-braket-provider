@@ -92,8 +92,8 @@ class RestoreVerbatimBoxes(TransformationPass):
         """Splice stashed gate sequences back in place of labeled barriers.
 
         Raises:
-            RuntimeError: If the number of labeled barriers does not match
-                the number of stashed verbatim boxes.
+            RuntimeError: If a labeled barrier has no matching stashed box.
+            RuntimeError: If stashed boxes remain unconsumed after processing.
         """
         verbatim_boxes = self.property_set.get("verbatim_boxes", {})
         if not verbatim_boxes:
@@ -111,8 +111,8 @@ class RestoreVerbatimBoxes(TransformationPass):
                     f"This is a bug in the verbatim pass pipeline."
                 )
             box_circuit, clbit_indices = verbatim_boxes.pop(label)
+            box_dag = circuit_to_dag(box_circuit)
             if clbit_indices:
-                box_dag = circuit_to_dag(box_circuit)
                 # Build a replacement DAG that includes the box's clbits.
                 qubit_map = dict(zip(box_dag.qubits, node.qargs, strict=True))
                 clbit_map = dict(
@@ -124,7 +124,6 @@ class RestoreVerbatimBoxes(TransformationPass):
                 )
                 dag.substitute_node_with_dag(node, box_dag, wires={**qubit_map, **clbit_map})
             else:
-                box_dag = circuit_to_dag(box_circuit)
                 dag.substitute_node_with_dag(node, box_dag)
 
         if verbatim_boxes:
