@@ -1556,6 +1556,167 @@ class TestFromBraket(TestCase):
         expected_qiskit_circuit.measure_all()
         self.assertEqual(qiskit_circuit, expected_qiskit_circuit)
 
+    def test_oq3_parametric_function_direct_input(self):
+        """Tests OQ3 string -> Qiskit conversion with transcendental fns of input floats.
+
+        This covers the direct-application path: a built-in gate is called with an
+        expression involving a transcendental function of an ``input float`` variable,
+        e.g. ``rx(sin(theta)) q[0]``.  No user-defined gate wrapping is involved.
+        Resolves issue #347.
+        """
+        function_conversions = {
+            "sin": lambda p: p.sin(),
+            "cos": lambda p: p.cos(),
+            "tan": lambda p: p.tan(),
+            "arcsin": lambda p: p.arcsin(),
+            "arccos": lambda p: p.arccos(),
+            "arctan": lambda p: p.arctan(),
+            "exp": lambda p: p.exp(),
+            "log": lambda p: p.log(),
+        }
+        for fn_name, qiskit_fn in function_conversions.items():
+            with self.subTest(fn=fn_name):
+                qasm = f"""OPENQASM 3.0;
+input float theta;
+qubit[1] q;
+rx({fn_name}(theta)) q[0];"""
+                qiskit_circuit = to_qiskit(qasm.strip(), add_measurements=False)
+
+                self.assertEqual(len(qiskit_circuit.parameters), 1)
+                uuid = qiskit_circuit.parameters[0].uuid
+                qiskit_theta = Parameter("theta", uuid=uuid)
+
+                expected = QuantumCircuit(1)
+                expected.rx(qiskit_fn(qiskit_theta), 0)
+                self.assertEqual(qiskit_circuit, expected)
+
+    def test_oq3_parametric_function_direct_composite(self):
+        """Tests OQ3 -> Qiskit conversion with composite transcendental expressions.
+        Resolves issue #347.
+        """
+        qasm = """OPENQASM 3.0;
+input float theta;
+input float phi;
+qubit[1] q;
+rx(sin(theta) + 2.0*phi) q[0];"""
+        qiskit_circuit = to_qiskit(qasm.strip(), add_measurements=False)
+
+        self.assertEqual(set(p.name for p in qiskit_circuit.parameters), {"theta", "phi"})
+        uuids = {p.name: p.uuid for p in qiskit_circuit.parameters}
+        qiskit_theta = Parameter("theta", uuid=uuids["theta"])
+        qiskit_phi = Parameter("phi", uuid=uuids["phi"])
+
+        expected = QuantumCircuit(1)
+        expected.rx(qiskit_theta.sin() + 2.0 * qiskit_phi, 0)
+        self.assertEqual(qiskit_circuit, expected)
+
+    def test_oq3_parametric_function_in_gate_def_symbolic(self):
+        """Tests OQ3 gate def with transcendental fn called with a free param.
+        Main bug case from issue #347: raised AttributeError before this fix.
+        """
+        function_conversions = {
+            "sin": lambda p: p.sin(),
+            "cos": lambda p: p.cos(),
+            "tan": lambda p: p.tan(),
+            "arcsin": lambda p: p.arcsin(),
+            "arccos": lambda p: p.arccos(),
+            "arctan": lambda p: p.arctan(),
+            "exp": lambda p: p.exp(),
+            "log": lambda p: p.log(),
+        }
+        for fn_name, qiskit_fn in function_conversions.items():
+            with self.subTest(fn=fn_name):
+                qasm = f"""OPENQASM 3.0;
+input float theta;
+gate mygate(a) q {{
+    rx({fn_name}(a)) q;
+}}
+qubit[1] q;
+mygate(theta) q[0];"""
+                qiskit_circuit = to_qiskit(qasm.strip(), add_measurements=False)
+
+                self.assertEqual(len(qiskit_circuit.parameters), 1)
+                uuid = qiskit_circuit.parameters[0].uuid
+                qiskit_theta = Parameter("theta", uuid=uuid)
+
+                expected = QuantumCircuit(1)
+                expected.rx(qiskit_fn(qiskit_theta), 0)
+                self.assertEqual(qiskit_circuit, expected)
+
+    def test_oq3_parametric_function_in_gate_def_concrete(self):
+        """Tests OQ3 gate def with transcendental fn called with a concrete float.
+        Resolves issue #347.
+        """
+        import math
+        function_concrete = {
+            "sin": math.sin,
+            "cos": math.cos,
+            "exp": math.exp,
+        }
+        angle = 0.5
+        for fn_name, math_fn in function_concrete.items():
+            with self.subTest(fn=fn_name):
+                qasm = f"""OPENQASM 3.0;
+gate mygate(a) q {{
+    rx({fn_name}(a)) q;
+}}
+qubit[1] q;
+mygate({angle}) q[0];"""
+                qiskit_circuit = to_qiskit(qasm.strip(), add_measurements=False)
+
+                self.assertEqual(len(qiskit_circuit.parameters), 0)
+                actual_param = qiskit_circuit.data[0].operation.params[0]
+                self.assertAlmostEqual(float(actual_param), math_fn(angle), places=10)
+
+    def test_oq3_parametric_function_in_gate_def_multi_param(self):
+        """Tests OQ3 gate def with two transcendental parameters. Resolves issue #347."""
+        qasm = """OPENQASM 3.0;
+input float theta;
+input float phi;
+gate mygate(a, b) q {
+    rx(sin(a) + cos(b)) q;
+}
+qubit[1] q;
+mygate(theta, phi) q[0];"""
+        qiskit_circuit = to_qiskit(qasm.strip(), add_measurements=False)
+
+        self.assertEqual(set(p.name for p in qiskit_circuit.parameters), {"theta", "phi"})
+        uuids = {p.name: p.uuid for p in qiskit_circuit.parameters}
+        qiskit_theta = Parameter("theta", uuid=uuids["theta"])
+        qiskit_phi = Parameter("phi", uuid=uuids["phi"])
+
+        expected = QuantumCircuit(1)
+        expected.rx(qiskit_theta.sin() + qiskit_phi.cos(), 0)
+        self.assertEqual(qiskit_circuit, expected)
+
+    def test_oq3_parametric_function_braket_circuit_roundtrip(self):
+        """Tests Braket Circuit -> OQ3 -> Qiskit preserves transcendental exprs.
+        Resolves issue #347.
+        """
+        import math
+        alpha = FreeParameter("alpha")
+        bind_value = 0.5
+        function_conversions = {
+            "sin": (sympy.sin, math.sin),
+            "cos": (sympy.cos, math.cos),
+            "exp": (sympy.exp, math.exp),
+        }
+        for fn_name, (sympy_fn, math_fn) in function_conversions.items():
+            with self.subTest(fn=fn_name):
+                expression = FreeParameterExpression(sympy_fn(alpha.expression))
+                braket_circuit = Circuit().rx(0, expression)
+                oq3_source = braket_circuit.to_ir(ir_type="OPENQASM").source
+
+                qiskit_circuit = to_qiskit(oq3_source)
+
+                self.assertEqual(len(qiskit_circuit.parameters), 1)
+                self.assertEqual(qiskit_circuit.parameters[0].name, "alpha")
+
+                qiskit_alpha = qiskit_circuit.parameters[0]
+                bound = qiskit_circuit.assign_parameters({qiskit_alpha: bind_value})
+                actual = float(bound.data[0].operation.params[0])
+                self.assertAlmostEqual(actual, math_fn(bind_value), places=10)
+
     def test_unsupported_parameter_division(self):
         """Tests if TypeError is raised for parameter division."""
         braket_circuit = Circuit().rx(0, 1j * FreeParameter("alpha"))
