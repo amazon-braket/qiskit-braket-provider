@@ -20,6 +20,7 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_VERBATIM_BOX_NAME,
 )
 from qiskit_braket_provider.providers.passes import (
+    AddBasisRotationGates,
     ExtractVerbatimBoxes,
     RestoreVerbatimBoxes,
 )
@@ -226,6 +227,13 @@ def _compile(
 
     if isinstance(target, _SubstitutedTarget):
         circuits = target._substitute(circuits)
+
+    has_result_pragmas = any(
+        (circ.metadata or {}).get("braket_result_pragmas") for circ in circuits
+    )
+    if has_result_pragmas:
+        basis_rotation_pm = PassManager([AddBasisRotationGates()])
+        circuits = basis_rotation_pm.run(circuits)
 
     return _CompilationContext(
         circuits=circuits,

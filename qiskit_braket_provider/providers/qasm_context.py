@@ -32,6 +32,7 @@ from braket.default_simulator.openqasm._helpers.functions import (
     evaluate_unary_expression,
 )
 from braket.default_simulator.openqasm.interpreter import VerbatimBoxDelimiter
+from braket.ir.jaqcd.program_v1 import Results
 from braket.default_simulator.openqasm.parser.openqasm_ast import (
     ArrayLiteral,
     BinaryExpression,
@@ -117,6 +118,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._in_verbatim_box = False
         self._verbatim_box_name = verbatim_box_name
         self._clbit_offset: dict[str, int] = {}
+        self._result_types: list[dict[str, Any]] = []
 
     @property
     def _active_circuit(self) -> QuantumCircuit:
@@ -130,7 +132,37 @@ class _QiskitProgramContext(AbstractProgramContext):
                 "Unclosed verbatim box at end of program. "
                 "Every verbatim box start marker must have a matching end marker."
             )
-        return self._circuit_stack[0]
+        qc = self._circuit_stack[0]
+        if self._result_types:
+            if qc.metadata is None:
+                qc.metadata = {}
+            qc.metadata["braket_result_pragmas"] = self._result_types
+        return qc
+
+    def parse_pragma(self, pragma_body: str):
+        """Parse pragma and capture raw text for result type pragmas.
+
+        Overrides AbstractProgramContext.parse_pragma() to store the raw pragma
+        command string before parsing. This allows us to reconstruct the full
+        pragma text for re-emission in the compiled output.
+
+        Args:
+            pragma_body: The body of the pragma statement (e.g., "braket result expectation z(q[0])").
+        """
+        self._last_pragma_command = pragma_body
+        return super().parse_pragma(pragma_body)
+
+    def add_result(self, result: Results) -> None:
+        """Store a parsed result type from a pragma.
+
+        Overrides AbstractProgramContext.add_result() to collect result type
+        pragmas as structured metadata that will be attached to the circuit.
+
+        Args:
+            result: The parsed result IR object (e.g., Expectation, Probability, Sample).
+        """
+        raw_pragma = f"#pragma {self._last_pragma_command}"
+        self._result_types.append({"raw_pragma": raw_pragma, "parsed": result})
 
     def _push_scoped_circuit(self) -> QuantumCircuit:
         """Push an empty body circuit onto the stack that shares the parent's bit objects."""
