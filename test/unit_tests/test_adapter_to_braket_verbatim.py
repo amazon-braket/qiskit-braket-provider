@@ -767,3 +767,29 @@ def test_verbatim_with_if_else_on_unsupported_backend_raises_clean_error():
 
     with pytest.raises(TranspilerError, match="control-flow"):
         to_braket(qc, target=target)
+
+
+def test_verbatim_box_preserves_reversed_qubit_order():
+    """Verbatim box on reversed qubits preserves outer qubit indices."""
+    body = QuantumCircuit(NUM_QUBITS)
+    body.cx(0, 1)
+
+    qc = QuantumCircuit(NUM_QUBITS)
+    qc.append(BoxOp(body, label=VERBATIM_LABEL), [qc.qubits[1], qc.qubits[0]])
+
+    out = _compile(qc, basis_gates={"cx"}).circuits[0]
+    cx = next(i for i in out.data if i.operation.name == "cx")
+    assert [out.find_bit(q).index for q in cx.qubits] == [1, 0]
+
+
+def test_verbatim_box_preserves_non_contiguous_qubit_order():
+    """Verbatim box on non-contiguous qubits preserves outer qubit indices."""
+    body = QuantumCircuit(2)
+    body.cx(0, 1)
+
+    qc = QuantumCircuit(3)
+    qc.append(BoxOp(body, label=VERBATIM_LABEL), [qc.qubits[2], qc.qubits[0]])
+
+    out = _compile(qc, basis_gates={"cx"}).circuits[0]
+    cx = next(i for i in out.data if i.operation.name == "cx")
+    assert [out.find_bit(q).index for q in cx.qubits] == [2, 0]
