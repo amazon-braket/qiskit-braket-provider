@@ -8,9 +8,9 @@ import warnings
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
-from qiskit import QuantumCircuit, transpile
+from qiskit import QuantumCircuit, generate_preset_pass_manager
 from qiskit.circuit import Barrier, BoxOp, Measure
-from qiskit.transpiler import PassManager, Target
+from qiskit.transpiler import PassManager, StagedPassManager, Target
 
 from braket.aws import AwsDevice
 from braket.devices import Device
@@ -19,108 +19,15 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_TO_QISKIT_NAMES,
     _BRAKET_VERBATIM_BOX_NAME,
 )
+from qiskit_braket_provider.providers.passes import (
+    ExtractVerbatimBoxes,
+    RestoreVerbatimBoxes,
+)
 from qiskit_braket_provider.providers.target import (
     _SubstitutedTarget,
     aws_device_to_target,
     local_simulator_to_target,
 )
-
-
-def _extract_verbatim_boxes(
-    circuit: QuantumCircuit, verbatim_box_name: str
-) -> tuple[QuantumCircuit, list[tuple[QuantumCircuit, list[int]]]]:
-    """Extract BoxOp operations with verbatim box name and replace with barriers.
-
-    Args:
-        circuit: The Qiskit circuit to process
-        verbatim_box_name: The label name used to identify verbatim BoxOp operations
-
-    Returns:
-        A tuple of (modified_circuit, verbatim_boxes) where:
-        - modified_circuit: Circuit with BoxOps replaced by named barriers
-        - verbatim_boxes: List of (box_circuit, qubit_indices) tuples
-    """
-    modified_circuit = QuantumCircuit(circuit.num_qubits, circuit.num_clbits)
-    modified_circuit.global_phase = circuit.global_phase
-
-    verbatim_boxes = []
-
-    for instruction in circuit.data:
-        operation = instruction.operation
-
-        qubit_indices = [circuit.find_bit(q).index for q in instruction.qubits]
-
-        if isinstance(operation, BoxOp) and getattr(operation, "label", None) == verbatim_box_name:
-            box_circuit = operation.blocks[0]
-            verbatim_boxes.append((box_circuit, qubit_indices))
-            barrier = Barrier(len(instruction.qubits), label=verbatim_box_name)
-            modified_circuit.append(barrier, qubit_indices)
-        else:
-            clbit_indices = [circuit.find_bit(c).index for c in instruction.clbits]
-            modified_circuit.append(operation, qubit_indices, clbit_indices)
-
-    return modified_circuit, verbatim_boxes
-
-
-def _restore_verbatim_boxes(
-    transpiled_circuit: QuantumCircuit,
-    verbatim_boxes: list[tuple[QuantumCircuit, list[int]]],
-    verbatim_box_name: str,
-) -> QuantumCircuit:
-    """Restore verbatim boxes by replacing named barriers with box contents.
-
-    Args:
-        transpiled_circuit: The transpiled circuit with named barriers
-        verbatim_boxes: List of (box_circuit, original_qubit_indices) tuples
-        verbatim_box_name: The label name used to identify verbatim barriers
-
-    Returns:
-        Circuit with verbatim box contents restored
-
-    Raises:
-        ValueError: If barrier count doesn't match verbatim box count
-        ValueError: If qubit mapping fails
-    """
-    reconstructed_circuit = transpiled_circuit.copy_empty_like()
-
-    verbatim_box_iter = iter(verbatim_boxes)
-    barrier_count = 0
-
-    for instruction in transpiled_circuit.data:
-        operation = instruction.operation
-
-        if (
-            isinstance(operation, Barrier)
-            and getattr(operation, "label", None) == verbatim_box_name
-        ):
-            barrier_count += 1
-
-            try:
-                box_circuit, _ = next(verbatim_box_iter)
-            except StopIteration as err:
-                raise ValueError(
-                    f"Compiler error while processing verbatim boxes. Illegal barriers with label '{verbatim_box_name}'"
-                ) from err
-
-            for box_instruction in box_circuit.data:
-                qubit_indices = [box_circuit.find_bit(q).index for q in box_instruction.qubits]
-                clbit_indices = [box_circuit.find_bit(q).index for q in box_instruction.clbits]
-                reconstructed_circuit.append(
-                    box_instruction.operation, qubit_indices, clbit_indices
-                )
-        else:
-            qubit_indices = [transpiled_circuit.find_bit(q).index for q in instruction.qubits]
-            clbit_indices = [transpiled_circuit.find_bit(q).index for q in instruction.clbits]
-            reconstructed_circuit.append(operation, qubit_indices, clbit_indices)
-
-    remaining_boxes = list(verbatim_box_iter)
-    if remaining_boxes:
-        raise ValueError(
-            f"Compiler error while processing verbatim boxes. Expected {barrier_count} "
-            f"verbatim boxes, but found {len(verbatim_boxes)}."
-        )
-
-    return reconstructed_circuit
 
 
 @dataclass(frozen=True)
@@ -155,6 +62,20 @@ def _default_target(circuits: Iterable[QuantumCircuit]) -> Target:
     target.add_instruction(Measure())
     target.add_instruction(Barrier(1))
     return target
+
+
+def _inline_verbatim_boxes(circuit: QuantumCircuit, verbatim_box_name: str) -> QuantumCircuit:
+    """Replace BoxOps with the given label by their contents at the top level."""
+    out = circuit.copy_empty_like()
+    for instr in circuit.data:
+        op = instr.operation
+        if isinstance(op, BoxOp) and getattr(op, "label", None) == verbatim_box_name:
+            qubit_idx = [circuit.find_bit(q).index for q in instr.qubits]
+            clbit_idx = [circuit.find_bit(c).index for c in instr.clbits]
+            out.compose(op.blocks[0], qubits=qubit_idx, clbits=clbit_idx, inplace=True)
+        else:
+            out.append(instr.operation, instr.qubits, instr.clbits)
+    return out
 
 
 def _compile(
@@ -244,15 +165,6 @@ def _compile(
             "Verbatim boxes require controlled transpilation to preserve gate ordering."
         )
 
-    all_verbatim_boxes = []
-    if has_verbatim_boxes:
-        extracted_circuits = []
-        for circ in circuits:
-            modified_circ, verbatim_boxes = _extract_verbatim_boxes(circ, verbatim_box_name)
-            extracted_circuits.append(modified_circ)
-            all_verbatim_boxes.append(verbatim_boxes)
-        circuits = extracted_circuits
-
     if braket_device:
         if qubit_labels:
             raise ValueError("Cannot specify qubit labels with Braket device")
@@ -294,28 +206,30 @@ def _compile(
                 )
             )
         ):
-            circuits = transpile(
-                circuits,
-                basis_gates=basis_gates,
-                coupling_map=coupling_map,
+            pm = generate_preset_pass_manager(
                 optimization_level=optimization_level,
+                basis_gates=list(basis_gates) if basis_gates else None,
+                coupling_map=coupling_map,
                 target=target,
-                callback=callback,
-                num_processes=num_processes,
                 layout_method=effective_layout_method,
                 routing_method=effective_routing_method,
                 seed_transpiler=seed_transpiler,
             )
+            if has_verbatim_boxes:
+                pm = StagedPassManager(
+                    stages=("verbatim_extract", "transpile", "verbatim_restore"),
+                    verbatim_extract=PassManager([ExtractVerbatimBoxes(verbatim_box_name)]),
+                    transpile=pm,
+                    verbatim_restore=PassManager([RestoreVerbatimBoxes(verbatim_box_name)]),
+                )
+            circuits = pm.run(circuits, callback=callback, num_processes=num_processes)
+        elif has_verbatim_boxes:
+            circuits = [_inline_verbatim_boxes(circ, verbatim_box_name) for circ in circuits]
+    elif has_verbatim_boxes:
+        circuits = [_inline_verbatim_boxes(circ, verbatim_box_name) for circ in circuits]
+
     if isinstance(target, _SubstitutedTarget):
         circuits = target._substitute(circuits)
-
-    if has_verbatim_boxes:
-        circuits = [
-            _restore_verbatim_boxes(circ, verbatim_boxes, verbatim_box_name)
-            if len(verbatim_boxes) > 0
-            else circ
-            for circ, verbatim_boxes in zip(circuits, all_verbatim_boxes, strict=False)
-        ]
 
     return _CompilationContext(
         circuits=circuits,
