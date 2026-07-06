@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.17.4 (2026-07-06)
+
+### Bug Fixes and Other Changes
+
+ * correctly write measures across multiple bit registers in to_qiskit
+
 ## v0.17.3 (2026-06-30)
 
 ### Bug Fixes and Other Changes
