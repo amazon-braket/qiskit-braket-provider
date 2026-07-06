@@ -26,7 +26,7 @@ from qiskit.circuit import (
 from sympy import Add, Expr, Mul, Pow, Symbol
 
 from braket.default_simulator.openqasm._helpers.arrays import convert_range_def_to_range
-from braket.default_simulator.openqasm._helpers.casting import cast_to
+from braket.default_simulator.openqasm._helpers.casting import cast_to, get_identifier_name
 from braket.default_simulator.openqasm._helpers.functions import (
     evaluate_binary_expression,
     evaluate_unary_expression,
@@ -259,20 +259,40 @@ class _QiskitProgramContext(AbstractProgramContext):
 
     def add_measure(
         self,
-        target: tuple[int],
+        target: tuple[int, ...],
         classical_targets: Sequence[int] | None = None,
         *,
-        classical_destination: Identifier | IndexedIdentifier | None = None,  # noqa: ARG002
+        classical_destination: Identifier | IndexedIdentifier | None = None,
     ) -> None:
-        active = self._active_circuit
+        if classical_destination is None:
+            self._ensure_qubit_capacity(target)
+            self._add_measure_into_loose_clbits(target)
+            return
+        name = get_identifier_name(classical_destination)
+        if name not in self._clbit_offset:
+            raise ValueError(f"Classical bit register {name!r} is not declared")
         self._ensure_qubit_capacity(target)
-        # this is to cover the edge case where a user measures a qubit without assigning it to a classical register
+        self._add_measure_into_register(target, classical_targets, self._clbit_offset[name])
+
+    def _add_measure_into_loose_clbits(self, target: tuple[int, ...]) -> None:
+        """Measure without a classical destination, synthesizing loose clbits to receive the results."""
+        active = self._active_circuit
         if active.num_clbits < len(target):
-            num_missing_clbits = len(target) - active.num_clbits
-            active.add_bits([Clbit() for _ in range(num_missing_clbits)])
+            active.add_bits([Clbit() for _ in range(len(target) - active.num_clbits)])
         for idx, qubit in enumerate(target):
-            index = classical_targets[idx] if classical_targets else idx
-            active.measure(qubit, index)
+            active.measure(qubit, idx)
+
+    def _add_measure_into_register(
+        self,
+        target: tuple[int, ...],
+        classical_targets: Sequence[int] | None,
+        offset: int,
+    ) -> None:
+        """Measure into a declared bit register at the given flat-clbit offset."""
+        active = self._active_circuit
+        for idx, qubit in enumerate(target):
+            local_index = classical_targets[idx] if classical_targets else idx
+            active.measure(qubit, offset + local_index)
 
     def add_verbatim_marker(self, marker: VerbatimBoxDelimiter) -> None:
         """Handle verbatim box start/end markers.

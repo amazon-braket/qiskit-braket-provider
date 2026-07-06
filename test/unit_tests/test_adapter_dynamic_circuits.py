@@ -35,6 +35,15 @@ def _get_if_else_ops(circuit: QuantumCircuit) -> list[CircuitInstruction]:
     return [instr for instr in circuit.data if isinstance(instr.operation, IfElseOp)]
 
 
+def _measure_clbit_indices(circuit: QuantumCircuit) -> list[int]:
+    """Return the flat clbit index each measure in the given circuit writes to, in order."""
+    return [
+        circuit.clbits.index(instr.clbits[0])
+        for instr in circuit.data
+        if instr.operation.name == "measure"
+    ]
+
+
 def _get_ops_with_qubits(
     circuit: QuantumCircuit,
 ) -> list[tuple[str, list[int]]]:
@@ -1327,3 +1336,177 @@ def test_control_flow_body_global_phase_behavior(
 
     assert qc.global_phase == pytest.approx(expected_parent)
     assert body.global_phase == pytest.approx(expected_body)
+
+
+@pytest.mark.parametrize(
+    "qasm",
+    [
+        """
+OPENQASM 3;
+c[0] = measure $1;
+""",
+        """
+OPENQASM 3;
+c[1] = measure $1;
+""",
+        """
+OPENQASM 3;
+bit[1] z;
+h $0;
+z[0] = measure $0;
+if (z[0] == 0) {
+    c[1] = measure $0;
+}
+""",
+        """
+OPENQASM 3;
+#pragma braket verbatim
+box {
+    rx(0.1) $0;
+    c[1] = measure $0;
+}
+""",
+        """
+OPENQASM 3;
+bit[1] z;
+h $0;
+z[0] = measure $0;
+if (z[0] == 0) {
+    if (z[0] == 0) {
+        c[1] = measure $0;
+    }
+}
+""",
+        """
+OPENQASM 3;
+bit[1] z;
+h $0;
+z[0] = measure $0;
+#pragma braket verbatim
+box {
+    rx(0.1) $0;
+}
+if (z[0] == 0) {
+    c[1] = measure $0;
+}
+""",
+    ],
+    ids=["idx-0", "idx-1", "if-body", "verbatim-box", "nested-if", "if-after-verbatim"],
+)
+def test_measure_assignment_to_undeclared_register_raises(qasm: str):
+    with pytest.raises(ValueError, match=r"Classical bit register 'c' is not declared"):
+        to_qiskit(qasm)
+
+
+@pytest.mark.parametrize(
+    ("qasm", "expected_clbit_indices"),
+    [
+        (
+            """
+OPENQASM 3;
+qubit[2] q;
+bit[2] a;
+bit[2] b;
+a[0] = measure q[0];
+b[1] = measure q[1];
+""",
+            [0, 3],
+        ),
+        (
+            """
+OPENQASM 3;
+qubit[3] q;
+bit[1] a;
+bit[2] b;
+bit[1] c;
+b[0] = measure q[0];
+b[1] = measure q[1];
+""",
+            [1, 2],
+        ),
+        (
+            """
+OPENQASM 3;
+qubit[2] q;
+bit[1] a;
+bit[3] b;
+a[0] = measure q[0];
+b[2] = measure q[1];
+""",
+            [0, 3],
+        ),
+        (
+            """
+OPENQASM 3;
+qubit[2] q;
+bit[1] a;
+bit[1] b;
+bit[2] c;
+c[1] = measure q[0];
+""",
+            [3],
+        ),
+    ],
+    ids=["two-registers", "three-registers-middle", "mixed-sizes", "three-registers-last"],
+)
+def test_indexed_measure_routes_to_correct_register(qasm: str, expected_clbit_indices: list[int]):
+    qc = to_qiskit(qasm)
+    assert _measure_clbit_indices(qc) == expected_clbit_indices
+
+
+def test_whole_register_measure_routes_to_correct_register_with_multiple_bit_registers():
+    qasm = """
+OPENQASM 3;
+qubit[2] q;
+bit[2] a;
+bit[2] c;
+c = measure q;
+"""
+    qc = to_qiskit(qasm)
+    assert _measure_clbit_indices(qc) == [2, 3]  # c starts at flat 2
+
+
+def test_indexed_measure_inside_if_body_routes_to_correct_register():
+    qasm = """
+OPENQASM 3;
+qubit[2] q;
+bit[2] a;
+bit[2] b;
+h q[0];
+a[0] = measure q[0];
+if (a[0] == 1) {
+    b[1] = measure q[1];
+}
+"""
+    qc = to_qiskit(qasm)
+    body = _get_if_else_ops(qc)[0].operation.params[0]
+    assert _measure_clbit_indices(body) == [3]  # b[1]
+
+
+def test_indexed_measure_routes_correctly_for_register_declared_inside_if_body():
+    qasm = """
+OPENQASM 3;
+qubit[2] q;
+bit[2] c;
+c[0] = measure q[0];
+if (c[0] == 1) {
+    bit[2] d;
+    d[1] = measure q[1];
+}
+"""
+    qc = to_qiskit(qasm)
+    assert qc.num_clbits == 4  # d's clbits propagate back to the parent
+    body = _get_if_else_ops(qc)[0].operation.params[0]
+    assert _measure_clbit_indices(body) == [3]  # d[1]: d starts at flat 2
+
+
+def test_bare_measure_without_classical_destination_writes_into_loose_clbits():
+    qasm = """
+OPENQASM 3;
+qubit[3] q;
+measure q;
+"""
+    qc = to_qiskit(qasm)
+    assert qc.cregs == []  # no classical register was declared
+    assert qc.num_clbits == 3  # one loose clbit per measured qubit
+    assert _measure_clbit_indices(qc) == [0, 1, 2]

@@ -3,8 +3,10 @@
 import pytest
 from qiskit import QuantumCircuit
 from qiskit.circuit import Barrier, BoxOp
+from qiskit.circuit.library import CXGate, HGate, Measure, XGate
 from qiskit.converters import circuit_to_dag, dag_to_circuit
-from qiskit.transpiler import PassManager
+from qiskit.transpiler import PassManager, Target
+from qiskit.transpiler.exceptions import TranspilerError
 from qiskit.transpiler.passes import Optimize1qGates
 
 from braket.circuits import Circuit
@@ -544,7 +546,7 @@ def test_to_braket_handles_verbatim_box_with_clbits():
     """to_braket on a verbatim BoxOp carrying clbits succeeds."""
     body = QuantumCircuit(1, 1)
     body.h(0)
-    body.measure(0, 0)  # gives the body a clbit, which propagates to the BoxOp
+    body.measure(0, 0)
 
     qc = QuantumCircuit(1, 1)
     qc.append(BoxOp(body, label=VERBATIM_LABEL), qc.qubits, qc.clbits)
@@ -552,8 +554,10 @@ def test_to_braket_handles_verbatim_box_with_clbits():
     bc = to_braket(qc, verbatim=True)
 
     source = bc.to_ir(ir_type="OPENQASM").source
-    assert "bit[1] b;" in source
-    assert "b[0] = measure $0;" in source
+    expected = (
+        "OPENQASM 3.0;\nbit[1] b;\n#pragma braket verbatim\nbox{\nh $0;\n}\nb[0] = measure $0;"
+    )
+    assert source == expected
 
 
 def test_to_braket_verbatim_box_with_clbits_on_subset_of_qubits():
@@ -569,8 +573,11 @@ def test_to_braket_verbatim_box_with_clbits_on_subset_of_qubits():
     bc = to_braket(qc, verbatim=True)
 
     source = bc.to_ir(ir_type="OPENQASM").source
-    assert "bit[2] b;" in source
-    assert "x $0;" in source
+    expected = (
+        "OPENQASM 3.0;\nbit[2] b;\n#pragma braket verbatim\nbox{\nx $0;\n}\n"
+        "b[0] = measure $0;\nb[1] = measure $1;"
+    )
+    assert source == expected
 
 
 def test_verbatim_box_with_clbits_through_transpilation():
@@ -583,12 +590,11 @@ def test_verbatim_box_with_clbits_through_transpilation():
     qc.x(0)
     qc.append(BoxOp(body, label=VERBATIM_LABEL), [qc.qubits[1]], qc.clbits)
 
-    # Provide basis_gates to trigger transpilation path (not verbatim=True)
     bc = to_braket(qc, basis_gates=["x", "h", "cx", "measure"])
 
     source = bc.to_ir(ir_type="OPENQASM").source
-    assert "h q[1];" in source
-    assert "b[0] = measure q[1];" in source
+    expected = "OPENQASM 3.0;\nbit[1] b;\nqubit[2] q;\nx q[0];\nh q[1];\nb[0] = measure q[1];"
+    assert source == expected
 
 
 def test_verbatim_box_with_clbits_on_subset_through_transpilation():
@@ -604,9 +610,10 @@ def test_verbatim_box_with_clbits_on_subset_through_transpilation():
     bc = to_braket(qc, basis_gates=["x", "h", "cx", "measure"])
 
     source = bc.to_ir(ir_type="OPENQASM").source
-    assert "bit[2] b;" in source
-    assert "x q[0];" in source
-    assert "b[0] = measure q[0];" in source
+    expected = (
+        "OPENQASM 3.0;\nbit[2] b;\nqubit[2] q;\nx q[0];\nb[0] = measure q[0];\nb[1] = measure q[1];"
+    )
+    assert source == expected
 
 
 def test_to_braket_round_trip_preserves_verbatim_box_with_measurement():
@@ -625,11 +632,11 @@ def test_to_braket_round_trip_preserves_verbatim_box_with_measurement():
     qc = to_qiskit(src)
     bc = to_braket(qc, verbatim=True)
     out = bc.to_ir(ir_type="OPENQASM").source
-    assert "#pragma braket verbatim" in out
-    assert "h $0;" in out
-    assert "cnot $0, $1;" in out
-    assert "b[0] = measure $1;" in out
-    assert "b[1] = measure $0;" in out
+    expected = (
+        "OPENQASM 3.0;\nbit[2] b;\n#pragma braket verbatim\nbox{\n"
+        "h $0;\ncnot $0, $1;\n}\nb[0] = measure $1;\nb[1] = measure $0;"
+    )
+    assert out == expected
 
 
 def test_verbatim_boxes_without_transpilation_needed():
@@ -694,7 +701,7 @@ def test_restore_raises_on_leftover_boxes():
 
 
 def test_extract_restore_with_non_verbatim_barrier():
-    """A non-verbatim labeled barrier is preserved through extract/restore."""
+    """A non-verbatim barrier is preserved through extract/restore."""
     body = QuantumCircuit(NUM_QUBITS)
     body.h(0)
 
@@ -709,3 +716,80 @@ def test_extract_restore_with_non_verbatim_barrier():
     assert result.data[0].operation.name == "barrier"
     assert result.data[0].operation.label is None
     assert result.data[1].operation.name == "h"
+
+
+def test_verbatim_with_target_runs_contains_instruction():
+    """ContainsInstruction pass runs when verbatim boxes are present with a target."""
+    target = Target(num_qubits=2)
+    target.add_instruction(HGate(), {(i,): None for i in range(2)})
+    target.add_instruction(CXGate(), {(0, 1): None})
+    target.add_instruction(Measure(), {(i,): None for i in range(2)})
+
+    body = QuantumCircuit(2)
+    body.h(0)
+    body.cx(0, 1)
+
+    qc = QuantumCircuit(2)
+    qc.append(BoxOp(body, label=VERBATIM_LABEL), [0, 1])
+
+    pass_names = []
+
+    def cb(**kwargs):
+        p = kwargs.get("pass_")
+        if p:
+            pass_names.append(type(p).__name__)
+
+    _compile(qc, target=target, callback=cb)
+    assert "ContainsInstruction" in pass_names
+
+
+def test_verbatim_with_if_else_on_unsupported_backend_raises_clean_error():
+    """Verbatim box + if_else on a backend without control-flow gives a clear error."""
+    target = Target(num_qubits=3)
+    target.add_instruction(HGate(), {(i,): None for i in range(3)})
+    target.add_instruction(XGate(), {(i,): None for i in range(3)})
+    target.add_instruction(CXGate(), {(0, 1): None, (1, 2): None})
+    target.add_instruction(Measure(), {(i,): None for i in range(3)})
+
+    qc = to_qiskit("""
+    OPENQASM 3.0;
+    bit[1] c;
+    #pragma braket verbatim
+    box {
+        h $0;
+        cnot $0, $1;
+    }
+    c[0] = measure $0;
+    if (c[0] == 1) {
+        x $2;
+    }
+    """)
+
+    with pytest.raises(TranspilerError, match="control-flow"):
+        to_braket(qc, target=target)
+
+
+def test_verbatim_box_preserves_reversed_qubit_order():
+    """Verbatim box on reversed qubits preserves outer qubit indices."""
+    body = QuantumCircuit(NUM_QUBITS)
+    body.cx(0, 1)
+
+    qc = QuantumCircuit(NUM_QUBITS)
+    qc.append(BoxOp(body, label=VERBATIM_LABEL), [qc.qubits[1], qc.qubits[0]])
+
+    out = _compile(qc, basis_gates={"cx"}).circuits[0]
+    cx = next(i for i in out.data if i.operation.name == "cx")
+    assert [out.find_bit(q).index for q in cx.qubits] == [1, 0]
+
+
+def test_verbatim_box_preserves_non_contiguous_qubit_order():
+    """Verbatim box on non-contiguous qubits preserves outer qubit indices."""
+    body = QuantumCircuit(2)
+    body.cx(0, 1)
+
+    qc = QuantumCircuit(3)
+    qc.append(BoxOp(body, label=VERBATIM_LABEL), [qc.qubits[2], qc.qubits[0]])
+
+    out = _compile(qc, basis_gates={"cx"}).circuits[0]
+    cx = next(i for i in out.data if i.operation.name == "cx")
+    assert [out.find_bit(q).index for q in cx.qubits] == [2, 0]
