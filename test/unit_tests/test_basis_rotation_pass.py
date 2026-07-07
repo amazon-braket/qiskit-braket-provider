@@ -2,6 +2,7 @@
 
 import math
 
+import pytest
 from qiskit import QuantumCircuit
 from qiskit.transpiler import PassManager
 
@@ -292,3 +293,40 @@ def test_observable_targets_none_applies_to_all_qubits():
     # x on all qubits -> H on each of 3 qubits
     assert ops.count("h") == 1 + 3  # original h + 3 rotations
     assert ops.count("measure") == 3
+
+
+def test_unknown_observable_no_rotation():
+    """Unknown observable string should produce no rotation gates."""
+    from qiskit_braket_provider.providers.passes.basis_rotation_pass import (
+        _rotation_gates_for_observable,
+    )
+
+    result = _rotation_gates_for_observable("foo", 0)
+    assert result == []
+
+
+def test_probability_targets_none_measures_all():
+    """Probability with targets=None should measure all qubits."""
+    pragmas = [
+        {
+            "raw_pragma": "#pragma braket result probability all",
+            "parsed": Probability(targets=None),
+        }
+    ]
+    qc = _circuit_with_result_pragmas(3, pragmas)
+
+    pm = PassManager([AddBasisRotationGates()])
+    result = pm.run(qc)
+
+    ops = [instr.operation.name for instr in result.data]
+    assert ops.count("measure") == 3
+
+
+def test_hermitian_invalid_matrix_raises_error():
+    """Malformed Hermitian matrix should raise ValueError."""
+    from qiskit_braket_provider.providers.passes.basis_rotation_pass import (
+        _rotation_gates_for_hermitian,
+    )
+
+    with pytest.raises(ValueError, match="Invalid Hermitian matrix format"):
+        _rotation_gates_for_hermitian([[("not", "valid")]], [0])
