@@ -32,7 +32,6 @@ from braket.default_simulator.openqasm._helpers.functions import (
     evaluate_unary_expression,
 )
 from braket.default_simulator.openqasm.interpreter import VerbatimBoxDelimiter
-from braket.ir.jaqcd.program_v1 import Results
 from braket.default_simulator.openqasm.parser.openqasm_ast import (
     ArrayLiteral,
     BinaryExpression,
@@ -55,6 +54,7 @@ from braket.default_simulator.openqasm.parser.openqasm_ast import (
 from braket.default_simulator.openqasm.program_context import (
     AbstractProgramContext,
 )
+from braket.ir.jaqcd.program_v1 import Results
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_VERBATIM_BOX_NAME,
@@ -135,7 +135,7 @@ class _QiskitProgramContext(AbstractProgramContext):
             )
         return self._circuit_stack[0]
 
-    def parse_pragma(self, pragma_body: str):
+    def parse_pragma(self, pragma_body: str):  # noqa: ANN202
         """Parse pragma and capture raw text for result type pragmas.
 
         Overrides AbstractProgramContext.parse_pragma() to store the raw pragma

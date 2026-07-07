@@ -1,8 +1,6 @@
 """End-to-end tests for result pragma support through to_qiskit → to_braket pipeline."""
 
-import pytest
 from braket.circuits import Circuit as BraketCircuit
-
 from qiskit_braket_provider import to_braket, to_qiskit
 
 
@@ -313,39 +311,6 @@ h q[0];
     assert pragmas[1]["raw_pragma"] == "#pragma braket result variance y(q[1])"
     assert pragmas[1]["parsed"].observable == ["y"]
     assert pragmas[1]["parsed"].targets == [1]
-
-
-def test_hermitian_observable_produces_unitary_rotation():
-    """Hermitian observable should produce a unitary rotation gate before measurement."""
-    source = """OPENQASM 3.0;
-qubit[1] q;
-h q[0];
-#pragma braket result expectation hermitian([[0, -1im], [1im, 0]]) q[0]
-"""
-    qc = to_qiskit(source)
-    braket_circuit = to_braket(qc)
-
-    gate_names = [instr.operator.name for instr in braket_circuit.instructions]
-    assert "H" in gate_names
-    assert "Unitary" in gate_names
-    assert "Measure" in gate_names
-
-
-def test_hermitian_observable_metadata():
-    """Hermitian observable should store matrix in parsed metadata."""
-    source = """OPENQASM 3.0;
-qubit[1] q;
-h q[0];
-#pragma braket result expectation hermitian([[0, -1im], [1im, 0]]) q[0]
-"""
-    qc = to_qiskit(source)
-    pragmas = qc.metadata["braket_result_pragmas"]
-
-    assert len(pragmas) == 1
-    assert "hermitian" in pragmas[0]["raw_pragma"]
-    parsed = pragmas[0]["parsed"]
-    assert parsed.targets == [0]
-    assert isinstance(parsed.observable[0], list)
 
 
 def test_hermitian_observable_produces_unitary_rotation():

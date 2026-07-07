@@ -56,7 +56,7 @@ def _rotation_gates_for_hermitian(matrix: list, targets: list[int]) -> list[tupl
         np_matrix = np.array([[complex(c[0], c[1]) for c in row] for row in matrix])
     except (IndexError, TypeError, ValueError) as e:
         raise ValueError(f"Invalid Hermitian matrix format in result type pragma: {e}") from e
-    eigenvalues, eigenvectors = np.linalg.eigh(np_matrix)
+    _eigenvalues, eigenvectors = np.linalg.eigh(np_matrix)
     unitary = eigenvectors.conj().T
     return [(UnitaryGate(unitary), targets)]
 

@@ -2,8 +2,6 @@
 
 import math
 
-import numpy as np
-import pytest
 from qiskit import QuantumCircuit
 from qiskit.transpiler import PassManager
 
@@ -11,7 +9,7 @@ from braket.ir.jaqcd import Expectation, Probability, Sample, StateVector, Varia
 from qiskit_braket_provider.providers.passes import AddBasisRotationGates
 
 
-def _circuit_with_result_pragmas(num_qubits, pragmas):
+def _circuit_with_result_pragmas(num_qubits: int, pragmas: list) -> QuantumCircuit:
     """Helper to create a circuit with result pragma metadata."""
     qc = QuantumCircuit(num_qubits)
     qc.h(0)
