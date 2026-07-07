@@ -1,6 +1,6 @@
 certifi>=2021.5.30
-qiskit>=2.0.0
-qiskit-ionq>=1.0.0
+qiskit<3.0.0
+qiskit-ionq<2.0.0
 amazon-braket-sdk>=1.112.0
 amazon-braket-default-simulator>=1.39.3
 
