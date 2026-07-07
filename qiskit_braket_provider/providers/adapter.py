@@ -41,8 +41,6 @@ from qiskit_braket_provider.providers.compilation import (
     _CompilationContext,  # noqa: F401
     _compile,
     _default_target,  # noqa: F401
-    _extract_verbatim_boxes,  # noqa: F401
-    _restore_verbatim_boxes,  # noqa: F401
 )
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
@@ -184,7 +182,7 @@ def to_braket(
         angle_restrictions (Mapping[str, Mapping[int, set[float] | tuple[float, float]]] | None):
             Mapping of gate names to parameter angle constraints used to
             validate numeric parameters. Default: ``None``.
-        optimization_level (int | None): The optimization level to pass to ``qiskit.transpile``.
+        optimization_level (int): The optimization level to pass to ``qiskit.transpile``.
             From Qiskit:
 
             * 0: no optimization - basic translation, no optimization, trivial layout
