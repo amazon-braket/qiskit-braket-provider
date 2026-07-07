@@ -55,9 +55,7 @@ def _rotation_gates_for_hermitian(matrix: list, targets: list[int]) -> list[tupl
     try:
         np_matrix = np.array([[complex(c[0], c[1]) for c in row] for row in matrix])
     except (IndexError, TypeError, ValueError) as e:
-        raise ValueError(
-            f"Invalid Hermitian matrix format in result type pragma: {e}"
-        ) from e
+        raise ValueError(f"Invalid Hermitian matrix format in result type pragma: {e}") from e
     eigenvalues, eigenvectors = np.linalg.eigh(np_matrix)
     unitary = eigenvectors.conj().T
     return [(UnitaryGate(unitary), targets)]
@@ -116,9 +114,7 @@ class AddBasisRotationGates(TransformationPass):
 
                 if len(observable) == 1 and isinstance(observable[0], str):
                     for target in targets:
-                        rotation_ops.extend(
-                            _rotation_gates_for_observable(observable[0], target)
-                        )
+                        rotation_ops.extend(_rotation_gates_for_observable(observable[0], target))
                         qubits_to_measure.add(target)
                 else:
                     obs_idx = 0
@@ -126,17 +122,13 @@ class AddBasisRotationGates(TransformationPass):
                         if isinstance(obs, str):
                             if obs_idx < len(targets):
                                 target = targets[obs_idx]
-                                rotation_ops.extend(
-                                    _rotation_gates_for_observable(obs, target)
-                                )
+                                rotation_ops.extend(_rotation_gates_for_observable(obs, target))
                                 qubits_to_measure.add(target)
                                 obs_idx += 1
                         elif isinstance(obs, list):
                             num_qubits_for_obs = int(math.log2(len(obs)))
                             obs_targets = targets[obs_idx : obs_idx + num_qubits_for_obs]
-                            rotation_ops.extend(
-                                _rotation_gates_for_hermitian(obs, obs_targets)
-                            )
+                            rotation_ops.extend(_rotation_gates_for_hermitian(obs, obs_targets))
                             qubits_to_measure.update(obs_targets)
                             obs_idx += num_qubits_for_obs
 

@@ -45,12 +45,7 @@ cnot q[0], q[1];
     braket_circuit = to_braket(qc)
 
     expected = (
-        "OPENQASM 3.0;\n"
-        "bit[1] b;\n"
-        "qubit[2] q;\n"
-        "cnot q[0], q[1];\n"
-        "h q[0];\n"
-        "b[0] = measure q[0];"
+        "OPENQASM 3.0;\nbit[1] b;\nqubit[2] q;\ncnot q[0], q[1];\nh q[0];\nb[0] = measure q[0];"
     )
     assert _to_oq3(braket_circuit) == expected
 

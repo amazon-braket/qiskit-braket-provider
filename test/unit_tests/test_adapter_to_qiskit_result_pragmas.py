@@ -187,9 +187,7 @@ h q[0];
 cnot q[0], q[1];
 """
     circuit = to_qiskit(source)
-    assert circuit.metadata is None or "braket_result_pragmas" not in (
-        circuit.metadata or {}
-    )
+    assert circuit.metadata is None or "braket_result_pragmas" not in (circuit.metadata or {})
 
 
 def test_program_object_with_result_pragmas():
