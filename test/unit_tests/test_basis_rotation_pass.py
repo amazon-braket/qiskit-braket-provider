@@ -295,14 +295,14 @@ def test_observable_targets_none_applies_to_all_qubits():
     assert ops.count("measure") == 3
 
 
-def test_unknown_observable_no_rotation():
-    """Unknown observable string should produce no rotation gates."""
+def test_unknown_observable_raises_error():
+    """Unknown observable string should raise ValueError."""
     from qiskit_braket_provider.providers.passes.basis_rotation_pass import (
         _rotation_gates_for_observable,
     )
 
-    result = _rotation_gates_for_observable("foo", 0)
-    assert result == []
+    with pytest.raises(ValueError, match="Unknown observable 'foo'"):
+        _rotation_gates_for_observable("foo", 0)
 
 
 def test_probability_targets_none_measures_all():

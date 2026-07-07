@@ -35,7 +35,7 @@ def _rotation_gates_for_observable(observable: str, target: int) -> list[tuple]:
         case "h":
             return [(RYGate(-math.pi / 4), target)]
         case _:
-            return []
+            raise ValueError(f"Unknown observable '{observable}' in result type pragma.")
 
 
 def _rotation_gates_for_hermitian(matrix: list, targets: list[int]) -> list[tuple]:
