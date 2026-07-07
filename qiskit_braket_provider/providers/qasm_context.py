@@ -119,6 +119,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._verbatim_box_name = verbatim_box_name
         self._clbit_offset: dict[str, int] = {}
         self._result_types: list[dict[str, Any]] = []
+        self._last_pragma_command: str = ""
 
     @property
     def _active_circuit(self) -> QuantumCircuit:
@@ -132,12 +133,7 @@ class _QiskitProgramContext(AbstractProgramContext):
                 "Unclosed verbatim box at end of program. "
                 "Every verbatim box start marker must have a matching end marker."
             )
-        qc = self._circuit_stack[0]
-        if self._result_types:
-            if qc.metadata is None:
-                qc.metadata = {}
-            qc.metadata["braket_result_pragmas"] = self._result_types
-        return qc
+        return self._circuit_stack[0]
 
     def parse_pragma(self, pragma_body: str):
         """Parse pragma and capture raw text for result type pragmas.
@@ -160,9 +156,21 @@ class _QiskitProgramContext(AbstractProgramContext):
 
         Args:
             result: The parsed result IR object (e.g., Expectation, Probability, Sample).
+
+        Raises:
+            NotImplementedError: If the pragma is an adjoint_gradient result type,
+                which is not supported by this pipeline.
         """
         raw_pragma = f"#pragma {self._last_pragma_command}"
+        if "adjoint_gradient" in self._last_pragma_command:
+            raise NotImplementedError(
+                "adjoint_gradient result type is not supported in the Qiskit compilation pipeline. "
+            )
         self._result_types.append({"raw_pragma": raw_pragma, "parsed": result})
+        qc = self._circuit_stack[0]
+        if qc.metadata is None:
+            qc.metadata = {}
+        qc.metadata["braket_result_pragmas"] = self._result_types
 
     def _push_scoped_circuit(self) -> QuantumCircuit:
         """Push an empty body circuit onto the stack that shares the parent's bit objects."""

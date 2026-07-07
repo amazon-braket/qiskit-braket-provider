@@ -275,3 +275,22 @@ def test_multiple_result_types_combined_rotations():
     assert "z" in ops
     assert "s" in ops
     assert ops.count("measure") == 2
+
+
+def test_observable_targets_none_applies_to_all_qubits():
+    """When targets is None, rotations should apply to all qubits."""
+    pragmas = [
+        {
+            "raw_pragma": "#pragma braket result expectation x all",
+            "parsed": Expectation(observable=["x"], targets=None),
+        }
+    ]
+    qc = _circuit_with_result_pragmas(3, pragmas)
+
+    pm = PassManager([AddBasisRotationGates()])
+    result = pm.run(qc)
+
+    ops = [instr.operation.name for instr in result.data]
+    # x on all qubits -> H on each of 3 qubits
+    assert ops.count("h") == 1 + 3  # original h + 3 rotations
+    assert ops.count("measure") == 3

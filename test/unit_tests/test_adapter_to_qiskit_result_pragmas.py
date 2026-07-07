@@ -233,3 +233,15 @@ cnot $0, $1;
     circuit = to_qiskit(source)
     assert isinstance(circuit, QuantumCircuit)
     assert "braket_result_pragmas" in circuit.metadata
+
+
+def test_adjoint_gradient_raises_not_implemented():
+    """adjoint_gradient result type should raise NotImplementedError."""
+    source = """OPENQASM 3.0;
+qubit[2] q;
+h q[0];
+cnot q[0], q[1];
+#pragma braket result adjoint_gradient expectation(z(q[0]) @ z(q[1])) all
+"""
+    with pytest.raises(NotImplementedError, match="adjoint_gradient"):
+        to_qiskit(source)

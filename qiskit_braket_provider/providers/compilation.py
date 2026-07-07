@@ -98,6 +98,7 @@ def _compile(
     layout_method: str | None = None,
     routing_method: str | None = None,
     seed_transpiler: int | None = None,
+    preserve_result_pragmas: bool = False,
 ) -> _CompilationContext:
     """Compile Qiskit circuits for execution on a Braket device.
 
@@ -125,6 +126,10 @@ def _compile(
         layout_method: Layout method for the transpiler.
         routing_method: Routing method for the transpiler.
         seed_transpiler: Seed for reproducible transpilation.
+        preserve_result_pragmas: Whether to preserve result type pragmas as metadata
+            without converting them to basis rotation gates and measurements. Set to
+            ``True`` for simulator targets that handle result types natively.
+            Default: ``False``.
 
     Returns:
         A :class:`_CompilationContext` containing the compiled circuits and resolved
@@ -235,7 +240,7 @@ def _compile(
     has_result_pragmas = any(
         (circ.metadata or {}).get("braket_result_pragmas") for circ in circuits
     )
-    if has_result_pragmas:
+    if has_result_pragmas and not preserve_result_pragmas:
         basis_rotation_pm = PassManager([AddBasisRotationGates()])
         circuits = basis_rotation_pm.run(circuits)
 
