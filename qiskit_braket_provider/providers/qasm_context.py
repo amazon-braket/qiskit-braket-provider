@@ -168,8 +168,6 @@ class _QiskitProgramContext(AbstractProgramContext):
             )
         self._result_types.append({"raw_pragma": raw_pragma, "parsed": result})
         qc = self._circuit_stack[0]
-        if qc.metadata is None:
-            qc.metadata = {}
         qc.metadata["braket_result_pragmas"] = self._result_types
 
     def _push_scoped_circuit(self) -> QuantumCircuit:
