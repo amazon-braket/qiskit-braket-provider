@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.17.5 (2026-07-08)
+
+### Bug Fixes and Other Changes
+
+ * register Braket-native two-qubit gates in to_qiskit
+
 ## v0.17.4 (2026-07-06)
 
 ### Bug Fixes and Other Changes
