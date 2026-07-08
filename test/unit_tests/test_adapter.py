@@ -463,6 +463,12 @@ class TestAdapter(TestCase):
                 "ms",
                 "unitary",
                 "kraus",
+                "xy",
+                "cphaseshift00",
+                "cphaseshift01",
+                "cphaseshift10",
+                "pswap",
+                "cv",
             ]
         }
 
