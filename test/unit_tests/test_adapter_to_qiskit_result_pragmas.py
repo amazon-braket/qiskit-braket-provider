@@ -8,36 +8,15 @@ from qiskit_braket_provider import to_qiskit
 
 
 @pytest.mark.parametrize(
-    "pragma_line,expected_raw_pragma",
+    "pragma_line",
     [
-        (
-            "#pragma braket result expectation z(q[0]) @ z(q[1])",
-            "#pragma braket result expectation z(q[0]) @ z(q[1])",
-        ),
-        (
-            "#pragma braket result probability q[0], q[1]",
-            "#pragma braket result probability q[0], q[1]",
-        ),
-        (
-            "#pragma braket result sample x(q[0])",
-            "#pragma braket result sample x(q[0])",
-        ),
-        (
-            "#pragma braket result variance y(q[1])",
-            "#pragma braket result variance y(q[1])",
-        ),
-        (
-            "#pragma braket result state_vector",
-            "#pragma braket result state_vector",
-        ),
-        (
-            '#pragma braket result amplitude "00", "11"',
-            '#pragma braket result amplitude "00", "11"',
-        ),
-        (
-            "#pragma braket result density_matrix q[0], q[1]",
-            "#pragma braket result density_matrix q[0], q[1]",
-        ),
+        "#pragma braket result expectation z(q[0]) @ z(q[1])",
+        "#pragma braket result probability q[0], q[1]",
+        "#pragma braket result sample x(q[0])",
+        "#pragma braket result variance y(q[1])",
+        "#pragma braket result state_vector",
+        '#pragma braket result amplitude "00", "11"',
+        "#pragma braket result density_matrix q[0], q[1]",
     ],
     ids=[
         "expectation",
@@ -49,7 +28,7 @@ from qiskit_braket_provider import to_qiskit
         "density_matrix",
     ],
 )
-def test_single_result_type_parsed_to_metadata(pragma_line: str, expected_raw_pragma: str):
+def test_single_result_type_parsed_to_metadata(pragma_line: str):
     """Each result type pragma should parse without error and store in metadata."""
     source = f"""OPENQASM 3.0;
 qubit[2] q;
@@ -64,7 +43,7 @@ cnot q[0], q[1];
     assert "braket_result_pragmas" in circuit.metadata
     pragmas = circuit.metadata["braket_result_pragmas"]
     assert len(pragmas) == 1
-    assert pragmas[0]["raw_pragma"] == expected_raw_pragma
+    assert pragmas[0]["raw_pragma"] == pragma_line
     assert pragmas[0]["parsed"] is not None
 
 
