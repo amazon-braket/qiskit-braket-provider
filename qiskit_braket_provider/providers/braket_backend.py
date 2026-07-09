@@ -48,17 +48,30 @@ _TASK_ID_DIVIDER = ";"
 T = TypeVar("T", bound=Device, covariant=True)  # noqa: PLC0105
 
 
-def _emulator_supports_program_sets(emulator: Emulator) -> bool:
-    """Whether the emulated device accepts OpenQASM program sets.
+def _device_max_program_set_executables(device: Device) -> int | None:
+    action = device.properties.action
+    return (
+        action[DeviceActionType.OPENQASM_PROGRAM_SET].maximumExecutables
+        if DeviceActionType.OPENQASM_PROGRAM_SET in action
+        else None
+    )
+
+
+def _emulator_max_program_set_executables(emulator: Emulator) -> int | None:
+    """Maximum program-set executables accepted by the emulated device.
 
     An emulator has no ``properties``, so this reads the source device's actions
     off the emulator's ``ProgramSetValidator`` pass instead.
     """
-    return any(
-        isinstance(emulator_pass, ProgramSetValidator)
-        and DeviceActionType.OPENQASM_PROGRAM_SET in emulator_pass.device_actions
-        for emulator_pass in emulator._pass_manager._passes
-    )
+    for emulator_pass in emulator._pass_manager._passes:
+        if (
+            isinstance(emulator_pass, ProgramSetValidator)
+            and DeviceActionType.OPENQASM_PROGRAM_SET in emulator_pass.device_actions
+        ):
+            return emulator_pass.device_actions[
+                DeviceActionType.OPENQASM_PROGRAM_SET
+            ].maximumExecutables
+    return None
 
 
 class BraketBackend(BackendV2, ABC, Generic[T]):
@@ -68,9 +81,7 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
         super().__init__(name=name, **fields)
         self._device = device
         self._qubit_labels: tuple[int, ...] | None = None
-        self._supports_program_sets = (
-            DeviceActionType.OPENQASM_PROGRAM_SET in self._device.properties.action
-        )
+        self._max_program_set_executables = _device_max_program_set_executables(self._device)
 
     def __repr__(self) -> str:
         return f"BraketBackend[{self.name}]"
@@ -163,10 +174,10 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
             target = target or local_simulator_to_target(device)
         BackendV2.__init__(self, name=name or device.name, **fields)
         self._device = device
-        self._supports_program_sets = (
-            _emulator_supports_program_sets(device)
+        self._max_program_set_executables = (
+            _emulator_max_program_set_executables(device)
             if self._is_emulator
-            else DeviceActionType.OPENQASM_PROGRAM_SET in device.properties.action
+            else _device_max_program_set_executables(device)
         )
         self._target = target
         self._qubit_labels = qubit_labels
@@ -495,7 +506,9 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         )
         return (
             self._run_program_set(braket_circuits, shots, **options)
-            if self._supports_program_sets and shots != 0 and len(braket_circuits) > 1
+            if self._max_program_set_executables is not None
+            and shots != 0
+            and len(braket_circuits) > 1
             else self._run_batch(braket_circuits, shots, **options)
         )
 
