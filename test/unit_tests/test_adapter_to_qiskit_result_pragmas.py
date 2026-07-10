@@ -3,8 +3,10 @@
 import pytest
 from qiskit import QuantumCircuit
 
+from braket.ir.jaqcd import AdjointGradient, Expectation, Probability, Variance
 from braket.ir.openqasm import Program
 from qiskit_braket_provider import to_qiskit
+from qiskit_braket_provider.providers.qasm_context import _QiskitProgramContext
 
 
 @pytest.mark.parametrize(
@@ -43,8 +45,6 @@ cnot q[0], q[1];
     assert "braket_result_pragmas" in circuit.metadata
     pragmas = circuit.metadata["braket_result_pragmas"]
     assert len(pragmas) == 1
-    assert pragmas[0]["raw_pragma"] == pragma_line
-    assert pragmas[0]["parsed"] is not None
 
 
 def test_multiple_result_types():
@@ -61,8 +61,8 @@ cnot q[0], q[1];
     assert isinstance(circuit, QuantumCircuit)
     pragmas = circuit.metadata["braket_result_pragmas"]
     assert len(pragmas) == 2
-    assert pragmas[0]["raw_pragma"] == "#pragma braket result expectation x(q[0]) @ y(q[1])"
-    assert pragmas[1]["raw_pragma"] == "#pragma braket result variance z(q[0])"
+    assert isinstance(pragmas[0], Expectation)
+    assert isinstance(pragmas[1], Variance)
 
 
 def test_metadata_contains_parsed_result_with_observable_and_targets():
@@ -76,9 +76,8 @@ h q[0];
     pragmas = circuit.metadata["braket_result_pragmas"]
 
     assert len(pragmas) == 1
-    parsed = pragmas[0]["parsed"]
-    assert parsed.observable == ["z"]
-    assert parsed.targets == [0]
+    assert pragmas[0].observable == ["z"]
+    assert pragmas[0].targets == [0]
 
 
 def test_no_metadata_when_no_result_pragmas():
@@ -104,7 +103,9 @@ cnot q[0], q[1];
     )
     circuit = to_qiskit(program)
     assert "braket_result_pragmas" in circuit.metadata
-    assert len(circuit.metadata["braket_result_pragmas"]) == 1
+    pragmas = circuit.metadata["braket_result_pragmas"]
+    assert len(pragmas) == 1
+    assert isinstance(pragmas[0], Probability)
 
 
 def test_result_pragma_does_not_add_measurements():
@@ -131,17 +132,12 @@ cnot $0, $1;
 
     assert "braket_result_pragmas" in circuit.metadata
     pragmas = circuit.metadata["braket_result_pragmas"]
-    parsed = pragmas[0]["parsed"]
-    assert parsed.targets == [0, 1]
+    assert pragmas[0].targets == [0, 1]
 
 
 def test_adjoint_gradient_raises_not_implemented():
-    """adjoint_gradient result type should raise NotImplementedError."""
-    source = """OPENQASM 3.0;
-qubit[2] q;
-h q[0];
-cnot q[0], q[1];
-#pragma braket result adjoint_gradient expectation(z(q[0]) @ z(q[1])) all
-"""
-    with pytest.raises(NotImplementedError, match="adjoint_gradient"):
-        to_qiskit(source)
+    """AdjointGradient result type should raise NotImplementedError."""
+    ctx = _QiskitProgramContext()
+    result = AdjointGradient(observable=["z"], targets=[[0]], parameters=["alpha"])
+    with pytest.raises(NotImplementedError, match="AdjointGradient"):
+        ctx.add_result(result)

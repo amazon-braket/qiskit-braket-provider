@@ -54,6 +54,7 @@ from braket.default_simulator.openqasm.parser.openqasm_ast import (
 from braket.default_simulator.openqasm.program_context import (
     AbstractProgramContext,
 )
+from braket.ir.jaqcd import AdjointGradient
 from braket.ir.jaqcd.program_v1 import Results
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
@@ -118,8 +119,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._in_verbatim_box = False
         self._verbatim_box_name = verbatim_box_name
         self._clbit_offset: dict[str, int] = {}
-        self._result_types: list[dict[str, Any]] = []
-        self._last_pragma_command: str = ""
+        self._result_types: list[Results] = []
 
     @property
     def _active_circuit(self) -> QuantumCircuit:
@@ -135,19 +135,6 @@ class _QiskitProgramContext(AbstractProgramContext):
             )
         return self._circuit_stack[0]
 
-    def parse_pragma(self, pragma_body: str):  # noqa: ANN202
-        """Parse pragma and capture raw text for result type pragmas.
-
-        Overrides AbstractProgramContext.parse_pragma() to store the raw pragma
-        command string before parsing. This allows us to reconstruct the full
-        pragma text for re-emission in the compiled output.
-
-        Args:
-            pragma_body: The body of the pragma statement (e.g., "braket result expectation z(q[0])").
-        """
-        self._last_pragma_command = pragma_body
-        return super().parse_pragma(pragma_body)
-
     def add_result(self, result: Results) -> None:
         """Store a parsed result type from a pragma.
 
@@ -158,15 +145,14 @@ class _QiskitProgramContext(AbstractProgramContext):
             result: The parsed result IR object (e.g., Expectation, Probability, Sample).
 
         Raises:
-            NotImplementedError: If the pragma is an adjoint_gradient result type,
+            NotImplementedError: If the result is an AdjointGradient type,
                 which is not supported by this pipeline.
         """
-        raw_pragma = f"#pragma {self._last_pragma_command}"
-        if "adjoint_gradient" in self._last_pragma_command:
+        if isinstance(result, AdjointGradient):
             raise NotImplementedError(
-                "adjoint_gradient result type is not supported in the Qiskit compilation pipeline. "
+                "AdjointGradient result type is not supported in the Qiskit compilation pipeline."
             )
-        self._result_types.append({"raw_pragma": raw_pragma, "parsed": result})
+        self._result_types.append(result)
         qc = self._circuit_stack[0]
         qc.metadata["braket_result_pragmas"] = self._result_types
 
