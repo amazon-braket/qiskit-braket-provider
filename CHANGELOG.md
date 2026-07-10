@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.18.0 (2026-07-10)
+
+### Features
+
+ * changes in the context to parse result pragmas
+
 ## v0.17.5 (2026-07-08)
 
 ### Bug Fixes and Other Changes
