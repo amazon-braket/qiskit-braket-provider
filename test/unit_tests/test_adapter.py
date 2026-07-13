@@ -1710,6 +1710,52 @@ class TestFromBraket(TestCase):
         self.assertEqual({0, 1}, barrier_indices[0])
         self.assertEqual({0}, barrier_indices[1])
 
+    def test_braket_circuit_barrier_scoping_around_verbatim_box(self):
+        """Barriers land in the scope they were written in."""
+        circuit = (
+            Circuit()
+            .h(0)
+            .barrier([0])
+            .add_verbatim_box(Circuit().h(0).barrier([0, 1]).cnot(0, 1))
+            .barrier([1])
+            .h(1)
+        )
+        qc = to_qiskit(circuit, add_measurements=False)
+        ops = [(i.operation.name, [qc.find_bit(q).index for q in i.qubits]) for i in qc.data]
+        self.assertEqual(
+            ops,
+            [
+                ("h", [0]),
+                ("barrier", [0]),
+                ("box", [0, 1]),
+                ("barrier", [1]),
+                ("h", [1]),
+            ],
+        )
+        body = qc.data[2].operation.body
+        body_ops = [
+            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
+        ]
+        self.assertEqual(body_ops, [("h", [0]), ("barrier", [0, 1]), ("cx", [0, 1])])
+
+    def test_braket_circuit_bare_barrier_covers_all_qubits(self):
+        """Bare Circuit.barrier() (empty target) covers every qubit."""
+        circuit = Circuit().h(0).barrier().h(1)
+        qc = to_qiskit(circuit, add_measurements=False)
+        ops = [(i.operation.name, [qc.find_bit(q).index for q in i.qubits]) for i in qc.data]
+        self.assertEqual(ops, [("h", [0]), ("barrier", [0, 1]), ("h", [1])])
+
+    def test_braket_circuit_bare_barrier_inside_verbatim_box_covers_body_qubits(self):
+        """Bare barrier inside a verbatim box covers the box body's qubits."""
+        circuit = Circuit().h(0).add_verbatim_box(Circuit().h(0).barrier().cnot(0, 1)).h(1)
+        qc = to_qiskit(circuit, add_measurements=False)
+        box = next(i for i in qc.data if i.operation.name == "box").operation
+        body = box.body
+        body_ops = [
+            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
+        ]
+        self.assertEqual(body_ops, [("h", [0]), ("barrier", [0, 1]), ("cx", [0, 1])])
+
 
 class TestThereAndBackAgain(TestCase):
     """testing whether or not to_braket and to_qiskit work together"""
