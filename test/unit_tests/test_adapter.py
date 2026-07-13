@@ -1710,6 +1710,146 @@ class TestFromBraket(TestCase):
         self.assertEqual({0, 1}, barrier_indices[0])
         self.assertEqual({0}, barrier_indices[1])
 
+    def test_openqasm_barrier_grows_circuit_and_later_gates_extend_further(self):
+        """Explicit-target barrier's qubit list is frozen at emit time."""
+        qasm = (
+            "OPENQASM 3.0;\n"
+            "h $0;\n"
+            "barrier $0, $2;\n"
+            "h $4;\n"
+        )
+        qc = to_qiskit(qasm, add_measurements=False)
+        self.assertEqual(qc.num_qubits, 5)
+        ops = [(i.operation.name, [qc.find_bit(q).index for q in i.qubits]) for i in qc.data]
+        self.assertEqual(ops, [("h", [0]), ("barrier", [0, 2]), ("h", [4])])
+
+    def test_openqasm_bare_barrier_late_binds_to_all_qubits_in_scope(self):
+        """Bare barrier covers every qubit of the enclosing scope at scope-close."""
+        qasm = (
+            "OPENQASM 3.0;\n"
+            "h $0;\n"
+            "barrier;\n"
+            "h $2;\n"
+        )
+        qc = to_qiskit(qasm, add_measurements=False)
+        self.assertEqual(qc.num_qubits, 3)
+        ops = [(i.operation.name, [qc.find_bit(q).index for q in i.qubits]) for i in qc.data]
+        self.assertEqual(ops, [("h", [0]), ("barrier", [0, 1, 2]), ("h", [2])])
+
+    def test_openqasm_bare_barrier_before_any_qubit_raises(self):
+        """SDK parity: bare barrier before any qubit exists in the enclosing scope raises."""
+        qasm = (
+            "OPENQASM 3.0;\n"
+            "barrier;\n"
+            "h $0;\n"
+        )
+        with self.assertRaisesRegex(ValueError, "Cannot add global barrier to empty circuit"):
+            to_qiskit(qasm, add_measurements=False)
+
+    def test_openqasm_bare_barrier_in_empty_verbatim_box_raises(self):
+        """SDK parity: bare barrier inside a box with no inherited or local qubits raises."""
+        qasm = (
+            "OPENQASM 3.0;\n"
+            "#pragma braket verbatim\n"
+            "box {\n"
+            "    barrier;\n"
+            "}\n"
+        )
+        with self.assertRaisesRegex(ValueError, "Cannot add global barrier to empty circuit"):
+            to_qiskit(qasm, add_measurements=False)
+
+    def test_openqasm_bare_barrier_after_first_gate_does_not_raise(self):
+        """Empty-circuit check does not fire once at least one qubit exists in scope."""
+        qasm = (
+            "OPENQASM 3.0;\n"
+            "h $0;\n"
+            "barrier;\n"
+        )
+        qc = to_qiskit(qasm, add_measurements=False)
+        ops = [(i.operation.name, [qc.find_bit(q).index for q in i.qubits]) for i in qc.data]
+        self.assertEqual(ops, [("h", [0]), ("barrier", [0])])
+
+    def test_openqasm_bare_barrier_inside_verbatim_box_covers_inherited_and_late_added_qubits(
+        self,
+    ):
+        """Bare barrier in a verbatim box covers parent-inherited qubits and body-local
+        qubits added after the barrier."""
+        qasm = (
+            "OPENQASM 3.0;\n"
+            "h $2;\n"
+            "#pragma braket verbatim\n"
+            "box {\n"
+            "    h $0;\n"
+            "    barrier;\n"
+            "    h $5;\n"
+            "}\n"
+        )
+        qc = to_qiskit(qasm, add_measurements=False)
+        body = qc.data[1].operation.body
+        body_ops = [
+            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
+        ]
+        self.assertEqual(
+            body_ops,
+            [("h", [0]), ("barrier", [0, 1, 2, 3, 4, 5]), ("h", [5])],
+        )
+
+    def test_openqasm_barrier_scoping_around_verbatim_box(self):
+        """OpenQASM path: barriers land in the scope they were written in."""
+        qasm = (
+            "OPENQASM 3.0;\n"
+            "h $0;\n"
+            "barrier $0;\n"
+            "#pragma braket verbatim\n"
+            "box {\n"
+            "    h $0;\n"
+            "    barrier $0, $1;\n"
+            "    cnot $0, $1;\n"
+            "}\n"
+            "barrier $1;\n"
+            "h $1;\n"
+        )
+        qc = to_qiskit(qasm, add_measurements=False)
+        ops = [(i.operation.name, [qc.find_bit(q).index for q in i.qubits]) for i in qc.data]
+        self.assertEqual(
+            ops,
+            [
+                ("h", [0]),
+                ("barrier", [0]),
+                ("box", [0, 1]),
+                ("barrier", [1]),
+                ("h", [1]),
+            ],
+        )
+        body = qc.data[2].operation.body
+        body_ops = [
+            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
+        ]
+        self.assertEqual(body_ops, [("h", [0]), ("barrier", [0, 1]), ("cx", [0, 1])])
+
+    def test_openqasm_bare_barrier_inside_if_body_late_binds_to_if_body_qubits(self):
+        """Bare barrier inside an if-body late-binds via resolve recursing into IfElseOp.blocks."""
+        qasm = (
+            "OPENQASM 3.0;\n"
+            "bit[1] c;\n"
+            "qubit[2] q;\n"
+            "h q[0];\n"
+            "c[0] = measure q[0];\n"
+            "if (c[0]) {\n"
+            "    h q[1];\n"
+            "    barrier;\n"
+            "}\n"
+        )
+        qc = to_qiskit(qasm, add_measurements=False)
+        if_else = qc.data[-1].operation
+        self.assertEqual(if_else.name, "if_else")
+        true_body = if_else.blocks[0]
+        body_ops = [
+            (i.operation.name, [true_body.find_bit(q).index for q in i.qubits])
+            for i in true_body.data
+        ]
+        self.assertEqual(body_ops, [("h", [1]), ("barrier", [0, 1])])
+
 
 class TestThereAndBackAgain(TestCase):
     """testing whether or not to_braket and to_qiskit work together"""

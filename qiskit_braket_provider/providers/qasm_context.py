@@ -12,6 +12,7 @@ from typing import Any
 
 from qiskit import QuantumCircuit
 from qiskit.circuit import (
+    Barrier,
     BoxOp,
     CircuitInstruction,
     Clbit,
@@ -130,7 +131,9 @@ class _QiskitProgramContext(AbstractProgramContext):
                 "Unclosed verbatim box at end of program. "
                 "Every verbatim box start marker must have a matching end marker."
             )
-        return self._circuit_stack[0]
+        top = self._circuit_stack[0]
+        self._resolve_global_barriers(top)
+        return top
 
     def _push_scoped_circuit(self) -> QuantumCircuit:
         """Push an empty body circuit onto the stack that shares the parent's bit objects."""
@@ -261,6 +264,42 @@ class _QiskitProgramContext(AbstractProgramContext):
         for idx, qubit in enumerate(target):
             local_index = classical_targets[idx] if classical_targets else idx
             active.measure(qubit, offset + local_index)
+
+    def add_barrier(self, target: list[int] | None = None) -> None:
+        """Add a barrier instruction to the active circuit.
+
+        Args:
+            target: Qubit indices for the barrier. If None or empty, the
+                barrier applies to all qubits in the enclosing scope
+                (including qubits added later within the same scope).
+
+        Raises:
+            ValueError: If target is None or empty and the enclosing scope
+                has no qubits at the time the barrier is added.
+        """
+        active = self._active_circuit
+        if target:
+            self._ensure_qubit_capacity(target)
+            active.barrier(target)
+            return
+        if active.num_qubits == 0:
+            raise ValueError("Cannot add global barrier to empty circuit")
+        # Global-barrier placeholder; _resolve_global_barriers rewrites it at scope-close.
+        active.append(Barrier(0), (), ())
+
+    def _resolve_global_barriers(self, circ: QuantumCircuit) -> None:
+        """Rewrite empty-target global-barrier placeholders to cover every qubit
+        of their enclosing scope, recursing into any nested control-flow bodies."""
+        for i, instr in enumerate(circ.data):
+            op = instr.operation
+            # Zero-width Barrier is the global-barrier placeholder from add_barrier.
+            if isinstance(op, Barrier) and op.num_qubits == 0:
+                circ.data[i] = CircuitInstruction(
+                    Barrier(circ.num_qubits), tuple(circ.qubits), ()
+                )
+            for block in getattr(op, "blocks", ()) or ():
+                if isinstance(block, QuantumCircuit):
+                    self._resolve_global_barriers(block)
 
     def add_verbatim_marker(self, marker: VerbatimBoxDelimiter) -> None:
         """Handle verbatim box start/end markers.
