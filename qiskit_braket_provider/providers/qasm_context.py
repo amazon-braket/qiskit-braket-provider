@@ -55,6 +55,8 @@ from braket.default_simulator.openqasm.parser.openqasm_ast import (
 from braket.default_simulator.openqasm.program_context import (
     AbstractProgramContext,
 )
+from braket.ir.jaqcd import AdjointGradient
+from braket.ir.jaqcd.program_v1 import Results
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_VERBATIM_BOX_NAME,
@@ -118,6 +120,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._in_verbatim_box = False
         self._verbatim_box_name = verbatim_box_name
         self._clbit_offset: dict[str, int] = {}
+        self._result_types: list[Results] = []
 
     @property
     def _active_circuit(self) -> QuantumCircuit:
@@ -134,6 +137,27 @@ class _QiskitProgramContext(AbstractProgramContext):
         top = self._circuit_stack[0]
         self._resolve_global_barriers(top)
         return top
+
+    def add_result(self, result: Results) -> None:
+        """Store a parsed result type from a pragma.
+
+        Overrides AbstractProgramContext.add_result() to collect result type
+        pragmas as structured metadata that will be attached to the circuit.
+
+        Args:
+            result: The parsed result IR object (e.g., Expectation, Probability, Sample).
+
+        Raises:
+            NotImplementedError: If the result is an AdjointGradient type,
+                which is not supported by this pipeline.
+        """
+        if isinstance(result, AdjointGradient):
+            raise NotImplementedError(
+                "AdjointGradient result type is not supported in the Qiskit compilation pipeline."
+            )
+        self._result_types.append(result)
+        qc = self._circuit_stack[0]
+        qc.metadata["braket_result_pragmas"] = self._result_types
 
     def _push_scoped_circuit(self) -> QuantumCircuit:
         """Push an empty body circuit onto the stack that shares the parent's bit objects."""
