@@ -19,6 +19,15 @@ from braket import experimental_capabilities as braket_expcaps
 from braket.circuits import gates as braket_gates
 from braket.circuits import noises as braket_noises
 from braket.circuits import observables as braket_observables
+from braket.ir.jaqcd import (
+    Amplitude,
+    DensityMatrix,
+    Expectation,
+    Probability,
+    Sample,
+    StateVector,
+    Variance,
+)
 from qiskit_braket_provider.providers import braket_instructions
 
 _BRAKET_TO_QISKIT_NAMES = {
@@ -246,3 +255,7 @@ _TRANSPILER_GATE_SUBSTITUTES: dict[tuple[str, tuple[float | str, ...]], "QiskitI
     ("rx", (pi / 2,)): qiskit_gates.SXGate(),
     ("rx", (-pi / 2,)): qiskit_gates.SXdgGate(),
 }
+
+_BASIS_INVARIANT_RESULT_TYPES = (StateVector, DensityMatrix, Amplitude)
+_Z_BASIS_RESULT_TYPES = (Probability,)
+_OBSERVABLE_RESULT_TYPES = (Expectation, Sample, Variance)
