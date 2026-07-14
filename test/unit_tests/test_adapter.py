@@ -1719,22 +1719,6 @@ class TestFromBraket(TestCase):
         self.assertEqual({0, 1}, barrier_indices[0])
         self.assertEqual({0}, barrier_indices[1])
 
-    def test_openqasm_barrier_grows_circuit_and_later_gates_extend_further(self):
-        """Explicit-target barrier's qubit list is frozen at emit time."""
-        qasm = "OPENQASM 3.0;\nh $0;\nbarrier $0, $2;\nh $4;\n"
-        qc = to_qiskit(qasm, add_measurements=False)
-        self.assertEqual(qc.num_qubits, 5)
-        ops = [(i.operation.name, [qc.find_bit(q).index for q in i.qubits]) for i in qc.data]
-        self.assertEqual(ops, [("h", [0]), ("barrier", [0, 2]), ("h", [4])])
-
-    def test_openqasm_bare_barrier_late_binds_to_all_qubits_in_scope(self):
-        """Bare barrier covers every qubit of the enclosing scope at scope-close."""
-        qasm = "OPENQASM 3.0;\nh $0;\nbarrier;\nh $2;\n"
-        qc = to_qiskit(qasm, add_measurements=False)
-        self.assertEqual(qc.num_qubits, 3)
-        ops = [(i.operation.name, [qc.find_bit(q).index for q in i.qubits]) for i in qc.data]
-        self.assertEqual(ops, [("h", [0]), ("barrier", [0, 1, 2]), ("h", [2])])
-
     def test_openqasm_bare_barrier_before_any_qubit_raises(self):
         """Bare barrier before any qubit exists in the enclosing scope raises."""
         qasm = "OPENQASM 3.0;\nbarrier;\nh $0;\n"
@@ -1776,6 +1760,31 @@ class TestFromBraket(TestCase):
             body_ops,
             [("h", [0]), ("barrier", [0, 1, 2, 3, 4, 5, 6]), ("h", [5])],
         )
+
+
+@pytest.mark.parametrize(
+    "qasm,expected_num_qubits,expected_ops",
+    [
+        pytest.param(
+            "OPENQASM 3.0;\nh $0;\nbarrier $0, $2;\nh $4;\n",
+            5,
+            [("h", [0]), ("barrier", [0, 2]), ("h", [4])],
+            id="explicit-target-frozen-at-emit-time",
+        ),
+        pytest.param(
+            "OPENQASM 3.0;\nh $0;\nbarrier;\nh $2;\n",
+            3,
+            [("h", [0]), ("barrier", [0, 1, 2]), ("h", [2])],
+            id="bare-covers-all-top-level-qubits",
+        ),
+    ],
+)
+def test_openqasm_top_level_barrier(qasm, expected_num_qubits, expected_ops):
+    """Top-level barriers: explicit targets stay frozen, bare barriers cover every top-level qubit."""
+    qc = to_qiskit(qasm, add_measurements=False)
+    assert qc.num_qubits == expected_num_qubits
+    ops = [(i.operation.name, [qc.find_bit(q).index for q in i.qubits]) for i in qc.data]
+    assert ops == expected_ops
 
 
 @pytest.mark.parametrize(
