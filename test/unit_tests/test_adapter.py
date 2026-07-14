@@ -1823,7 +1823,7 @@ class TestFromBraket(TestCase):
             "if (c[0]) {\n"
             "    barrier;\n"
             "}\n"
-            "h $3;\n"
+            "h $4;\n"
         )
         qc = to_qiskit(qasm, add_measurements=False)
         if_else = next(i for i in qc.data if i.operation.name == "if_else").operation
