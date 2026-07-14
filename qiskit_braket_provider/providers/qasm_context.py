@@ -135,6 +135,7 @@ class _QiskitProgramContext(AbstractProgramContext):
                 "Every verbatim box start marker must have a matching end marker."
             )
         top = self._circuit_stack[0]
+        self._expand_verbatim_bodies(top)
         self._resolve_global_barriers(top)
         return top
 
@@ -322,6 +323,16 @@ class _QiskitProgramContext(AbstractProgramContext):
             for block in getattr(op, "blocks", ()) or ():
                 if isinstance(block, QuantumCircuit):
                     self._resolve_global_barriers(block)
+
+    def _expand_verbatim_bodies(self, outer: QuantumCircuit) -> None:
+        """Grow every verbatim BoxOp body (and its qargs) to cover all of outer's qubits."""
+        for i, instr in enumerate(outer.data):
+            op = instr.operation
+            if isinstance(op, BoxOp) and op.label == self._verbatim_box_name:
+                op.body.add_bits([q for q in outer.qubits if q not in op.body.qubits])
+                outer.data[i] = CircuitInstruction(
+                    BoxOp(op.body, label=op.label), tuple(outer.qubits), instr.clbits
+                )
 
     def add_verbatim_marker(self, marker: VerbatimBoxDelimiter) -> None:
         """Handle verbatim box start/end markers.

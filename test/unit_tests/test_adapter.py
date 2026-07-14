@@ -1732,11 +1732,10 @@ class TestFromBraket(TestCase):
         with self.assertRaisesRegex(ValueError, "Cannot add global barrier to empty circuit"):
             to_qiskit(qasm, add_measurements=False)
 
-    def test_openqasm_bare_barrier_inside_verbatim_box_covers_inherited_and_late_added_qubits(
+    def test_openqasm_bare_barrier_inside_verbatim_box_covers_all_top_level_qubits(
         self,
     ):
-        """Body's bare barrier covers inherited + body-local qubits and stays frozen at
-        box close; a subsequent top-level bare barrier resolves independently."""
+        """Bare barrier inside a verbatim box covers every top-level qubit."""
         qasm = (
             "OPENQASM 3.0;\n"
             "h $2;\n"
@@ -1755,7 +1754,7 @@ class TestFromBraket(TestCase):
             ops,
             [
                 ("h", [2]),
-                ("box", [0, 1, 2, 3, 4, 5]),
+                ("box", [0, 1, 2, 3, 4, 5, 6]),
                 ("h", [6]),
                 ("barrier", [0, 1, 2, 3, 4, 5, 6]),
             ],
@@ -1766,8 +1765,28 @@ class TestFromBraket(TestCase):
         ]
         self.assertEqual(
             body_ops,
-            [("h", [0]), ("barrier", [0, 1, 2, 3, 4, 5]), ("h", [5])],
+            [("h", [0]), ("barrier", [0, 1, 2, 3, 4, 5, 6]), ("h", [5])],
         )
+
+    def test_openqasm_bare_barrier_in_verbatim_box_covers_qubit_added_after_box(self):
+        """Bare barrier inside a verbatim box picks up a qubit added outside the box."""
+        qasm = (
+            "OPENQASM 3.0;\n"
+            "#pragma braket verbatim\n"
+            "box {\n"
+            "    h $0;\n"
+            "    barrier;\n"
+            "    cnot $0, $1;\n"
+            "}\n"
+            "h $2;\n"
+        )
+        qc = to_qiskit(qasm, add_measurements=False)
+        box = next(i for i in qc.data if i.operation.name == "box").operation
+        body = box.body
+        body_ops = [
+            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
+        ]
+        self.assertEqual(body_ops, [("h", [0]), ("barrier", [0, 1, 2]), ("cx", [0, 1])])
 
     def test_openqasm_bare_barrier_inside_if_body_late_binds_to_if_body_qubits(self):
         """Bare barrier inside an if-body late-binds via resolve recursing into IfElseOp.blocks."""
@@ -1791,6 +1810,49 @@ class TestFromBraket(TestCase):
             for i in true_body.data
         ]
         self.assertEqual(body_ops, [("h", [1]), ("barrier", [0, 1])])
+
+    def test_openqasm_bare_barrier_in_if_body_covers_qubit_added_later_in_same_body(self):
+        """Bare barrier inside an if-body late-binds to qubits added later within the body."""
+        qasm = (
+            "OPENQASM 3.0;\n"
+            "bit[1] c;\n"
+            "qubit[1] q;\n"
+            "h q[0];\n"
+            "c[0] = measure q[0];\n"
+            "if (c[0]) {\n"
+            "    barrier;\n"
+            "    h $3;\n"
+            "}\n"
+        )
+        qc = to_qiskit(qasm, add_measurements=False)
+        true_body = qc.data[-1].operation.blocks[0]
+        body_ops = [
+            (i.operation.name, [true_body.find_bit(q).index for q in i.qubits])
+            for i in true_body.data
+        ]
+        self.assertEqual(body_ops, [("barrier", [0, 1, 2, 3]), ("h", [3])])
+
+    def test_openqasm_bare_barrier_in_if_body_does_not_cover_qubit_added_after_if(self):
+        """Bare barrier inside an if-body stays scope-local; a qubit added outside afterwards is excluded."""
+        qasm = (
+            "OPENQASM 3.0;\n"
+            "bit[1] c;\n"
+            "qubit[1] q;\n"
+            "h q[0];\n"
+            "c[0] = measure q[0];\n"
+            "if (c[0]) {\n"
+            "    barrier;\n"
+            "}\n"
+            "h $3;\n"
+        )
+        qc = to_qiskit(qasm, add_measurements=False)
+        if_else = next(i for i in qc.data if i.operation.name == "if_else").operation
+        true_body = if_else.blocks[0]
+        body_ops = [
+            (i.operation.name, [true_body.find_bit(q).index for q in i.qubits])
+            for i in true_body.data
+        ]
+        self.assertEqual(body_ops, [("barrier", [0])])
 
 
 class TestThereAndBackAgain(TestCase):
