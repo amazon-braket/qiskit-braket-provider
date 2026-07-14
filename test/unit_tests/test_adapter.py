@@ -1720,11 +1720,12 @@ class TestFromBraket(TestCase):
         self.assertEqual({0, 1}, barrier_indices[0])
         self.assertEqual({0}, barrier_indices[1])
 
-    def test_openqasm_bare_barrier_before_any_qubit_raises(self):
-        """Bare barrier before any qubit exists in the enclosing scope raises."""
-        qasm = "OPENQASM 3.0;\nbarrier;\nh $0;\n"
-        with self.assertRaisesRegex(ValueError, "Cannot add bare barrier to empty circuit"):
-            to_qiskit(qasm, add_measurements=False)
+
+def test_openqasm_bare_barrier_before_any_qubit_raises() -> None:
+    """Bare barrier before any qubit exists in the enclosing scope raises."""
+    qasm = "OPENQASM 3.0;\nbarrier;\nh $0;\n"
+    with pytest.raises(ValueError, match="Cannot add bare barrier to empty circuit"):
+        to_qiskit(qasm, add_measurements=False)
 
 
 @pytest.mark.parametrize(
