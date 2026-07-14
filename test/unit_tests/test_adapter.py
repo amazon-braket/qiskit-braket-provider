@@ -1712,12 +1712,7 @@ class TestFromBraket(TestCase):
 
     def test_openqasm_barrier_grows_circuit_and_later_gates_extend_further(self):
         """Explicit-target barrier's qubit list is frozen at emit time."""
-        qasm = (
-            "OPENQASM 3.0;\n"
-            "h $0;\n"
-            "barrier $0, $2;\n"
-            "h $4;\n"
-        )
+        qasm = "OPENQASM 3.0;\nh $0;\nbarrier $0, $2;\nh $4;\n"
         qc = to_qiskit(qasm, add_measurements=False)
         self.assertEqual(qc.num_qubits, 5)
         ops = [(i.operation.name, [qc.find_bit(q).index for q in i.qubits]) for i in qc.data]
@@ -1725,12 +1720,7 @@ class TestFromBraket(TestCase):
 
     def test_openqasm_bare_barrier_late_binds_to_all_qubits_in_scope(self):
         """Bare barrier covers every qubit of the enclosing scope at scope-close."""
-        qasm = (
-            "OPENQASM 3.0;\n"
-            "h $0;\n"
-            "barrier;\n"
-            "h $2;\n"
-        )
+        qasm = "OPENQASM 3.0;\nh $0;\nbarrier;\nh $2;\n"
         qc = to_qiskit(qasm, add_measurements=False)
         self.assertEqual(qc.num_qubits, 3)
         ops = [(i.operation.name, [qc.find_bit(q).index for q in i.qubits]) for i in qc.data]
@@ -1738,19 +1728,15 @@ class TestFromBraket(TestCase):
 
     def test_openqasm_bare_barrier_before_any_qubit_raises(self):
         """Bare barrier before any qubit exists in the enclosing scope raises."""
-        qasm = (
-            "OPENQASM 3.0;\n"
-            "barrier;\n"
-            "h $0;\n"
-        )
+        qasm = "OPENQASM 3.0;\nbarrier;\nh $0;\n"
         with self.assertRaisesRegex(ValueError, "Cannot add global barrier to empty circuit"):
             to_qiskit(qasm, add_measurements=False)
 
     def test_openqasm_bare_barrier_inside_verbatim_box_covers_inherited_and_late_added_qubits(
         self,
     ):
-        """Bare barrier in a verbatim box covers parent-inherited qubits and body-local
-        qubits added after the barrier."""
+        """Body's bare barrier covers inherited + body-local qubits and stays frozen at
+        box close; a subsequent top-level bare barrier resolves independently."""
         qasm = (
             "OPENQASM 3.0;\n"
             "h $2;\n"
@@ -1760,8 +1746,20 @@ class TestFromBraket(TestCase):
             "    barrier;\n"
             "    h $5;\n"
             "}\n"
+            "h $6;\n"
+            "barrier;\n"
         )
         qc = to_qiskit(qasm, add_measurements=False)
+        ops = [(i.operation.name, [qc.find_bit(q).index for q in i.qubits]) for i in qc.data]
+        self.assertEqual(
+            ops,
+            [
+                ("h", [2]),
+                ("box", [0, 1, 2, 3, 4, 5]),
+                ("h", [6]),
+                ("barrier", [0, 1, 2, 3, 4, 5, 6]),
+            ],
+        )
         body = qc.data[1].operation.body
         body_ops = [
             (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data

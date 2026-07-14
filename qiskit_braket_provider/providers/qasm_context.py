@@ -318,9 +318,7 @@ class _QiskitProgramContext(AbstractProgramContext):
             op = instr.operation
             # Zero-width Barrier is the global-barrier placeholder from add_barrier.
             if isinstance(op, Barrier) and op.num_qubits == 0:
-                circ.data[i] = CircuitInstruction(
-                    Barrier(circ.num_qubits), tuple(circ.qubits), ()
-                )
+                circ.data[i] = CircuitInstruction(Barrier(circ.num_qubits), tuple(circ.qubits), ())
             for block in getattr(op, "blocks", ()) or ():
                 if isinstance(block, QuantumCircuit):
                     self._resolve_global_barriers(block)
