@@ -1725,42 +1725,6 @@ class TestFromBraket(TestCase):
         with self.assertRaisesRegex(ValueError, "Cannot add bare barrier to empty circuit"):
             to_qiskit(qasm, add_measurements=False)
 
-    def test_openqasm_bare_barrier_inside_verbatim_box_covers_all_top_level_qubits(
-        self,
-    ):
-        """Bare barrier inside a verbatim box covers every top-level qubit."""
-        qasm = (
-            "OPENQASM 3.0;\n"
-            "h $2;\n"
-            "#pragma braket verbatim\n"
-            "box {\n"
-            "    h $0;\n"
-            "    barrier;\n"
-            "    h $5;\n"
-            "}\n"
-            "h $6;\n"
-            "barrier;\n"
-        )
-        qc = to_qiskit(qasm, add_measurements=False)
-        ops = [(i.operation.name, [qc.find_bit(q).index for q in i.qubits]) for i in qc.data]
-        self.assertEqual(
-            ops,
-            [
-                ("h", [2]),
-                ("box", [0, 1, 2, 3, 4, 5, 6]),
-                ("h", [6]),
-                ("barrier", [0, 1, 2, 3, 4, 5, 6]),
-            ],
-        )
-        body = qc.data[1].operation.body
-        body_ops = [
-            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
-        ]
-        self.assertEqual(
-            body_ops,
-            [("h", [0]), ("barrier", [0, 1, 2, 3, 4, 5, 6]), ("h", [5])],
-        )
-
 
 @pytest.mark.parametrize(
     "qasm,expected_num_qubits,expected_ops",
@@ -1828,6 +1792,7 @@ def test_openqasm_bare_barrier_in_if_body_late_binds_to_top_level_qubits(qasm, e
 @pytest.mark.parametrize(
     "wrapper",
     [
+        pytest.param("#pragma braket verbatim\nbox {\nBODY\n}\n", id="verbatim-box"),
         pytest.param("for uint i in [0:1] {\nBODY\n}\n", id="for"),
         pytest.param("while (c[0] == 1) {\nBODY\n}\n", id="while"),
         pytest.param(
