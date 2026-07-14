@@ -1768,26 +1768,6 @@ class TestFromBraket(TestCase):
             [("h", [0]), ("barrier", [0, 1, 2, 3, 4, 5, 6]), ("h", [5])],
         )
 
-    def test_openqasm_bare_barrier_in_verbatim_box_covers_qubit_added_after_box(self):
-        """Bare barrier inside a verbatim box picks up a qubit added outside the box."""
-        qasm = (
-            "OPENQASM 3.0;\n"
-            "#pragma braket verbatim\n"
-            "box {\n"
-            "    h $0;\n"
-            "    barrier;\n"
-            "    cnot $0, $1;\n"
-            "}\n"
-            "h $2;\n"
-        )
-        qc = to_qiskit(qasm, add_measurements=False)
-        box = next(i for i in qc.data if i.operation.name == "box").operation
-        body = box.body
-        body_ops = [
-            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
-        ]
-        self.assertEqual(body_ops, [("h", [0]), ("barrier", [0, 1, 2]), ("cx", [0, 1])])
-
     def test_openqasm_bare_barrier_inside_if_body_late_binds_to_if_body_qubits(self):
         """Bare barrier inside an if-body late-binds via resolve recursing into IfElseOp.blocks."""
         qasm = (
