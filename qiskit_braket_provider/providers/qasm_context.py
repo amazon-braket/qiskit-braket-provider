@@ -135,10 +135,7 @@ class _QiskitProgramContext(AbstractProgramContext):
                 "Every verbatim box start marker must have a matching end marker."
             )
         top = self._circuit_stack[0]
-        self._finalize_verbatim_boxes(top)
-        self._finalize_if_else_bodies(top)
-        self._resolve_bare_barriers(top)
-        return top
+        return self._finalize_scoped_bodies(top)
 
     def add_result(self, result: Results) -> None:
         """Store a parsed result type from a pragma.
@@ -301,42 +298,38 @@ class _QiskitProgramContext(AbstractProgramContext):
             return
         if active.num_qubits == 0:
             raise ValueError("Cannot add bare barrier to empty circuit")
-        # Bare-barrier placeholder; resolved to top-level qubits by _resolve_bare_barriers.
+        # Bare-barrier placeholder; resolved to top-level qubits by _finalize_scoped_bodies.
         active.append(Barrier(0), (), ())
 
-    def _resolve_bare_barriers(self, circ: QuantumCircuit) -> None:
-        """Rewrite bare-barrier placeholders in circ to cover circ's qubits.
-        Nested control-flow bodies resolve their own placeholders at their
-        own scope-close, so this pass is single-scope."""
-        for i, instr in enumerate(circ.data):
+    def _finalize_scoped_bodies(
+        self,
+        circ: QuantumCircuit,
+        top_qubits: tuple[Qubit, ...] | None = None,
+    ) -> QuantumCircuit:
+        """Rebuild circ: resolve bare-barrier placeholders and widen every scoped
+        body (verbatim BoxOp, IfElseOp, ForLoopOp, WhileLoopOp) to top_qubits,
+        recursing into nested scoped ops."""
+        if top_qubits is None:
+            top_qubits = tuple(circ.qubits)
+        new = circ.copy_empty_like()
+        for q in top_qubits:
+            if q not in new.qubits:
+                new.add_bits([q])
+        for instr in circ.data:
             op = instr.operation
             if isinstance(op, Barrier) and op.num_qubits == 0:
-                circ.data[i] = CircuitInstruction(Barrier(circ.num_qubits), tuple(circ.qubits), ())
-
-    def _finalize_verbatim_boxes(self, outer: QuantumCircuit) -> None:
-        """Grow every verbatim BoxOp body (and its qargs) to cover all of outer's qubits,
-        then resolve any bare-barrier placeholders inside the widened body."""
-        for i, instr in enumerate(outer.data):
-            op = instr.operation
+                new.append(Barrier(len(top_qubits)), top_qubits, ())
+                continue
             if isinstance(op, BoxOp) and op.label == self._verbatim_box_name:
-                op.body.add_bits([q for q in outer.qubits if q not in op.body.qubits])
-                self._resolve_bare_barriers(op.body)
-                outer.data[i] = CircuitInstruction(
-                    BoxOp(op.body, label=op.label), tuple(outer.qubits), instr.clbits
-                )
-
-    def _finalize_if_else_bodies(self, outer: QuantumCircuit) -> None:
-        """Grow every top-level IfElseOp body (and its qargs) to cover all of outer's qubits,
-        then resolve any bare-barrier placeholders inside the widened bodies. Nested
-        IfElseOps inside another IfElseOp body are not handled."""
-        for i, instr in enumerate(outer.data):
-            op = instr.operation
-            if isinstance(op, IfElseOp):
-                for body in op.blocks:
-                    body.add_bits([q for q in outer.qubits if q not in body.qubits])
-                    self._resolve_bare_barriers(body)
-                new_op = op.replace_blocks(op.blocks)
-                outer.data[i] = CircuitInstruction(new_op, tuple(outer.qubits), instr.clbits)
+                bodies = [op.body]
+            elif isinstance(op, (IfElseOp, ForLoopOp, WhileLoopOp)):
+                bodies = list(op.blocks)
+            else:
+                new.append(op, instr.qubits, instr.clbits)
+                continue
+            new_bodies = [self._finalize_scoped_bodies(b, top_qubits) for b in bodies]
+            new.append(op.replace_blocks(new_bodies), tuple(top_qubits), instr.clbits)
+        return new
 
     def add_verbatim_marker(self, marker: VerbatimBoxDelimiter) -> None:
         """Handle verbatim box start/end markers.

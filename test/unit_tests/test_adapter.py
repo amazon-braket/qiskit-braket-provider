@@ -1835,6 +1835,110 @@ class TestFromBraket(TestCase):
         ]
         self.assertEqual(body_ops, [("barrier", [0, 1, 2, 3, 4])])
 
+    def test_openqasm_bare_barrier_inside_for_loop_covers_top_level_qubits(self):
+        """Bare barrier inside a for-loop body late-binds to top-level qubits,
+        including qubits added at the outer scope after the loop closes."""
+        qasm = (
+            "OPENQASM 3.0;\n"
+            "qubit[3] q;\n"
+            "for uint i in [0:2] {\n"
+            "    h q[0];\n"
+            "    barrier;\n"
+            "    cnot q[0], q[1];\n"
+            "}\n"
+            "h $5;\n"
+        )
+        qc = to_qiskit(qasm, add_measurements=False)
+        for_loop = next(i for i in qc.data if i.operation.name == "for_loop").operation
+        body = for_loop.blocks[0]
+        body_ops = [
+            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
+        ]
+        self.assertEqual(
+            body_ops, [("h", [0]), ("barrier", [0, 1, 2, 3, 4, 5]), ("cx", [0, 1])]
+        )
+
+    def test_openqasm_bare_barrier_inside_while_loop_covers_top_level_qubits(self):
+        """Bare barrier inside a while-loop body late-binds to top-level qubits,
+        including qubits added at the outer scope after the loop closes."""
+        qasm = (
+            "OPENQASM 3.0;\n"
+            "qubit[2] q;\n"
+            "bit[1] c;\n"
+            "c[0] = measure q[0];\n"
+            "while (c[0] == 1) {\n"
+            "    h q[0];\n"
+            "    barrier;\n"
+            "    c[0] = measure q[0];\n"
+            "}\n"
+            "h $5;\n"
+        )
+        qc = to_qiskit(qasm, add_measurements=False)
+        while_loop = next(i for i in qc.data if i.operation.name == "while_loop").operation
+        body = while_loop.blocks[0]
+        body_ops = [
+            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
+        ]
+        self.assertEqual(
+            body_ops,
+            [("h", [0]), ("barrier", [0, 1, 2, 3, 4, 5]), ("measure", [0])],
+        )
+
+    def test_openqasm_bare_barrier_in_nested_for_loop_covers_top_level_qubits(self):
+        """Bare barrier inside a for-in-for body late-binds to top-level qubits."""
+        qasm = (
+            "OPENQASM 3.0;\n"
+            "qubit[2] q;\n"
+            "for uint i in [0:1] {\n"
+            "    for uint j in [0:1] {\n"
+            "        h q[0];\n"
+            "        barrier;\n"
+            "        cnot q[0], q[1];\n"
+            "    }\n"
+            "}\n"
+            "h $5;\n"
+        )
+        qc = to_qiskit(qasm, add_measurements=False)
+        outer_for = next(i for i in qc.data if i.operation.name == "for_loop").operation
+        inner_for = outer_for.blocks[0].data[0].operation
+        body = inner_for.blocks[0]
+        body_ops = [
+            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
+        ]
+        self.assertEqual(
+            body_ops,
+            [("h", [0]), ("barrier", [0, 1, 2, 3, 4, 5]), ("cx", [0, 1])],
+        )
+
+    def test_openqasm_bare_barrier_in_nested_if_body_covers_top_level_qubits(self):
+        """Bare barrier inside an if-in-if body late-binds to top-level qubits."""
+        qasm = (
+            "OPENQASM 3.0;\n"
+            "bit[1] c;\n"
+            "qubit[2] q;\n"
+            "h q[0];\n"
+            "c[0] = measure q[0];\n"
+            "if (c[0]) {\n"
+            "    if (c[0]) {\n"
+            "        h q[0];\n"
+            "        barrier;\n"
+            "        cnot q[0], q[1];\n"
+            "    }\n"
+            "}\n"
+            "h $5;\n"
+        )
+        qc = to_qiskit(qasm, add_measurements=False)
+        outer_if = next(i for i in qc.data if i.operation.name == "if_else").operation
+        inner_if = outer_if.blocks[0].data[0].operation
+        body = inner_if.blocks[0]
+        body_ops = [
+            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
+        ]
+        self.assertEqual(
+            body_ops,
+            [("h", [0]), ("barrier", [0, 1, 2, 3, 4, 5]), ("cx", [0, 1])],
+        )
+
 
 class TestThereAndBackAgain(TestCase):
     """testing whether or not to_braket and to_qiskit work together"""
