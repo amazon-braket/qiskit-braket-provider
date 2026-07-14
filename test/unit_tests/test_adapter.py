@@ -1729,7 +1729,7 @@ class TestFromBraket(TestCase):
     def test_openqasm_bare_barrier_before_any_qubit_raises(self):
         """Bare barrier before any qubit exists in the enclosing scope raises."""
         qasm = "OPENQASM 3.0;\nbarrier;\nh $0;\n"
-        with self.assertRaisesRegex(ValueError, "Cannot add global barrier to empty circuit"):
+        with self.assertRaisesRegex(ValueError, "Cannot add bare barrier to empty circuit"):
             to_qiskit(qasm, add_measurements=False)
 
     def test_openqasm_bare_barrier_inside_verbatim_box_covers_all_top_level_qubits(

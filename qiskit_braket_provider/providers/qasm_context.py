@@ -135,8 +135,8 @@ class _QiskitProgramContext(AbstractProgramContext):
                 "Every verbatim box start marker must have a matching end marker."
             )
         top = self._circuit_stack[0]
-        self._expand_verbatim_bodies(top)
-        self._resolve_global_barriers(top)
+        self._finalize_verbatim_boxes(top)
+        self._resolve_bare_barriers(top)
         return top
 
     def add_result(self, result: Results) -> None:
@@ -308,28 +308,27 @@ class _QiskitProgramContext(AbstractProgramContext):
             active.barrier(target)
             return
         if active.num_qubits == 0:
-            raise ValueError("Cannot add global barrier to empty circuit")
-        # Global-barrier placeholder; _resolve_global_barriers rewrites it at scope-close.
+            raise ValueError("Cannot add bare barrier to empty circuit")
+        # Bare-barrier placeholder; _resolve_bare_barriers rewrites it at scope-close.
         active.append(Barrier(0), (), ())
 
-    def _resolve_global_barriers(self, circ: QuantumCircuit) -> None:
-        """Rewrite empty-target global-barrier placeholders to cover every qubit
-        of their enclosing scope, recursing into any nested control-flow bodies."""
+    def _resolve_bare_barriers(self, circ: QuantumCircuit) -> None:
+        """Rewrite bare-barrier placeholders in circ to cover circ's qubits.
+        Nested control-flow bodies resolve their own placeholders at their
+        own scope-close, so this pass is single-scope."""
         for i, instr in enumerate(circ.data):
             op = instr.operation
-            # Zero-width Barrier is the global-barrier placeholder from add_barrier.
             if isinstance(op, Barrier) and op.num_qubits == 0:
                 circ.data[i] = CircuitInstruction(Barrier(circ.num_qubits), tuple(circ.qubits), ())
-            for block in getattr(op, "blocks", ()) or ():
-                if isinstance(block, QuantumCircuit):
-                    self._resolve_global_barriers(block)
 
-    def _expand_verbatim_bodies(self, outer: QuantumCircuit) -> None:
-        """Grow every verbatim BoxOp body (and its qargs) to cover all of outer's qubits."""
+    def _finalize_verbatim_boxes(self, outer: QuantumCircuit) -> None:
+        """Grow every verbatim BoxOp body (and its qargs) to cover all of outer's qubits,
+        then resolve any bare-barrier placeholders inside the widened body."""
         for i, instr in enumerate(outer.data):
             op = instr.operation
             if isinstance(op, BoxOp) and op.label == self._verbatim_box_name:
                 op.body.add_bits([q for q in outer.qubits if q not in op.body.qubits])
+                self._resolve_bare_barriers(op.body)
                 outer.data[i] = CircuitInstruction(
                     BoxOp(op.body, label=op.label), tuple(outer.qubits), instr.clbits
                 )
@@ -439,6 +438,9 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._extend_bits(main, false_body)
         self._extend_bits(true_body, main)
         self._extend_bits(false_body, main)
+
+        self._resolve_bare_barriers(true_body)
+        self._resolve_bare_barriers(false_body)
 
         if_else_op = IfElseOp(resolved_condition, true_body, actual_false)
         main.append(if_else_op, main.qubits, main.clbits)
