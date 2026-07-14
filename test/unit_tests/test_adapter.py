@@ -1812,8 +1812,9 @@ class TestFromBraket(TestCase):
         ]
         self.assertEqual(body_ops, [("barrier", [0, 1, 2, 3]), ("h", [3])])
 
-    def test_openqasm_bare_barrier_in_if_body_does_not_cover_qubit_added_after_if(self):
-        """Bare barrier inside an if-body stays scope-local; a qubit added outside afterwards is excluded."""
+    def test_openqasm_bare_barrier_in_if_body_covers_qubit_added_after_if(self):
+        """Bare barrier inside an if-body late-binds to top-level qubits, including
+        qubits added at the outer scope after the if closes."""
         qasm = (
             "OPENQASM 3.0;\n"
             "bit[1] c;\n"
@@ -1832,7 +1833,7 @@ class TestFromBraket(TestCase):
             (i.operation.name, [true_body.find_bit(q).index for q in i.qubits])
             for i in true_body.data
         ]
-        self.assertEqual(body_ops, [("barrier", [0])])
+        self.assertEqual(body_ops, [("barrier", [0, 1, 2, 3, 4])])
 
 
 class TestThereAndBackAgain(TestCase):

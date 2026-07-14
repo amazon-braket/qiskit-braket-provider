@@ -136,6 +136,7 @@ class _QiskitProgramContext(AbstractProgramContext):
             )
         top = self._circuit_stack[0]
         self._finalize_verbatim_boxes(top)
+        self._finalize_if_else_bodies(top)
         self._resolve_bare_barriers(top)
         return top
 
@@ -333,6 +334,19 @@ class _QiskitProgramContext(AbstractProgramContext):
                     BoxOp(op.body, label=op.label), tuple(outer.qubits), instr.clbits
                 )
 
+    def _finalize_if_else_bodies(self, outer: QuantumCircuit) -> None:
+        """Grow every top-level IfElseOp body (and its qargs) to cover all of outer's qubits,
+        then resolve any bare-barrier placeholders inside the widened bodies. Nested
+        IfElseOps inside another IfElseOp body are not handled."""
+        for i, instr in enumerate(outer.data):
+            op = instr.operation
+            if isinstance(op, IfElseOp):
+                for body in op.blocks:
+                    body.add_bits([q for q in outer.qubits if q not in body.qubits])
+                    self._resolve_bare_barriers(body)
+                new_op = op.replace_blocks(op.blocks)
+                outer.data[i] = CircuitInstruction(new_op, tuple(outer.qubits), instr.clbits)
+
     def add_verbatim_marker(self, marker: VerbatimBoxDelimiter) -> None:
         """Handle verbatim box start/end markers.
 
@@ -438,9 +452,6 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._extend_bits(main, false_body)
         self._extend_bits(true_body, main)
         self._extend_bits(false_body, main)
-
-        self._resolve_bare_barriers(true_body)
-        self._resolve_bare_barriers(false_body)
 
         if_else_op = IfElseOp(resolved_condition, true_body, actual_false)
         main.append(if_else_op, main.qubits, main.clbits)
