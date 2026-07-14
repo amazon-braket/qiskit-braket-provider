@@ -1756,6 +1756,17 @@ class TestFromBraket(TestCase):
         ]
         self.assertEqual(body_ops, [("h", [0]), ("barrier", [0, 1]), ("cx", [0, 1])])
 
+    def test_braket_circuit_bare_barrier_in_verbatim_box_with_qubit_outside_box(self):
+        """Bare barrier inside a verbatim box expands to all outer-circuit qubits."""
+        circuit = Circuit().add_verbatim_box(Circuit().h(0).barrier().cnot(0, 1)).h(2)
+        qc = to_qiskit(circuit, add_measurements=False)
+        box = next(i for i in qc.data if i.operation.name == "box").operation
+        body = box.body
+        body_ops = [
+            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
+        ]
+        self.assertEqual(body_ops, [("h", [0]), ("barrier", [0, 1, 2]), ("cx", [0, 1])])
+
 
 class TestThereAndBackAgain(TestCase):
     """testing whether or not to_braket and to_qiskit work together"""

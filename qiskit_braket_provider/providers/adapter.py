@@ -577,7 +577,7 @@ def to_qiskit(
             case compiler_directives.Barrier():
                 active = verbatim_buffer if verbatim_buffer is not None else qiskit_circuit
                 barrier_qubits = (
-                    [qiskit_circuit.qubits[qubit_map[i]] for i in instruction.target]
+                    [active.qubits[qubit_map[i]] for i in instruction.target]
                     if instruction.target
                     else active.qubits
                 )
