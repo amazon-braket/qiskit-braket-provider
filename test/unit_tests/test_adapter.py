@@ -63,6 +63,15 @@ from test.unit_tests.mocks import (
 
 _EPS = 1e-10  # global variable used to chop very small numbers to zero
 
+
+def _innermost_scoped_body(circ):
+    """Descend into the first scoped op recursively; return the innermost body."""
+    for instr in circ.data:
+        blocks = getattr(instr.operation, "blocks", ()) or ()
+        if blocks and isinstance(blocks[0], QuantumCircuit):
+            return _innermost_scoped_body(blocks[0])
+    return circ
+
 qiskit_ionq_gates: list[QiskitGate] = [
     ionq_gates.GPIGate(Parameter("φ")),
     ionq_gates.GPI2Gate(Parameter("φ")),
@@ -1768,176 +1777,70 @@ class TestFromBraket(TestCase):
             [("h", [0]), ("barrier", [0, 1, 2, 3, 4, 5, 6]), ("h", [5])],
         )
 
-    def test_openqasm_bare_barrier_inside_if_body_late_binds_to_if_body_qubits(self):
-        """Bare barrier inside an if-body late-binds via resolve recursing into IfElseOp.blocks."""
-        qasm = (
-            "OPENQASM 3.0;\n"
-            "bit[1] c;\n"
-            "qubit[2] q;\n"
-            "h q[0];\n"
+
+@pytest.mark.parametrize(
+    "qasm,expected",
+    [
+        pytest.param(
+            "OPENQASM 3.0;\nbit[1] c;\nqubit[2] q;\nh q[0];\n"
             "c[0] = measure q[0];\n"
-            "if (c[0]) {\n"
-            "    h q[1];\n"
-            "    barrier;\n"
-            "}\n"
-        )
-        qc = to_qiskit(qasm, add_measurements=False)
-        if_else = qc.data[-1].operation
-        self.assertEqual(if_else.name, "if_else")
-        true_body = if_else.blocks[0]
-        body_ops = [
-            (i.operation.name, [true_body.find_bit(q).index for q in i.qubits])
-            for i in true_body.data
-        ]
-        self.assertEqual(body_ops, [("h", [1]), ("barrier", [0, 1])])
-
-    def test_openqasm_bare_barrier_in_if_body_covers_qubit_added_later_in_same_body(self):
-        """Bare barrier inside an if-body late-binds to qubits added later within the body."""
-        qasm = (
-            "OPENQASM 3.0;\n"
-            "bit[1] c;\n"
-            "qubit[1] q;\n"
-            "h q[0];\n"
+            "if (c[0]) { h q[1]; barrier; }\n",
+            [("h", [1]), ("barrier", [0, 1])],
+            id="qubit-used-inside-if-before-barrier",
+        ),
+        pytest.param(
+            "OPENQASM 3.0;\nbit[1] c;\nqubit[1] q;\nh q[0];\n"
             "c[0] = measure q[0];\n"
-            "if (c[0]) {\n"
-            "    barrier;\n"
-            "    h $3;\n"
-            "}\n"
-        )
-        qc = to_qiskit(qasm, add_measurements=False)
-        true_body = qc.data[-1].operation.blocks[0]
-        body_ops = [
-            (i.operation.name, [true_body.find_bit(q).index for q in i.qubits])
-            for i in true_body.data
-        ]
-        self.assertEqual(body_ops, [("barrier", [0, 1, 2, 3]), ("h", [3])])
-
-    def test_openqasm_bare_barrier_in_if_body_covers_qubit_added_after_if(self):
-        """Bare barrier inside an if-body late-binds to top-level qubits, including
-        qubits added at the outer scope after the if closes."""
-        qasm = (
-            "OPENQASM 3.0;\n"
-            "bit[1] c;\n"
-            "qubit[1] q;\n"
-            "h q[0];\n"
+            "if (c[0]) { barrier; h $3; }\n",
+            [("barrier", [0, 1, 2, 3]), ("h", [3])],
+            id="qubit-added-inside-if-after-barrier",
+        ),
+        pytest.param(
+            "OPENQASM 3.0;\nbit[1] c;\nqubit[1] q;\nh q[0];\n"
             "c[0] = measure q[0];\n"
-            "if (c[0]) {\n"
-            "    barrier;\n"
-            "}\n"
-            "h $4;\n"
-        )
-        qc = to_qiskit(qasm, add_measurements=False)
-        if_else = next(i for i in qc.data if i.operation.name == "if_else").operation
-        true_body = if_else.blocks[0]
-        body_ops = [
-            (i.operation.name, [true_body.find_bit(q).index for q in i.qubits])
-            for i in true_body.data
-        ]
-        self.assertEqual(body_ops, [("barrier", [0, 1, 2, 3, 4])])
+            "if (c[0]) { barrier; }\n"
+            "h $4;\n",
+            [("barrier", [0, 1, 2, 3, 4])],
+            id="qubit-added-outside-if-after-it-closes",
+        ),
+    ],
+)
+def test_openqasm_bare_barrier_in_if_body_late_binds_to_top_level_qubits(qasm, expected):
+    """Bare barrier inside an if body covers all top-level qubits at circuit
+    finalization, regardless of where the extra qubits are introduced."""
+    qc = to_qiskit(qasm, add_measurements=False)
+    body = _innermost_scoped_body(qc)
+    body_ops = [
+        (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
+    ]
+    assert body_ops == expected
 
-    def test_openqasm_bare_barrier_inside_for_loop_covers_top_level_qubits(self):
-        """Bare barrier inside a for-loop body late-binds to top-level qubits,
-        including qubits added at the outer scope after the loop closes."""
-        qasm = (
-            "OPENQASM 3.0;\n"
-            "qubit[3] q;\n"
-            "for uint i in [0:2] {\n"
-            "    h q[0];\n"
-            "    barrier;\n"
-            "    cnot q[0], q[1];\n"
-            "}\n"
-            "h $5;\n"
-        )
-        qc = to_qiskit(qasm, add_measurements=False)
-        for_loop = next(i for i in qc.data if i.operation.name == "for_loop").operation
-        body = for_loop.blocks[0]
-        body_ops = [
-            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
-        ]
-        self.assertEqual(
-            body_ops, [("h", [0]), ("barrier", [0, 1, 2, 3, 4, 5]), ("cx", [0, 1])]
-        )
 
-    def test_openqasm_bare_barrier_inside_while_loop_covers_top_level_qubits(self):
-        """Bare barrier inside a while-loop body late-binds to top-level qubits,
-        including qubits added at the outer scope after the loop closes."""
-        qasm = (
-            "OPENQASM 3.0;\n"
-            "qubit[2] q;\n"
-            "bit[1] c;\n"
-            "c[0] = measure q[0];\n"
-            "while (c[0] == 1) {\n"
-            "    h q[0];\n"
-            "    barrier;\n"
-            "    c[0] = measure q[0];\n"
-            "}\n"
-            "h $5;\n"
-        )
-        qc = to_qiskit(qasm, add_measurements=False)
-        while_loop = next(i for i in qc.data if i.operation.name == "while_loop").operation
-        body = while_loop.blocks[0]
-        body_ops = [
-            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
-        ]
-        self.assertEqual(
-            body_ops,
-            [("h", [0]), ("barrier", [0, 1, 2, 3, 4, 5]), ("measure", [0])],
-        )
-
-    def test_openqasm_bare_barrier_in_nested_for_loop_covers_top_level_qubits(self):
-        """Bare barrier inside a for-in-for body late-binds to top-level qubits."""
-        qasm = (
-            "OPENQASM 3.0;\n"
-            "qubit[2] q;\n"
-            "for uint i in [0:1] {\n"
-            "    for uint j in [0:1] {\n"
-            "        h q[0];\n"
-            "        barrier;\n"
-            "        cnot q[0], q[1];\n"
-            "    }\n"
-            "}\n"
-            "h $5;\n"
-        )
-        qc = to_qiskit(qasm, add_measurements=False)
-        outer_for = next(i for i in qc.data if i.operation.name == "for_loop").operation
-        inner_for = outer_for.blocks[0].data[0].operation
-        body = inner_for.blocks[0]
-        body_ops = [
-            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
-        ]
-        self.assertEqual(
-            body_ops,
-            [("h", [0]), ("barrier", [0, 1, 2, 3, 4, 5]), ("cx", [0, 1])],
-        )
-
-    def test_openqasm_bare_barrier_in_nested_if_body_covers_top_level_qubits(self):
-        """Bare barrier inside an if-in-if body late-binds to top-level qubits."""
-        qasm = (
-            "OPENQASM 3.0;\n"
-            "bit[1] c;\n"
-            "qubit[2] q;\n"
-            "h q[0];\n"
-            "c[0] = measure q[0];\n"
-            "if (c[0]) {\n"
-            "    if (c[0]) {\n"
-            "        h q[0];\n"
-            "        barrier;\n"
-            "        cnot q[0], q[1];\n"
-            "    }\n"
-            "}\n"
-            "h $5;\n"
-        )
-        qc = to_qiskit(qasm, add_measurements=False)
-        outer_if = next(i for i in qc.data if i.operation.name == "if_else").operation
-        inner_if = outer_if.blocks[0].data[0].operation
-        body = inner_if.blocks[0]
-        body_ops = [
-            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
-        ]
-        self.assertEqual(
-            body_ops,
-            [("h", [0]), ("barrier", [0, 1, 2, 3, 4, 5]), ("cx", [0, 1])],
-        )
+@pytest.mark.parametrize(
+    "wrapper",
+    [
+        pytest.param("for uint i in [0:1] {\nBODY\n}\n", id="for"),
+        pytest.param("while (c[0] == 1) {\nBODY\n}\n", id="while"),
+        pytest.param(
+            "for uint i in [0:1] {\nfor uint j in [0:1] {\nBODY\n}\n}\n", id="for-in-for"
+        ),
+        pytest.param("if (c[0]) {\nif (c[0]) {\nBODY\n}\n}\n", id="if-in-if"),
+        pytest.param("while (c[0] == 1) {\nif (c[0]) {\nBODY\n}\n}\n", id="if-in-while"),
+    ],
+)
+def test_openqasm_bare_barrier_in_scoped_body_covers_top_level_qubits(wrapper):
+    """Bare barrier inside a scoped body late-binds to all top-level qubits,
+    including qubits added at the outer scope after the scope closes."""
+    preamble = "OPENQASM 3.0;\nbit[1] c;\nqubit[2] q;\nh q[0];\nc[0] = measure q[0];\n"
+    body_stmt = "h q[0]; barrier; cnot q[0], q[1];"
+    trailing = "h $5;\n"
+    qasm = preamble + wrapper.replace("BODY", body_stmt) + trailing
+    qc = to_qiskit(qasm, add_measurements=False)
+    body = _innermost_scoped_body(qc)
+    body_ops = [
+        (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
+    ]
+    assert body_ops == [("h", [0]), ("barrier", [0, 1, 2, 3, 4, 5]), ("cx", [0, 1])]
 
 
 class TestThereAndBackAgain(TestCase):
