@@ -255,6 +255,23 @@ def test_hermitian_invalid_matrix_raises_error():
             "More observables than target qubits",
         ),
         (
+            [
+                Expectation(
+                    observable=[
+                        [
+                            [[0, 0], [0, 0], [0, 0], [0, 0]],
+                            [[0, 0], [0, 0], [0, 0], [0, 0]],
+                            [[0, 0], [0, 0], [0, 0], [0, 0]],
+                            [[0, 0], [0, 0], [0, 0], [0, 0]],
+                        ]
+                    ],
+                    targets=[0],
+                )
+            ],
+            2,
+            "More observables than target qubits",
+        ),
+        (
             [Expectation(observable=["x", "y"], targets=[0, 1, 2])],
             3,
             "Fewer observables than target qubits",
@@ -269,6 +286,7 @@ def test_hermitian_invalid_matrix_raises_error():
         "double_measurement",
         "hermitian_non_power_of_2",
         "more_observables_than_targets",
+        "hermitian_exceeds_targets",
         "fewer_observables_than_targets",
         "unrecognized_result_type",
     ],

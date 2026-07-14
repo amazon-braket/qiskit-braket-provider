@@ -122,9 +122,7 @@ def _plan_for_observable_type(
         for obs in observable:
             if isinstance(obs, str):
                 if obs_idx >= len(targets):
-                    raise ValueError(
-                        "More observables than target qubits in result type pragma."
-                    )
+                    raise ValueError("More observables than target qubits in result type pragma.")
                 target = targets[obs_idx]
                 rotation_ops.extend(_rotation_gates_for_observable(obs, target))
                 qubits_to_measure.add(target)
@@ -134,18 +132,14 @@ def _plan_for_observable_type(
                     raise ValueError(f"Hermitian matrix size {len(obs)} is not a power of 2.")
                 num_qubits_for_obs = int(math.log2(len(obs)))
                 if obs_idx + num_qubits_for_obs > len(targets):
-                    raise ValueError(
-                        "More observables than target qubits in result type pragma."
-                    )
+                    raise ValueError("More observables than target qubits in result type pragma.")
                 obs_targets = targets[obs_idx : obs_idx + num_qubits_for_obs]
                 rotation_ops.extend(_rotation_gates_for_hermitian(obs, obs_targets))
                 qubits_to_measure.update(obs_targets)
                 obs_idx += num_qubits_for_obs
 
         if obs_idx != len(targets):
-            raise ValueError(
-                "Fewer observables than target qubits in result type pragma."
-            )
+            raise ValueError("Fewer observables than target qubits in result type pragma.")
 
     return rotation_ops, qubits_to_measure
 
