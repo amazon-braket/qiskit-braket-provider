@@ -292,17 +292,8 @@ class _QiskitProgramContext(AbstractProgramContext):
             active.measure(qubit, offset + local_index)
 
     def add_barrier(self, target: list[int] | None = None) -> None:
-        """Add a barrier instruction to the active circuit.
-
-        Args:
-            target: Qubit indices for the barrier. If None or empty, the
-                barrier applies to all qubits in the enclosing scope
-                (including qubits added later within the same scope).
-
-        Raises:
-            ValueError: If target is None or empty and the enclosing scope
-                has no qubits at the time the barrier is added.
-        """
+        """Emit a barrier. Bare (empty target) barriers late-bind to cover
+        the top-level circuit's qubits."""
         active = self._active_circuit
         if target:
             self._ensure_qubit_capacity(target)
@@ -310,7 +301,7 @@ class _QiskitProgramContext(AbstractProgramContext):
             return
         if active.num_qubits == 0:
             raise ValueError("Cannot add bare barrier to empty circuit")
-        # Bare-barrier placeholder; _resolve_bare_barriers rewrites it at scope-close.
+        # Bare-barrier placeholder; resolved to top-level qubits by _resolve_bare_barriers.
         active.append(Barrier(0), (), ())
 
     def _resolve_bare_barriers(self, circ: QuantumCircuit) -> None:
