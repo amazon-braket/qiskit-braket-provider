@@ -411,9 +411,8 @@ def test_pass_raises_errors(pragmas: list, num_qubits: int, match: str, error_ty
     else:
         qc = _circuit_with_result_pragmas(num_qubits, pragmas)
 
-    pm = PassManager([AddBasisRotationAndMeasurement()])
     with pytest.raises(error_type, match=match):
-        pm.run(qc)
+        _run_pragma_handling_pass(qc)
 
 
 def test_unknown_observable_raises_error():

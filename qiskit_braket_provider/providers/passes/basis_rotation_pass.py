@@ -122,18 +122,16 @@ def _qubits_for_z_basis_type(result: Probability, num_qubits: int) -> set[int]:
     return set(range(num_qubits))
 
 
-def _basis_for_observable(obs: str | list) -> str:
-    """Return the measurement basis key for an observable.
+def _basis_for_observable(obs: str) -> str:
+    """Return the measurement basis key for a string observable.
 
     Args:
-        obs: Observable - either a string name or a list (hermitian matrix).
+        obs: Observable name string (x, y, z, h, i).
 
     Returns:
-        Basis string: "z", "x", "y", "h", or "hermitian".
+        Basis string: "z", "x", "y", or "h".
     """
-    if isinstance(obs, str):
-        return _OBSERVABLE_TO_BASIS.get(obs.lower(), obs.lower())
-    return "hermitian"
+    return _OBSERVABLE_TO_BASIS.get(obs.lower(), obs.lower())
 
 
 def _check_basis_conflicts(
@@ -297,9 +295,6 @@ class AddBasisRotationAndMeasurement(TransformationPass):
                 continue
 
             raise ValueError(f"Unrecognized result type: {type(result).__name__}")
-
-        if not all_qubit_bases:
-            return dag
 
         pragma_clbits = [Clbit() for _ in range(len(all_qubit_bases))]
         dag.add_clbits(pragma_clbits)
