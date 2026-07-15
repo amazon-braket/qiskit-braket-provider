@@ -210,8 +210,7 @@ class AddBasisRotationAndMeasurement(TransformationPass):
     Measurements are always written to freshly allocated classical bits appended to
     the circuit. Existing classical bits are never reused. Measurements are added in
     sorted qubit order: qubit N maps to classical bit index based on its position in
-    the sorted set of all measured qubits. For example, if targets are {3, 1},
-    measurements will be q[1]→c[new+0], q[3]→c[new+1].
+    the sorted set of all measured qubits.
 
     This pass should run before transpilation so that added rotation gates are
     compiled to the device's native gate set and qubit layout is applied correctly.
