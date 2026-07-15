@@ -575,8 +575,11 @@ def to_qiskit(
         gate_name = operator.name.lower()
         match operator:
             case compiler_directives.Barrier():
-                barrier_qubits = [qiskit_circuit.qubits[qubit_map[i]] for i in instruction.target]
-                qiskit_circuit.barrier(barrier_qubits)
+                active = verbatim_buffer if verbatim_buffer is not None else qiskit_circuit
+                if instruction.target:
+                    active.barrier([active.qubits[qubit_map[i]] for i in instruction.target])
+                else:
+                    active.barrier()
                 continue
             case braket_noises.Noise() | braket_noises.Kraus():
                 gate = _create_qiskit_kraus(operator.to_matrix())
