@@ -17,18 +17,11 @@ from braket.ir.jaqcd import (
 from qiskit_braket_provider.providers.gate_mappings import (
     _BASIS_INVARIANT_RESULT_TYPES,
     _OBSERVABLE_RESULT_TYPES,
+    _OBSERVABLE_TO_BASIS,
     _Z_BASIS_RESULT_TYPES,
 )
 
 RotationOp = tuple[Gate, int | list[int]]
-
-_OBSERVABLE_TO_BASIS = {
-    "z": "z",
-    "i": "z",
-    "x": "x",
-    "y": "y",
-    "h": "h",
-}
 
 
 def _reverse_endianness(matrix: np.ndarray) -> np.ndarray:
@@ -122,18 +115,6 @@ def _qubits_for_z_basis_type(result: Probability, num_qubits: int) -> set[int]:
     return set(range(num_qubits))
 
 
-def _basis_for_observable(obs: str) -> str:
-    """Return the measurement basis key for a string observable.
-
-    Args:
-        obs: Observable name string (x, y, z, h, i).
-
-    Returns:
-        Basis string: "z", "x", "y", or "h".
-    """
-    return _OBSERVABLE_TO_BASIS.get(obs.lower(), obs.lower())
-
-
 def _check_basis_conflicts(
     qubit_bases: dict[int, str], new_qubits: set[int], new_basis: str
 ) -> None:
@@ -184,7 +165,7 @@ def _plan_for_observable_type(
     qubit_bases: dict[int, str] = {}
 
     if len(observable) == 1 and isinstance(observable[0], str):
-        basis = _basis_for_observable(observable[0])
+        basis = _OBSERVABLE_TO_BASIS.get(observable[0].lower(), observable[0].lower())
         for target in targets:
             rotation_ops.extend(_rotation_gates_for_observable(observable[0], target))
             qubit_bases[target] = basis
@@ -196,7 +177,7 @@ def _plan_for_observable_type(
                     raise ValueError("More observables than target qubits in result type pragma.")
                 target = targets[obs_idx]
                 rotation_ops.extend(_rotation_gates_for_observable(obs, target))
-                qubit_bases[target] = _basis_for_observable(obs)
+                qubit_bases[target] = _OBSERVABLE_TO_BASIS.get(obs.lower(), obs.lower())
                 obs_idx += 1
             elif isinstance(obs, list):
                 if len(obs) == 0 or (len(obs) & (len(obs) - 1)) != 0:

@@ -259,3 +259,10 @@ _TRANSPILER_GATE_SUBSTITUTES: dict[tuple[str, tuple[float | str, ...]], "QiskitI
 _BASIS_INVARIANT_RESULT_TYPES = (StateVector, DensityMatrix, Amplitude)
 _Z_BASIS_RESULT_TYPES = (Probability,)
 _OBSERVABLE_RESULT_TYPES = (Expectation, Sample, Variance)
+_OBSERVABLE_TO_BASIS = {
+    "z": "z",
+    "i": "z",
+    "x": "x",
+    "y": "y",
+    "h": "h",
+}
