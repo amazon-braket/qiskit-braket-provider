@@ -1747,7 +1747,7 @@ class TestFromBraket(TestCase):
 
     def test_braket_circuit_bare_barrier_inside_verbatim_box_covers_body_qubits(self):
         """Bare barrier inside a verbatim box covers the box body's qubits."""
-        circuit = Circuit().h(0).add_verbatim_box(Circuit().h(0).barrier().cnot(0, 1)).h(1)
+        circuit = Circuit().add_verbatim_box(Circuit().h(0).barrier().cnot(0, 1))
         qc = to_qiskit(circuit, add_measurements=False)
         box = next(i for i in qc.data if i.operation.name == "box").operation
         body = box.body
