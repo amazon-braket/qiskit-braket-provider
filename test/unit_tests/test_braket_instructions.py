@@ -175,5 +175,14 @@ def test_direct_instantiation_of_abstract_base_raises() -> None:
         _CPhaseShift(0.5)
 
 
+def test_to_qiskit_supports_iqm_classical_control() -> None:
+    """Regression test for to_qiskit on cc_prx and measure_ff."""
+    qasm = "OPENQASM 3.0;\nqubit[2] q;\nmeasure_ff(0) q[0];\ncc_prx(0.5, 0.7, 0) q[1];\n"
+    with EnableExperimentalCapability():
+        qc = to_qiskit(Circuit.from_ir(qasm), add_measurements=False)
+    assert isinstance(qc.data[0].operation, MeasureFF)
+    assert isinstance(qc.data[1].operation, CCPRx)
+
+
 if __name__ == "__main__":
     unittest.main()

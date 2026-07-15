@@ -26,7 +26,7 @@ from qiskit.quantum_info import Pauli, SparsePauliOp
 from qiskit.transpiler import PassManager, Target
 from qiskit_ionq import add_equivalences
 
-from braket import experimental_capabilities as braket_expcaps  # noqa: F401
+from braket import experimental_capabilities as braket_expcaps
 from braket.aws import AwsDevice, AwsDeviceType  # noqa: F401
 from braket.circuits import Circuit, Instruction, compiler_directives, measure
 from braket.circuits import Observable as BraketObservable
@@ -582,6 +582,8 @@ def to_qiskit(
                 gate = _create_qiskit_kraus(operator.to_matrix())
             case braket_gates.Unitary():
                 gate = _create_qiskit_unitary(operator.to_matrix())
+            case braket_expcaps.iqm.classical_control.ExperimentalQuantumOperator():
+                gate = _create_qiskit_gate(operator._qasm_name, operator.parameters, parameter_map)
             case compiler_directives.StartVerbatimBox():
                 if verbatim_buffer is not None:
                     raise ValueError("Nested verbatim boxes are not supported")
