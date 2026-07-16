@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.18.1 (2026-07-16)
+
+### Bug Fixes and Other Changes
+
+ * preserve OpenQASM 3 barriers in to_qiskit
+ * barrier scope and bare-barrier handling in to_qiskit
+ * to_qiskit for IQM experimental operators (cc_prx, measure_ff)
+
 ## v0.18.0 (2026-07-10)
 
 ### Features
