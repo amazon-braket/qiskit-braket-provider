@@ -1,6 +1,7 @@
 """Transpiler pass to add basis rotation gates and measurements for Braket result type pragmas."""
 
 import math
+from collections.abc import Hashable
 
 import numpy as np
 from qiskit.circuit import Clbit, Gate, Measure
@@ -16,6 +17,7 @@ from braket.ir.jaqcd import (
 )
 from qiskit_braket_provider.providers.gate_mappings import (
     _BASIS_INVARIANT_RESULT_TYPES,
+    _IDENTITY_BASIS,
     _OBSERVABLE_RESULT_TYPES,
     _OBSERVABLE_TO_BASIS,
     _Z_BASIS_RESULT_TYPES,
@@ -44,6 +46,18 @@ def _reverse_endianness(matrix: np.ndarray) -> np.ndarray:
         matrix.reshape([2] * n_q * 2),
         list(range(n_q))[::-1] + list(range(n_q, 2 * n_q))[::-1],
     ).reshape((2**n_q, 2**n_q))
+
+
+def _hermitian_key(matrix: list) -> Hashable:
+    """Create a hashable key from a Hermitian matrix for deduplication.
+
+    Args:
+        matrix: Nested list representing the Hermitian matrix in [real, imag] format.
+
+    Returns:
+        A hashable tuple of complex elements for identity comparison.
+    """
+    return tuple(complex(c[0], c[1]) for row in matrix for c in row)
 
 
 def _rotation_gates_for_observable(observable: str, target: int) -> list[RotationOp]:
@@ -115,35 +129,54 @@ def _qubits_for_z_basis_type(result: Probability, num_qubits: int) -> set[int]:
     return set(range(num_qubits))
 
 
-def _check_basis_conflicts(
-    qubit_bases: dict[int, str], new_qubits: set[int], new_basis: str
-) -> None:
-    """Check and record basis assignments, raising on conflicts.
+def _check_basis_conflict(
+    qubit_bases: dict[int, Hashable], qubit: int, basis_key: Hashable
+) -> bool:
+    """Check and record a single qubit's basis assignment, raising on conflicts.
 
-    Z-basis (from Probability or z/i observables) is compatible with other Z-basis
-    assignments but conflicts with any other basis on the same qubit.
+    Same basis on the same qubit is deduplicated (returns False). Different basis
+    on the same qubit raises ValueError. New qubit assignment returns True.
+    Identity ("i") is compatible with any basis and does not override it.
 
     Args:
-        qubit_bases: Mutable dict mapping qubit index to its committed basis.
-        new_qubits: Set of qubit indices being assigned.
-        new_basis: The basis being assigned to these qubits.
+        qubit_bases: Mutable dict mapping qubit index to its committed basis key.
+        qubit: The qubit index being assigned.
+        basis_key: Hashable key identifying the observable basis. "i" means identity
+            (compatible with anything). For Pauli observables this is the string from
+            _OBSERVABLE_TO_BASIS. For Hermitian observables this is a tuple of the
+            matrix elements.
+
+    Returns:
+        True if the qubit was newly committed, False if it already had the same basis
+        or the new basis is identity.
 
     Raises:
-        ValueError: If a qubit already has a different non-compatible basis assigned.
+        ValueError: If the qubit already has a different non-identity basis assigned.
     """
-    for qubit in new_qubits:
-        existing = qubit_bases.get(qubit)
-        if existing is not None and existing != new_basis:
-            raise ValueError(
-                f"Conflicting measurement bases on qubit {qubit}: "
-                f"'{existing}' and '{new_basis}' cannot be measured simultaneously."
-            )
-        qubit_bases[qubit] = new_basis
+    if qubit not in qubit_bases:
+        qubit_bases[qubit] = basis_key
+        return True
+
+    existing = qubit_bases[qubit]
+
+    # Identity is diagonal in every basis (never conflicts); same basis deduplicates
+    if basis_key == _IDENTITY_BASIS or existing == basis_key:
+        return False
+
+    # Upgrade from identity to a real basis
+    if existing == _IDENTITY_BASIS:
+        qubit_bases[qubit] = basis_key
+        return True
+
+    raise ValueError(
+        f"Conflicting measurement bases on qubit {qubit}: "
+        f"cannot measure simultaneously with different observables."
+    )
 
 
 def _plan_for_observable_type(
     result: Expectation | Sample | Variance, num_qubits: int
-) -> tuple[list[RotationOp], dict[int, str]]:
+) -> tuple[list[RotationOp], dict[int, Hashable]]:
     """Compute the rotation/measurement plan for an observable result type.
 
     Args:
@@ -152,7 +185,7 @@ def _plan_for_observable_type(
 
     Returns:
         Tuple of (rotation_ops, qubit_bases) where qubit_bases maps qubit index
-        to its measurement basis string.
+        to a hashable basis key identifying the observable.
 
     Raises:
         ValueError: If a hermitian matrix size is not a power of 2, or if
@@ -162,7 +195,7 @@ def _plan_for_observable_type(
     targets = result.targets if result.targets is not None else list(range(num_qubits))
 
     rotation_ops: list[RotationOp] = []
-    qubit_bases: dict[int, str] = {}
+    qubit_bases: dict[int, Hashable] = {}
 
     if len(observable) == 1 and isinstance(observable[0], str):
         basis = _OBSERVABLE_TO_BASIS.get(observable[0].lower(), observable[0].lower())
@@ -187,8 +220,9 @@ def _plan_for_observable_type(
                     raise ValueError("More observables than target qubits in result type pragma.")
                 obs_targets = targets[obs_idx : obs_idx + num_qubits_for_obs]
                 rotation_ops.extend(_rotation_gates_for_hermitian(obs, obs_targets))
+                h_key = _hermitian_key(obs)
                 for t in obs_targets:
-                    qubit_bases[t] = "hermitian"
+                    qubit_bases[t] = h_key
                 obs_idx += num_qubits_for_obs
 
         if obs_idx != len(targets):
@@ -215,10 +249,14 @@ class AddBasisRotationAndMeasurement(TransformationPass):
     This pass should run before transpilation so that added rotation gates are
     compiled to the device's native gate set and qubit layout is applied correctly.
 
+    If multiple result pragmas target the same qubit with the same observable, rotation
+    gates are applied only once (deduplicated). If different observables target the same
+    qubit, the pass raises ValueError since they cannot be measured simultaneously.
+
     Raises:
         ValueError: If the circuit already contains measurement operations.
         ValueError: If two result pragmas require different measurement bases on
-            the same qubit.
+            the same qubit (non-commuting observables).
         NotImplementedError: If basis-invariant result types (state_vector,
             density_matrix, amplitude) are present, as these are not yet supported
             end-to-end.
@@ -253,7 +291,7 @@ class AddBasisRotationAndMeasurement(TransformationPass):
 
         num_qubits = dag.num_qubits()
         all_rotation_ops: list[RotationOp] = []
-        all_qubit_bases: dict[int, str] = {}
+        all_qubit_bases: dict[int, Hashable] = {}
 
         for result in result_pragmas:
             if isinstance(result, _BASIS_INVARIANT_RESULT_TYPES):
@@ -264,14 +302,27 @@ class AddBasisRotationAndMeasurement(TransformationPass):
 
             if isinstance(result, _Z_BASIS_RESULT_TYPES):
                 qubits = _qubits_for_z_basis_type(result, num_qubits)
-                _check_basis_conflicts(all_qubit_bases, qubits, "z")
+                for qubit in qubits:
+                    _check_basis_conflict(all_qubit_bases, qubit, "z")
                 continue
 
             if isinstance(result, _OBSERVABLE_RESULT_TYPES):
                 rotation_ops, qubit_bases = _plan_for_observable_type(result, num_qubits)
+                new_qubits: set[int] = set()
                 for qubit, basis in qubit_bases.items():
-                    _check_basis_conflicts(all_qubit_bases, {qubit}, basis)
-                all_rotation_ops.extend(rotation_ops)
+                    if _check_basis_conflict(all_qubit_bases, qubit, basis):
+                        new_qubits.add(qubit)
+                # Only add rotation ops targeting qubits not yet rotated
+                for gate, target in rotation_ops:
+                    gate_qubits = set(target) if isinstance(target, list) else {target}
+                    if gate_qubits <= new_qubits:
+                        all_rotation_ops.append((gate, target))
+                    elif gate_qubits & new_qubits:
+                        raise ValueError(
+                            "Multi-qubit observable partially overlaps with previously "
+                            "committed qubits. Cannot apply rotation to a subset of "
+                            "an entangled observable's targets."
+                        )
                 continue
 
             raise ValueError(f"Unrecognized result type: {type(result).__name__}")

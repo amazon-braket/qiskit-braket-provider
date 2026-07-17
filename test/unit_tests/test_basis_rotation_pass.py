@@ -170,6 +170,37 @@ def test_single_observable_rotation_and_measurement(
             [("measure", [0], [0]), ("measure", [1], [1])],
         ),
         (
+            [
+                Expectation(observable=["i"], targets=[0]),
+                Expectation(observable=["x"], targets=[0]),
+            ],
+            2,
+            [("h", [0], []), ("measure", [0], [0])],
+        ),
+        (
+            [
+                Sample(observable=["x"], targets=[0]),
+                Expectation(observable=["x"], targets=[0]),
+            ],
+            2,
+            [("h", [0], []), ("measure", [0], [0])],
+        ),
+        (
+            [
+                Expectation(observable=["x"], targets=[0]),
+                Expectation(observable=["x", "y"], targets=[0, 1]),
+            ],
+            2,
+            [
+                ("h", [0], []),
+                ("z", [1], []),
+                ("s", [1], []),
+                ("h", [1], []),
+                ("measure", [0], [0]),
+                ("measure", [1], [1]),
+            ],
+        ),
+        (
             [],
             2,
             [],
@@ -184,6 +215,9 @@ def test_single_observable_rotation_and_measurement(
         "multiple_result_types",
         "non_monotonic_targets",
         "compatible_z_basis_no_conflict",
+        "identity_compatible_with_x",
+        "duplicate_observable_deduplicates",
+        "partial_overlap_deduplicates_per_qubit",
         "empty_pragmas_no_ops",
     ],
 )
@@ -318,14 +352,67 @@ def test_basis_invariant_raises_not_implemented(pragmas: list):
             ],
             2,
         ),
+        (
+            [
+                Expectation(
+                    observable=[[[[0, 0], [1, 0]], [[1, 0], [0, 0]]]],
+                    targets=[0],
+                ),
+                Expectation(
+                    observable=[[[[1, 0], [0, 0]], [[0, 0], [-1, 0]]]],
+                    targets=[0],
+                ),
+            ],
+            2,
+        ),
+        (
+            [
+                Expectation(observable=["x"], targets=[0]),
+                Expectation(observable=["z", "y"], targets=[0, 1]),
+            ],
+            2,
+        ),
+        (
+            [
+                Expectation(
+                    observable=[
+                        [
+                            [[0, 0], [1, 0], [0, 0], [0, 0]],
+                            [[1, 0], [0, 0], [0, 0], [0, 0]],
+                            [[0, 0], [0, 0], [0, 0], [-1, 0]],
+                            [[0, 0], [0, 0], [-1, 0], [0, 0]],
+                        ]
+                    ],
+                    targets=[0, 1],
+                ),
+                Expectation(
+                    observable=[
+                        [
+                            [[0, 0], [1, 0], [0, 0], [0, 0]],
+                            [[1, 0], [0, 0], [0, 0], [0, 0]],
+                            [[0, 0], [0, 0], [0, 0], [-1, 0]],
+                            [[0, 0], [0, 0], [-1, 0], [0, 0]],
+                        ]
+                    ],
+                    targets=[0, 2],
+                ),
+            ],
+            3,
+        ),
     ],
-    ids=["x_vs_y_same_qubit", "z_basis_vs_x_same_qubit"],
+    ids=[
+        "x_vs_y_same_qubit",
+        "z_basis_vs_x_same_qubit",
+        "different_hermitians_same_qubit",
+        "tensor_product_conflicts_with_prior",
+        "hermitian_partial_overlap",
+    ],
 )
 def test_conflicting_bases_raises_error(pragmas: list, num_qubits: int):
     """Conflicting measurement bases on the same qubit should raise ValueError."""
     qc = _circuit_with_result_pragmas(num_qubits, pragmas)
 
-    with pytest.raises(ValueError, match="Conflicting measurement bases"):
+    with pytest.raises(ValueError, match=r"(Conflicting measurement bases|partially overlaps)"):
         _run_pragma_handling_pass(qc)
 
 

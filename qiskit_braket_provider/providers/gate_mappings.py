@@ -261,8 +261,9 @@ _Z_BASIS_RESULT_TYPES = (Probability,)
 _OBSERVABLE_RESULT_TYPES = (Expectation, Sample, Variance)
 _OBSERVABLE_TO_BASIS = {
     "z": "z",
-    "i": "z",
+    "i": "i",
     "x": "x",
     "y": "y",
     "h": "h",
 }
+_IDENTITY_BASIS = "i"
