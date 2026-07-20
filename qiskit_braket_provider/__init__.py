@@ -1,6 +1,6 @@
 """Qiskit-Braket provider."""
 
-from ._version import __version__  # noqa: F401
+from ._version import __version__  # ruff:ignore[unused-import]
 from .providers import (
     AmazonBraketTask as AmazonBraketTask,
 )
