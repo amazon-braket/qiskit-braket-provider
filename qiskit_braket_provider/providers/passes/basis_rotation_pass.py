@@ -21,31 +21,10 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _OBSERVABLE_RESULT_TYPES,
     _OBSERVABLE_TO_BASIS,
     _Z_BASIS_RESULT_TYPES,
+    _reverse_endianness,
 )
 
 RotationOp = tuple[Gate, int | list[int]]
-
-
-def _reverse_endianness(matrix: np.ndarray) -> np.ndarray:
-    """Reverse qubit endianness of a matrix (Braket big-endian to Qiskit little-endian).
-
-    For single-qubit matrices this is a no-op. For multi-qubit matrices, the tensor
-    factor ordering is reversed so q[0] becomes LSB (Qiskit convention) instead of
-    MSB (Braket convention).
-
-    Args:
-        matrix: Square matrix of dimension 2^n x 2^n.
-
-    Returns:
-        Matrix with reversed qubit ordering.
-    """
-    n_q = int(np.log2(matrix.shape[0]))
-    if n_q <= 1:
-        return matrix
-    return np.transpose(
-        matrix.reshape([2] * n_q * 2),
-        list(range(n_q))[::-1] + list(range(n_q, 2 * n_q))[::-1],
-    ).reshape((2**n_q, 2**n_q))
 
 
 def _hermitian_key(matrix: list) -> Hashable:
@@ -86,7 +65,9 @@ def _rotation_gates_for_observable(observable: str, target: int) -> list[Rotatio
             raise ValueError(f"Unknown observable '{observable}' in result type pragma.")
 
 
-def _rotation_gates_for_hermitian(matrix: list, targets: list[int]) -> list[RotationOp]:
+def _rotation_gates_for_hermitian(
+    matrix: list, targets: list[int]
+) -> tuple[list[RotationOp], np.ndarray]:
     """Compute rotation gates for a Hermitian observable from its eigenvectors.
 
     The resulting unitary is endianness-corrected from Braket's big-endian convention
@@ -98,7 +79,8 @@ def _rotation_gates_for_hermitian(matrix: list, targets: list[int]) -> list[Rota
         targets: Qubit indices the unitary should be applied to.
 
     Returns:
-        List of (gate, targets) tuples.
+        Tuple of (rotation_ops, eigenvalues) where eigenvalues are in ascending order
+        as returned by np.linalg.eigh. Measurement bit i corresponds to eigenvalue[i].
 
     Raises:
         ValueError: If the matrix cannot be parsed or is not a valid Hermitian matrix.
@@ -108,9 +90,9 @@ def _rotation_gates_for_hermitian(matrix: list, targets: list[int]) -> list[Rota
     except (IndexError, TypeError, ValueError) as e:
         raise ValueError(f"Invalid Hermitian matrix format in result type pragma: {e}") from e
     np_matrix = _reverse_endianness(np_matrix)
-    _eigenvalues, eigenvectors = np.linalg.eigh(np_matrix)
+    eigenvalues, eigenvectors = np.linalg.eigh(np_matrix)
     unitary = eigenvectors.conj().T
-    return [(UnitaryGate(unitary), targets)]
+    return [(UnitaryGate(unitary), targets)], eigenvalues
 
 
 def _qubits_for_z_basis_type(result: Probability, num_qubits: int) -> set[int]:
@@ -176,7 +158,7 @@ def _check_basis_conflict(
 
 def _plan_for_observable_type(
     result: Expectation | Sample | Variance, num_qubits: int
-) -> tuple[list[RotationOp], dict[int, Hashable]]:
+) -> tuple[list[RotationOp], dict[int, Hashable], np.ndarray | None]:
     """Compute the rotation/measurement plan for an observable result type.
 
     Args:
@@ -184,8 +166,10 @@ def _plan_for_observable_type(
         num_qubits: Total number of qubits in the circuit.
 
     Returns:
-        Tuple of (rotation_ops, qubit_bases) where qubit_bases maps qubit index
-        to a hashable basis key identifying the observable.
+        Tuple of (rotation_ops, qubit_bases, eigenvalues) where qubit_bases maps
+        qubit index to a hashable basis key identifying the observable, and
+        eigenvalues is the array from eigh for Hermitian observables (None for
+        Pauli-only observables).
 
     Raises:
         ValueError: If a hermitian matrix size is not a power of 2, or if
@@ -194,8 +178,12 @@ def _plan_for_observable_type(
     observable = result.observable
     targets = result.targets if result.targets is not None else list(range(num_qubits))
 
+    if len(set(targets)) != len(targets):
+        raise ValueError(f"All targets in a result-type pragma must be unique: {targets}")
+
     rotation_ops: list[RotationOp] = []
     qubit_bases: dict[int, Hashable] = {}
+    eigenvalues: np.ndarray | None = None
 
     if len(observable) == 1 and isinstance(observable[0], str):
         basis = _OBSERVABLE_TO_BASIS.get(observable[0].lower(), observable[0].lower())
@@ -219,7 +207,8 @@ def _plan_for_observable_type(
                 if obs_idx + num_qubits_for_obs > len(targets):
                     raise ValueError("More observables than target qubits in result type pragma.")
                 obs_targets = targets[obs_idx : obs_idx + num_qubits_for_obs]
-                rotation_ops.extend(_rotation_gates_for_hermitian(obs, obs_targets))
+                hermitian_ops, eigenvalues = _rotation_gates_for_hermitian(obs, obs_targets)
+                rotation_ops.extend(hermitian_ops)
                 h_key = _hermitian_key(obs)
                 for t in obs_targets:
                     qubit_bases[t] = h_key
@@ -228,7 +217,7 @@ def _plan_for_observable_type(
         if obs_idx != len(targets):
             raise ValueError("Fewer observables than target qubits in result type pragma.")
 
-    return rotation_ops, qubit_bases
+    return rotation_ops, qubit_bases, eigenvalues
 
 
 class AddBasisRotationAndMeasurement(TransformationPass):
@@ -292,8 +281,9 @@ class AddBasisRotationAndMeasurement(TransformationPass):
         num_qubits = dag.num_qubits()
         all_rotation_ops: list[RotationOp] = []
         all_qubit_bases: dict[int, Hashable] = {}
+        pragma_eigenvalues: dict[int, np.ndarray] = {}
 
-        for result in result_pragmas:
+        for pragma_idx, result in enumerate(result_pragmas):
             if isinstance(result, _BASIS_INVARIANT_RESULT_TYPES):
                 raise NotImplementedError(
                     f"{type(result).__name__} result types are not yet supported "
@@ -307,7 +297,11 @@ class AddBasisRotationAndMeasurement(TransformationPass):
                 continue
 
             if isinstance(result, _OBSERVABLE_RESULT_TYPES):
-                rotation_ops, qubit_bases = _plan_for_observable_type(result, num_qubits)
+                rotation_ops, qubit_bases, eigenvalues = _plan_for_observable_type(
+                    result, num_qubits
+                )
+                if eigenvalues is not None:
+                    pragma_eigenvalues[pragma_idx] = eigenvalues
                 new_qubits: set[int] = set()
                 for qubit, basis in qubit_bases.items():
                     if _check_basis_conflict(all_qubit_bases, qubit, basis):
@@ -343,5 +337,8 @@ class AddBasisRotationAndMeasurement(TransformationPass):
             qubit: dag.clbits.index(pragma_clbits[idx])
             for idx, qubit in enumerate(sorted(all_qubit_bases))
         }
+
+        if pragma_eigenvalues:
+            dag.metadata["braket_pragma_eigenvalues"] = pragma_eigenvalues
 
         return dag

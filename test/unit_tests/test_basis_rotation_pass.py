@@ -205,6 +205,20 @@ def test_single_observable_rotation_and_measurement(
             2,
             [],
         ),
+        (
+            [
+                Sample(
+                    observable=[[[[0, 0], [1, 0]], [[1, 0], [0, 0]]]],
+                    targets=[0],
+                ),
+                Expectation(
+                    observable=[[[[0, 0], [1, 0]], [[1, 0], [0, 0]]]],
+                    targets=[0],
+                ),
+            ],
+            2,
+            [("unitary", [0], []), ("measure", [0], [0])],
+        ),
     ],
     ids=[
         "tensor_product_x_y",
@@ -219,6 +233,7 @@ def test_single_observable_rotation_and_measurement(
         "duplicate_observable_deduplicates",
         "partial_overlap_deduplicates_per_qubit",
         "empty_pragmas_no_ops",
+        "same_hermitian_deduplicates",
     ],
 )
 def test_multi_qubit_cases(pragmas: list, num_qubits: int, expected_ops: list):
@@ -251,6 +266,38 @@ def test_hermitian_observable_applies_unitary():
     observable = np.array([[0, -1j], [1j, 0]])
     diagonalized = unitary @ observable @ unitary.conj().T
     assert np.allclose(diagonalized, np.diag(np.diag(diagonalized)))
+
+    eigenvalues = result.metadata["braket_pragma_eigenvalues"][0]
+    assert np.allclose(sorted(eigenvalues), [-1.0, 1.0])
+
+
+def test_hermitian_eigenvalues_stored_in_metadata():
+    """Eigenvalues from eigh are stored in metadata for downstream consumption."""
+    x_matrix = [[[0, 0], [1, 0]], [[1, 0], [0, 0]]]
+    z_matrix = [[[1, 0], [0, 0]], [[0, 0], [-1, 0]]]
+    pragmas = [
+        Expectation(observable=["y"], targets=[1]),
+        Expectation(observable=[x_matrix], targets=[0]),
+        Expectation(observable=[z_matrix], targets=[2]),
+    ]
+    qc = _circuit_with_result_pragmas(3, pragmas)
+
+    result = _run_pragma_handling_pass(qc)
+
+    eigen_meta = result.metadata["braket_pragma_eigenvalues"]
+    assert 0 not in eigen_meta  # Pauli 'y' has no eigenvalues stored
+    assert np.allclose(sorted(eigen_meta[1]), [-1.0, 1.0])  # X eigenvalues
+    assert np.allclose(sorted(eigen_meta[2]), [-1.0, 1.0])  # Z eigenvalues
+
+
+def test_pauli_only_no_eigenvalues_metadata():
+    """Pauli-only pragmas should not produce braket_pragma_eigenvalues in metadata."""
+    pragmas = [Expectation(observable=["x"], targets=[0])]
+    qc = _circuit_with_result_pragmas(2, pragmas)
+
+    result = _run_pragma_handling_pass(qc)
+
+    assert "braket_pragma_eigenvalues" not in result.metadata
 
 
 def test_hermitian_multi_qubit_endianness():
@@ -478,6 +525,12 @@ def test_conflicting_bases_raises_error(pragmas: list, num_qubits: int):
             "Unrecognized result type",
             ValueError,
         ),
+        (
+            [Expectation(observable=["y"], targets=[0, 0])],
+            2,
+            "must be unique",
+            ValueError,
+        ),
     ],
     ids=[
         "double_measurement",
@@ -486,6 +539,7 @@ def test_conflicting_bases_raises_error(pragmas: list, num_qubits: int):
         "hermitian_exceeds_targets",
         "fewer_observables_than_targets",
         "unrecognized_result_type",
+        "duplicate_targets",
     ],
 )
 def test_pass_raises_errors(pragmas: list, num_qubits: int, match: str, error_type: type):
