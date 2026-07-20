@@ -185,7 +185,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         self,
         name: str,
         symbol_type: ClassicalType | type,
-        value: Any = None,  # noqa: ANN401
+        value: Any = None,  # ruff:ignore[any-type]
         const: bool = False,
     ) -> None:
         """Override to add classical bits to the Qiskit circuit when declared.
@@ -218,7 +218,7 @@ class _QiskitProgramContext(AbstractProgramContext):
     def is_builtin_gate(self, name: str) -> bool:
         return name in _BRAKET_GATE_NAME_TO_QISKIT_GATE
 
-    def add_phase_instruction(self, target: int | list[int], phase_value: float) -> None:  # noqa: ARG002
+    def add_phase_instruction(self, target: int | list[int], phase_value: float) -> None:  # ruff:ignore[unused-method-argument]
         self._active_circuit.global_phase += phase_value
 
     def add_gate_instruction(
@@ -386,7 +386,7 @@ class _QiskitProgramContext(AbstractProgramContext):
             return True
         return super().is_mcm_dependent(expression)
 
-    def iter_classical_scopes(self, expression: Expression):  # noqa: ARG002
+    def iter_classical_scopes(self, expression: Expression):  # ruff:ignore[unused-method-argument]
         """Yield once since Qiskit circuit building doesn't do per-path branching."""
         yield
 
@@ -544,7 +544,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         while_op = WhileLoopOp(resolved_condition, body)
         main.append(while_op, main.qubits, main.clbits)
 
-    def _evaluate_expression(self, expression: Expression | list[Expression]) -> Any:  # noqa: ANN401
+    def _evaluate_expression(self, expression: Expression | list[Expression]) -> Any:  # ruff:ignore[any-type]
         """Lightweight expression evaluator for loop conditions and ranges."""
         match expression:
             case (
