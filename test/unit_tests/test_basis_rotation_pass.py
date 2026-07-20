@@ -267,12 +267,12 @@ def test_hermitian_observable_applies_unitary():
     diagonalized = unitary @ observable @ unitary.conj().T
     assert np.allclose(diagonalized, np.diag(np.diag(diagonalized)))
 
-    eigenvalues = result.metadata["braket_pragma_eigenvalues"][0]
+    eigenvalues = result.metadata["braket_pragma_eigenvalues"][0,]
     assert np.allclose(sorted(eigenvalues), [-1.0, 1.0])
 
 
 def test_hermitian_eigenvalues_stored_in_metadata():
-    """Eigenvalues from eigh are stored in metadata for downstream consumption."""
+    """Eigenvalues from eigh are stored in metadata keyed by qubit tuple."""
     x_matrix = [[[0, 0], [1, 0]], [[1, 0], [0, 0]]]
     z_matrix = [[[1, 0], [0, 0]], [[0, 0], [-1, 0]]]
     pragmas = [
@@ -285,9 +285,9 @@ def test_hermitian_eigenvalues_stored_in_metadata():
     result = _run_pragma_handling_pass(qc)
 
     eigen_meta = result.metadata["braket_pragma_eigenvalues"]
-    assert 0 not in eigen_meta  # Pauli 'y' has no eigenvalues stored
-    assert np.allclose(sorted(eigen_meta[1]), [-1.0, 1.0])  # X eigenvalues
-    assert np.allclose(sorted(eigen_meta[2]), [-1.0, 1.0])  # Z eigenvalues
+    assert (1,) not in eigen_meta  # Pauli 'y' has no eigenvalues stored
+    assert np.allclose(sorted(eigen_meta[0,]), [-1.0, 1.0])  # X eigenvalues
+    assert np.allclose(sorted(eigen_meta[2,]), [-1.0, 1.0])  # Z eigenvalues
 
 
 def test_pauli_only_no_eigenvalues_metadata():
@@ -298,6 +298,20 @@ def test_pauli_only_no_eigenvalues_metadata():
     result = _run_pragma_handling_pass(qc)
 
     assert "braket_pragma_eigenvalues" not in result.metadata
+
+
+def test_hermitian_tensor_product_eigenvalues():
+    """Two distinct Hermitian factors in a tensor product both have eigenvalues stored."""
+    x_matrix = [[[0, 0], [1, 0]], [[1, 0], [0, 0]]]
+    diag_matrix = [[[2, 0], [0, 0]], [[0, 0], [5, 0]]]
+    pragmas = [Expectation(observable=[x_matrix, diag_matrix], targets=[0, 1])]
+    qc = _circuit_with_result_pragmas(2, pragmas)
+
+    result = _run_pragma_handling_pass(qc)
+
+    eigen_meta = result.metadata["braket_pragma_eigenvalues"]
+    assert np.allclose(sorted(eigen_meta[0,]), [-1.0, 1.0])
+    assert np.allclose(sorted(eigen_meta[1,]), [2.0, 5.0])
 
 
 def test_hermitian_multi_qubit_endianness():

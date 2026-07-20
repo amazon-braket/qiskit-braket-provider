@@ -158,7 +158,7 @@ def _check_basis_conflict(
 
 def _plan_for_observable_type(
     result: Expectation | Sample | Variance, num_qubits: int
-) -> tuple[list[RotationOp], dict[int, Hashable], np.ndarray | None]:
+) -> tuple[list[RotationOp], dict[int, Hashable], dict[tuple[int, ...], np.ndarray]]:
     """Compute the rotation/measurement plan for an observable result type.
 
     Args:
@@ -166,10 +166,10 @@ def _plan_for_observable_type(
         num_qubits: Total number of qubits in the circuit.
 
     Returns:
-        Tuple of (rotation_ops, qubit_bases, eigenvalues) where qubit_bases maps
-        qubit index to a hashable basis key identifying the observable, and
-        eigenvalues is the array from eigh for Hermitian observables (None for
-        Pauli-only observables).
+        Tuple of (rotation_ops, qubit_bases, eigenvalues_by_qubits) where:
+        - qubit_bases maps qubit index to a hashable basis key
+        - eigenvalues_by_qubits maps qubit tuples to their Hermitian eigenvalue
+          arrays (empty dict for Pauli-only observables)
 
     Raises:
         ValueError: If a hermitian matrix size is not a power of 2, or if
@@ -183,7 +183,7 @@ def _plan_for_observable_type(
 
     rotation_ops: list[RotationOp] = []
     qubit_bases: dict[int, Hashable] = {}
-    eigenvalues: np.ndarray | None = None
+    eigenvalues_by_qubits: dict[tuple[int, ...], np.ndarray] = {}
 
     if len(observable) == 1 and isinstance(observable[0], str):
         basis = _OBSERVABLE_TO_BASIS.get(observable[0].lower(), observable[0].lower())
@@ -209,6 +209,7 @@ def _plan_for_observable_type(
                 obs_targets = targets[obs_idx : obs_idx + num_qubits_for_obs]
                 hermitian_ops, eigenvalues = _rotation_gates_for_hermitian(obs, obs_targets)
                 rotation_ops.extend(hermitian_ops)
+                eigenvalues_by_qubits[tuple(obs_targets)] = eigenvalues
                 h_key = _hermitian_key(obs)
                 for t in obs_targets:
                     qubit_bases[t] = h_key
@@ -217,7 +218,7 @@ def _plan_for_observable_type(
         if obs_idx != len(targets):
             raise ValueError("Fewer observables than target qubits in result type pragma.")
 
-    return rotation_ops, qubit_bases, eigenvalues
+    return rotation_ops, qubit_bases, eigenvalues_by_qubits
 
 
 class AddBasisRotationAndMeasurement(TransformationPass):
@@ -281,9 +282,9 @@ class AddBasisRotationAndMeasurement(TransformationPass):
         num_qubits = dag.num_qubits()
         all_rotation_ops: list[RotationOp] = []
         all_qubit_bases: dict[int, Hashable] = {}
-        pragma_eigenvalues: dict[int, np.ndarray] = {}
+        all_eigenvalues: dict[tuple[int, ...], np.ndarray] = {}
 
-        for pragma_idx, result in enumerate(result_pragmas):
+        for result in result_pragmas:
             if isinstance(result, _BASIS_INVARIANT_RESULT_TYPES):
                 raise NotImplementedError(
                     f"{type(result).__name__} result types are not yet supported "
@@ -297,11 +298,12 @@ class AddBasisRotationAndMeasurement(TransformationPass):
                 continue
 
             if isinstance(result, _OBSERVABLE_RESULT_TYPES):
-                rotation_ops, qubit_bases, eigenvalues = _plan_for_observable_type(
+                rotation_ops, qubit_bases, eigenvalues_by_qubits = _plan_for_observable_type(
                     result, num_qubits
                 )
-                if eigenvalues is not None:
-                    pragma_eigenvalues[pragma_idx] = eigenvalues
+                for qubit_group, eigenvalues in eigenvalues_by_qubits.items():
+                    if qubit_group not in all_eigenvalues:
+                        all_eigenvalues[qubit_group] = eigenvalues
                 new_qubits: set[int] = set()
                 for qubit, basis in qubit_bases.items():
                     if _check_basis_conflict(all_qubit_bases, qubit, basis):
@@ -338,7 +340,7 @@ class AddBasisRotationAndMeasurement(TransformationPass):
             for idx, qubit in enumerate(sorted(all_qubit_bases))
         }
 
-        if pragma_eigenvalues:
-            dag.metadata["braket_pragma_eigenvalues"] = pragma_eigenvalues
+        if all_eigenvalues:
+            dag.metadata["braket_pragma_eigenvalues"] = all_eigenvalues
 
         return dag
