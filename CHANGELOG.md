@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.19.0 (2026-07-21)
+
+### Features
+
+ * add basis rotation pass
+
+### Bug Fixes and Other Changes
+
+ * fix errors due to new ruff version
+
 ## v0.18.1 (2026-07-16)
 
 ### Bug Fixes and Other Changes
