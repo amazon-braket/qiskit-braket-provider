@@ -63,6 +63,16 @@ from test.unit_tests.mocks import (
 
 _EPS = 1e-10  # global variable used to chop very small numbers to zero
 
+
+def _innermost_scoped_body(circ: QuantumCircuit) -> QuantumCircuit:
+    """Descend into the first scoped op recursively; return the innermost body."""
+    for instr in circ.data:
+        blocks = getattr(instr.operation, "blocks", ()) or ()
+        if blocks and isinstance(blocks[0], QuantumCircuit):
+            return _innermost_scoped_body(blocks[0])
+    return circ
+
+
 qiskit_ionq_gates: list[QiskitGate] = [
     ionq_gates.GPIGate(Parameter("φ")),
     ionq_gates.GPI2Gate(Parameter("φ")),
@@ -85,7 +95,7 @@ _BRAKET_SUPPORTED_NOISE_INSTANCES = {
 
 
 def check_to_braket_unitary_correct(
-    qiskit_circuit: QuantumCircuit, optimization_level: int | None = None
+    qiskit_circuit: QuantumCircuit, optimization_level: int = 0
 ) -> bool:
     """Checks if endianness-reversed Qiskit circuit matrix matches Braket counterpart"""
     result = to_braket(qiskit_circuit, optimization_level=optimization_level)
@@ -463,6 +473,12 @@ class TestAdapter(TestCase):
                 "ms",
                 "unitary",
                 "kraus",
+                "xy",
+                "cphaseshift00",
+                "cphaseshift01",
+                "cphaseshift10",
+                "pswap",
+                "cv",
             ]
         }
 
@@ -950,14 +966,16 @@ class TestAdapter(TestCase):
         with pytest.raises(ValueError, match=r"Please rename your parameters."):
             to_braket(qiskit_circuit)
 
-    @patch("qiskit_braket_provider.providers.compilation.transpile")
-    def test_invalid_ctrl_state(self, mock_transpile: MagicMock):
+    @patch("qiskit_braket_provider.providers.compilation.generate_preset_pass_manager")
+    def test_invalid_ctrl_state(self, mock_gen_pm: MagicMock):
         """Tests that control states other than all 1s are rejected."""
         qiskit_circuit = QuantumCircuit(2)
         qiskit_circuit.h(0)
         qiskit_circuit.cx(0, 1, ctrl_state=0)
 
-        mock_transpile.return_value = [qiskit_circuit]
+        mock_pm = MagicMock()
+        mock_pm.run.return_value = [qiskit_circuit]
+        mock_gen_pm.return_value = mock_pm
         with pytest.raises(ValueError):
             to_braket(qiskit_circuit)
 
@@ -1755,6 +1773,174 @@ rx(sin(theta) + 2.0*phi) q[0];"""
         ]
         self.assertEqual({0, 1}, barrier_indices[0])
         self.assertEqual({0}, barrier_indices[1])
+
+    def test_braket_circuit_barrier_scoping_around_verbatim_box(self):
+        """Barriers land in the scope they were written in."""
+        circuit = (
+            Circuit()
+            .h(0)
+            .barrier([0])
+            .add_verbatim_box(Circuit().h(0).barrier([0, 1]).cnot(0, 1))
+            .barrier([1])
+            .h(1)
+        )
+        qc = to_qiskit(circuit, add_measurements=False)
+        ops = [(i.operation.name, [qc.find_bit(q).index for q in i.qubits]) for i in qc.data]
+        self.assertEqual(
+            ops,
+            [
+                ("h", [0]),
+                ("barrier", [0]),
+                ("box", [0, 1]),
+                ("barrier", [1]),
+                ("h", [1]),
+            ],
+        )
+        body = qc.data[2].operation.body
+        body_ops = [
+            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
+        ]
+        self.assertEqual(body_ops, [("h", [0]), ("barrier", [0, 1]), ("cx", [0, 1])])
+
+    def test_braket_circuit_bare_barrier_covers_all_qubits(self):
+        """Bare Circuit.barrier() (empty target) covers every qubit."""
+        circuit = Circuit().h(0).barrier().h(1)
+        qc = to_qiskit(circuit, add_measurements=False)
+        ops = [(i.operation.name, [qc.find_bit(q).index for q in i.qubits]) for i in qc.data]
+        self.assertEqual(ops, [("h", [0]), ("barrier", [0, 1]), ("h", [1])])
+
+    def test_braket_circuit_bare_barrier_inside_verbatim_box_covers_body_qubits(self):
+        """Bare barrier inside a verbatim box covers the box body's qubits."""
+        circuit = Circuit().add_verbatim_box(Circuit().h(0).barrier().cnot(0, 1))
+        qc = to_qiskit(circuit, add_measurements=False)
+        box = next(i for i in qc.data if i.operation.name == "box").operation
+        body = box.body
+        body_ops = [
+            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
+        ]
+        self.assertEqual(body_ops, [("h", [0]), ("barrier", [0, 1]), ("cx", [0, 1])])
+
+    def test_braket_circuit_bare_barrier_in_verbatim_box_with_qubit_outside_box(self):
+        """Bare barrier inside a verbatim box expands to all outer-circuit qubits."""
+        circuit = Circuit().add_verbatim_box(Circuit().h(0).barrier().cnot(0, 1)).h(2)
+        qc = to_qiskit(circuit, add_measurements=False)
+        box = next(i for i in qc.data if i.operation.name == "box").operation
+        body = box.body
+        body_ops = [
+            (i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data
+        ]
+        self.assertEqual(body_ops, [("h", [0]), ("barrier", [0, 1, 2]), ("cx", [0, 1])])
+
+
+def test_openqasm_bare_barrier_before_any_qubit_raises() -> None:
+    """Bare barrier before any qubit exists in the enclosing scope raises."""
+    qasm = "OPENQASM 3.0;\nbarrier;\nh $0;\n"
+    with pytest.raises(ValueError, match="Cannot add bare barrier to empty circuit"):
+        to_qiskit(qasm, add_measurements=False)
+
+
+@pytest.mark.parametrize(
+    "qasm,expected_num_qubits,expected_ops",
+    [
+        pytest.param(
+            "OPENQASM 3.0;\nh $0;\nbarrier $0, $2;\nh $4;\n",
+            5,
+            [("h", [0]), ("barrier", [0, 2]), ("h", [4])],
+            id="explicit-target-frozen-at-emit-time",
+        ),
+        pytest.param(
+            "OPENQASM 3.0;\nh $0;\nbarrier;\nh $2;\n",
+            3,
+            [("h", [0]), ("barrier", [0, 1, 2]), ("h", [2])],
+            id="bare-covers-all-top-level-qubits",
+        ),
+    ],
+)
+def test_openqasm_top_level_barrier(
+    qasm: str, expected_num_qubits: int, expected_ops: list[tuple[str, list[int]]]
+) -> None:
+    """Top-level barriers: explicit targets stay frozen, bare barriers cover every top-level qubit."""
+    qc = to_qiskit(qasm, add_measurements=False)
+    assert qc.num_qubits == expected_num_qubits
+    ops = [(i.operation.name, [qc.find_bit(q).index for q in i.qubits]) for i in qc.data]
+    assert ops == expected_ops
+
+
+@pytest.mark.parametrize(
+    "qasm,expected",
+    [
+        pytest.param(
+            "OPENQASM 3.0;\nbit[1] c;\nqubit[2] q;\nh q[0];\n"
+            "c[0] = measure q[0];\n"
+            "if (c[0]) { h q[1]; barrier; }\n",
+            [("h", [1]), ("barrier", [0, 1])],
+            id="qubit-used-inside-if-before-barrier",
+        ),
+        pytest.param(
+            "OPENQASM 3.0;\nbit[1] c;\nqubit[1] q;\nh q[0];\n"
+            "c[0] = measure q[0];\n"
+            "if (c[0]) { barrier; h $3; }\n",
+            [("barrier", [0, 1, 2, 3]), ("h", [3])],
+            id="qubit-added-inside-if-after-barrier",
+        ),
+        pytest.param(
+            "OPENQASM 3.0;\nbit[1] c;\nqubit[1] q;\nh q[0];\n"
+            "c[0] = measure q[0];\n"
+            "if (c[0]) { barrier; }\n"
+            "h $4;\n",
+            [("barrier", [0, 1, 2, 3, 4])],
+            id="qubit-added-outside-if-after-it-closes",
+        ),
+    ],
+)
+def test_openqasm_bare_barrier_in_if_body_late_binds_to_top_level_qubits(
+    qasm: str, expected: list[tuple[str, list[int]]]
+) -> None:
+    """Bare barrier inside an if body covers all top-level qubits at circuit
+    finalization, regardless of where the extra qubits are introduced."""
+    qc = to_qiskit(qasm, add_measurements=False)
+    body = _innermost_scoped_body(qc)
+    body_ops = [(i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data]
+    assert body_ops == expected
+
+
+@pytest.mark.parametrize(
+    "wrapper",
+    [
+        pytest.param("#pragma braket verbatim\nbox {\nBODY\n}\n", id="verbatim-box"),
+        pytest.param("for uint i in [0:1] {\nBODY\n}\n", id="for"),
+        pytest.param("while (c[0] == 1) {\nBODY\n}\n", id="while"),
+        pytest.param("for uint i in [0:1] {\nfor uint j in [0:1] {\nBODY\n}\n}\n", id="for-in-for"),
+        pytest.param("if (c[0]) {\nif (c[0]) {\nBODY\n}\n}\n", id="if-in-if"),
+        pytest.param("while (c[0] == 1) {\nif (c[0]) {\nBODY\n}\n}\n", id="if-in-while"),
+    ],
+)
+def test_openqasm_bare_barrier_in_scoped_body_covers_top_level_qubits(wrapper: str) -> None:
+    """Bare barrier inside a scoped body late-binds to all top-level qubits,
+    including qubits added at the outer scope after the scope closes."""
+    preamble = "OPENQASM 3.0;\nbit[1] c;\nqubit[2] q;\nh q[0];\nc[0] = measure q[0];\n"
+    body_stmt = "h q[0]; barrier; cnot q[0], q[1];"
+    trailing = "h $5;\n"
+    qasm = preamble + wrapper.replace("BODY", body_stmt) + trailing
+    qc = to_qiskit(qasm, add_measurements=False)
+    body = _innermost_scoped_body(qc)
+    body_ops = [(i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data]
+    assert body_ops == [("h", [0]), ("barrier", [0, 1, 2, 3, 4, 5]), ("cx", [0, 1])]
+
+
+def test_openqasm_explicit_target_barrier_in_scoped_body_stays_narrow() -> None:
+    """Explicit-target barriers inside a scoped body stay on their targets even when
+    the enclosing scope is widened to cover all top-level qubits."""
+    qasm = (
+        "OPENQASM 3.0;\nqubit[2] q;\n"
+        "for uint i in [0:1] { h q[0]; barrier q[0]; cnot q[0], q[1]; }\n"
+        "barrier;\n"
+        "h $5;\n"
+    )
+    qc = to_qiskit(qasm, add_measurements=False)
+    body = _innermost_scoped_body(qc)
+    body_ops = [(i.operation.name, [body.find_bit(q).index for q in i.qubits]) for i in body.data]
+    assert body_ops == [("h", [0]), ("barrier", [0]), ("cx", [0, 1])]
 
 
 class TestThereAndBackAgain(TestCase):

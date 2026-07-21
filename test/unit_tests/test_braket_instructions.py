@@ -2,13 +2,28 @@
 
 import unittest
 
-from qiskit import QuantumCircuit
+import numpy as np
+import pytest
+from qiskit import QuantumCircuit, transpile
 from qiskit.circuit import CircuitInstruction, Parameter, QuantumRegister, Qubit
+from qiskit.quantum_info import Operator
 
+from braket.circuits import Circuit
+from braket.circuits import gates as braket_gates
 from braket.experimental_capabilities import EnableExperimentalCapability
-from qiskit_braket_provider import to_braket
+from qiskit_braket_provider import to_braket, to_qiskit
 from qiskit_braket_provider.providers.adapter import _default_target
-from qiskit_braket_provider.providers.braket_instructions import CCPRx, MeasureFF
+from qiskit_braket_provider.providers.braket_instructions import (
+    CV,
+    XY,
+    CCPRx,
+    CPhaseShift00,
+    CPhaseShift01,
+    CPhaseShift10,
+    MeasureFF,
+    PSwap,
+    _CPhaseShift,
+)
 
 
 class TestIqmExperimentalCapabilities(unittest.TestCase):
@@ -102,6 +117,71 @@ class TestIqmExperimentalCapabilities(unittest.TestCase):
         assert braket_circuit.instructions[1].operator.name == "CCPRx"
         assert braket_circuit.instructions[1].operator.parameters == [0.5, 0.7, 0]
         assert braket_circuit.instructions[1].target == [0]
+
+
+@pytest.mark.parametrize(
+    ("qiskit_cls", "name", "params"),
+    [
+        (XY, "xy", (0.5,)),
+        (CPhaseShift00, "cphaseshift00", (0.5,)),
+        (CPhaseShift01, "cphaseshift01", (0.5,)),
+        (CPhaseShift10, "cphaseshift10", (0.5,)),
+        (PSwap, "pswap", (0.5,)),
+        (CV, "cv", ()),
+    ],
+    ids=["xy", "cphaseshift00", "cphaseshift01", "cphaseshift10", "pswap", "cv"],
+)
+def test_openqasm_round_trip_preserves_name_and_unitary(
+    qiskit_cls: type, name: str, params: tuple[float, ...]
+) -> None:
+    args = f"({params[0]})" if params else ""
+    qasm = f"OPENQASM 3.0;\n{name}{args} $0, $1;\n"
+    qc = to_qiskit(qasm)
+    assert isinstance(qc.data[0].operation, qiskit_cls)
+
+    braket_circuit = to_braket(qc)
+    braket_cls = getattr(braket_gates, qiskit_cls.__name__)
+    assert isinstance(braket_circuit.instructions[0].operator, braket_cls)
+
+    ref = Circuit.from_ir(qasm).to_unitary()
+    assert np.allclose(braket_circuit.to_unitary(), ref)
+    assert np.allclose(Operator(qc).reverse_qargs().data, ref)
+
+
+@pytest.mark.parametrize(
+    ("qiskit_cls", "name", "params"),
+    [
+        (XY, "xy", (0.5,)),
+        (CPhaseShift00, "cphaseshift00", (0.5,)),
+        (CPhaseShift01, "cphaseshift01", (0.5,)),
+        (CPhaseShift10, "cphaseshift10", (0.5,)),
+        (PSwap, "pswap", (0.5,)),
+        (CV, "cv", ()),
+    ],
+    ids=["xy", "cphaseshift00", "cphaseshift01", "cphaseshift10", "pswap", "cv"],
+)
+def test_transpile_to_basic_basis_preserves_unitary(
+    qiskit_cls: type, name: str, params: tuple[float, ...]
+) -> None:
+    qc = QuantumCircuit(2)
+    qc.append(qiskit_cls(*params), [0, 1])
+    tqc = transpile(qc, basis_gates=["u", "cx"], optimization_level=1)
+    assert not any(inst.operation.name == name for inst in tqc.data)
+    assert np.allclose(Operator(qc).to_matrix(), Operator(tqc).to_matrix())
+
+
+def test_direct_instantiation_of_abstract_base_raises() -> None:
+    with pytest.raises(TypeError):
+        _CPhaseShift(0.5)
+
+
+def test_to_qiskit_supports_iqm_classical_control() -> None:
+    """Regression test for to_qiskit on cc_prx and measure_ff."""
+    qasm = "OPENQASM 3.0;\nqubit[2] q;\nmeasure_ff(0) q[0];\ncc_prx(0.5, 0.7, 0) q[1];\n"
+    with EnableExperimentalCapability():
+        qc = to_qiskit(Circuit.from_ir(qasm), add_measurements=False)
+    assert isinstance(qc.data[0].operation, MeasureFF)
+    assert isinstance(qc.data[1].operation, CCPRx)
 
 
 if __name__ == "__main__":

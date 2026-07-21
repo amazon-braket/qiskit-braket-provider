@@ -12,6 +12,7 @@ from typing import Any
 
 from qiskit import QuantumCircuit
 from qiskit.circuit import (
+    Barrier,
     BoxOp,
     CircuitInstruction,
     Clbit,
@@ -26,7 +27,7 @@ from qiskit.circuit import (
 from sympy import Add, Expr, Mul, Pow, Symbol
 
 from braket.default_simulator.openqasm._helpers.arrays import convert_range_def_to_range
-from braket.default_simulator.openqasm._helpers.casting import cast_to
+from braket.default_simulator.openqasm._helpers.casting import cast_to, get_identifier_name
 from braket.default_simulator.openqasm._helpers.functions import (
     evaluate_binary_expression,
     evaluate_unary_expression,
@@ -54,6 +55,8 @@ from braket.default_simulator.openqasm.parser.openqasm_ast import (
 from braket.default_simulator.openqasm.program_context import (
     AbstractProgramContext,
 )
+from braket.ir.jaqcd import AdjointGradient
+from braket.ir.jaqcd.program_v1 import Results
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_VERBATIM_BOX_NAME,
@@ -117,6 +120,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._in_verbatim_box = False
         self._verbatim_box_name = verbatim_box_name
         self._clbit_offset: dict[str, int] = {}
+        self._result_types: list[Results] = []
 
     @property
     def _active_circuit(self) -> QuantumCircuit:
@@ -130,7 +134,29 @@ class _QiskitProgramContext(AbstractProgramContext):
                 "Unclosed verbatim box at end of program. "
                 "Every verbatim box start marker must have a matching end marker."
             )
-        return self._circuit_stack[0]
+        top = self._circuit_stack[0]
+        return self._finalize_scoped_bodies(top)
+
+    def add_result(self, result: Results) -> None:
+        """Store a parsed result type from a pragma.
+
+        Overrides AbstractProgramContext.add_result() to collect result type
+        pragmas as structured metadata that will be attached to the circuit.
+
+        Args:
+            result: The parsed result IR object (e.g., Expectation, Probability, Sample).
+
+        Raises:
+            NotImplementedError: If the result is an AdjointGradient type,
+                which is not supported by this pipeline.
+        """
+        if isinstance(result, AdjointGradient):
+            raise NotImplementedError(
+                "AdjointGradient result type is not supported in the Qiskit compilation pipeline."
+            )
+        self._result_types.append(result)
+        qc = self._circuit_stack[0]
+        qc.metadata["braket_result_pragmas"] = self._result_types
 
     def _push_scoped_circuit(self) -> QuantumCircuit:
         """Push an empty body circuit onto the stack that shares the parent's bit objects."""
@@ -159,7 +185,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         self,
         name: str,
         symbol_type: ClassicalType | type,
-        value: Any = None,  # noqa: ANN401
+        value: Any = None,  # ruff:ignore[any-type]
         const: bool = False,
     ) -> None:
         """Override to add classical bits to the Qiskit circuit when declared.
@@ -192,7 +218,7 @@ class _QiskitProgramContext(AbstractProgramContext):
     def is_builtin_gate(self, name: str) -> bool:
         return name in _BRAKET_GATE_NAME_TO_QISKIT_GATE
 
-    def add_phase_instruction(self, target: int | list[int], phase_value: float) -> None:  # noqa: ARG002
+    def add_phase_instruction(self, target: int | list[int], phase_value: float) -> None:  # ruff:ignore[unused-method-argument]
         self._active_circuit.global_phase += phase_value
 
     def add_gate_instruction(
@@ -227,20 +253,83 @@ class _QiskitProgramContext(AbstractProgramContext):
 
     def add_measure(
         self,
-        target: tuple[int],
+        target: tuple[int, ...],
         classical_targets: Sequence[int] | None = None,
         *,
-        classical_destination: Identifier | IndexedIdentifier | None = None,  # noqa: ARG002
+        classical_destination: Identifier | IndexedIdentifier | None = None,
     ) -> None:
-        active = self._active_circuit
+        if classical_destination is None:
+            self._ensure_qubit_capacity(target)
+            self._add_measure_into_loose_clbits(target)
+            return
+        name = get_identifier_name(classical_destination)
+        if name not in self._clbit_offset:
+            raise ValueError(f"Classical bit register {name!r} is not declared")
         self._ensure_qubit_capacity(target)
-        # this is to cover the edge case where a user measures a qubit without assigning it to a classical register
+        self._add_measure_into_register(target, classical_targets, self._clbit_offset[name])
+
+    def _add_measure_into_loose_clbits(self, target: tuple[int, ...]) -> None:
+        """Measure without a classical destination, synthesizing loose clbits to receive the results."""
+        active = self._active_circuit
         if active.num_clbits < len(target):
-            num_missing_clbits = len(target) - active.num_clbits
-            active.add_bits([Clbit() for _ in range(num_missing_clbits)])
+            active.add_bits([Clbit() for _ in range(len(target) - active.num_clbits)])
         for idx, qubit in enumerate(target):
-            index = classical_targets[idx] if classical_targets else idx
-            active.measure(qubit, index)
+            active.measure(qubit, idx)
+
+    def _add_measure_into_register(
+        self,
+        target: tuple[int, ...],
+        classical_targets: Sequence[int] | None,
+        offset: int,
+    ) -> None:
+        """Measure into a declared bit register at the given flat-clbit offset."""
+        active = self._active_circuit
+        for idx, qubit in enumerate(target):
+            local_index = classical_targets[idx] if classical_targets else idx
+            active.measure(qubit, offset + local_index)
+
+    def add_barrier(self, target: list[int] | None = None) -> None:
+        """Emit a barrier. Bare (empty target) barriers late-bind to cover
+        the top-level circuit's qubits."""
+        active = self._active_circuit
+        if target:
+            self._ensure_qubit_capacity(target)
+            active.barrier(target)
+            return
+        if active.num_qubits == 0:
+            raise ValueError("Cannot add bare barrier to empty circuit")
+        # Bare-barrier placeholder; resolved to top-level qubits by _finalize_scoped_bodies.
+        active.append(Barrier(0), (), ())
+
+    def _finalize_scoped_bodies(
+        self,
+        circ: QuantumCircuit,
+        top_qubits: tuple[Qubit, ...] | None = None,
+    ) -> QuantumCircuit:
+        """Rebuild circ: resolve bare-barrier placeholders and widen every scoped
+        body (verbatim BoxOp, IfElseOp, ForLoopOp, WhileLoopOp) to top_qubits,
+        recursing into nested scoped ops."""
+        if top_qubits is None:
+            top_qubits = tuple(circ.qubits)
+        new = circ.copy_empty_like()
+        for q in top_qubits:
+            if q not in new.qubits:
+                new.add_bits([q])
+        for instr in circ.data:
+            op = instr.operation
+            if isinstance(op, Barrier) and op.num_qubits == 0:
+                new.append(Barrier(len(top_qubits)), top_qubits, ())
+                continue
+            if isinstance(op, BoxOp) and op.label == self._verbatim_box_name:
+                bodies = [op.body]
+            elif isinstance(op, (IfElseOp, ForLoopOp, WhileLoopOp)):
+                bodies = list(op.blocks)
+            else:
+                new.append(op, instr.qubits, instr.clbits)
+                continue
+            new_bodies = [self._finalize_scoped_bodies(b, top_qubits) for b in bodies]
+            new.append(op.replace_blocks(new_bodies), tuple(top_qubits), instr.clbits)
+        return new
 
     def add_verbatim_marker(self, marker: VerbatimBoxDelimiter) -> None:
         """Handle verbatim box start/end markers.
@@ -297,7 +386,7 @@ class _QiskitProgramContext(AbstractProgramContext):
             return True
         return super().is_mcm_dependent(expression)
 
-    def iter_classical_scopes(self, expression: Expression):  # noqa: ARG002
+    def iter_classical_scopes(self, expression: Expression):  # ruff:ignore[unused-method-argument]
         """Yield once since Qiskit circuit building doesn't do per-path branching."""
         yield
 
@@ -455,7 +544,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         while_op = WhileLoopOp(resolved_condition, body)
         main.append(while_op, main.qubits, main.clbits)
 
-    def _evaluate_expression(self, expression: Expression | list[Expression]) -> Any:  # noqa: ANN401
+    def _evaluate_expression(self, expression: Expression | list[Expression]) -> Any:  # ruff:ignore[any-type]
         """Lightweight expression evaluator for loop conditions and ranges."""
         match expression:
             case (

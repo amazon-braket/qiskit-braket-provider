@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.19.0 (2026-07-21)
+
+### Features
+
+ * add basis rotation pass
+
+### Bug Fixes and Other Changes
+
+ * fix errors due to new ruff version
+
+## v0.18.1 (2026-07-16)
+
+### Bug Fixes and Other Changes
+
+ * preserve OpenQASM 3 barriers in to_qiskit
+ * barrier scope and bare-barrier handling in to_qiskit
+ * to_qiskit for IQM experimental operators (cc_prx, measure_ff)
+
+## v0.18.0 (2026-07-10)
+
+### Features
+
+ * changes in the context to parse result pragmas
+
+## v0.17.5 (2026-07-08)
+
+### Bug Fixes and Other Changes
+
+ * register Braket-native two-qubit gates in to_qiskit
+
+## v0.17.4 (2026-07-06)
+
+### Bug Fixes and Other Changes
+
+ * correctly write measures across multiple bit registers in to_qiskit
+
+## v0.17.3 (2026-06-30)
+
+### Bug Fixes and Other Changes
+
+ * update tests & tutorials to current Braket devices
+
 ## v0.17.2 (2026-06-29)
 
 ### Bug Fixes and Other Changes
