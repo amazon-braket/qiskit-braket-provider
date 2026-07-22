@@ -78,9 +78,7 @@ class ExtractVerbatimBoxes(TransformationPass):
             verbatim_boxes[label] = (node.op.blocks[0], [dag.find_bit(c).index for c in node.cargs])
             if node.cargs:
                 # Use a VerbatimPlaceholder that can carry both qubits and
-                # clbits. A plain Barrier cannot carry clbits, and the Rust
-                # substitute_node_with_dag panics when trying to route clbit
-                # wires through a barrier node that has no clbit edges.
+                # clbits. A plain Barrier cannot carry clbits.
                 placeholder = VerbatimPlaceholder(len(node.qargs), len(node.cargs), label=label)
                 dag.substitute_node(node, placeholder)
             else:
