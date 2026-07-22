@@ -1,6 +1,6 @@
 """Transpiler passes for preserving verbatim boxes through compilation."""
 
-from qiskit.circuit import Barrier, BoxOp, Instruction, QuantumCircuit
+from qiskit.circuit import Barrier, BoxOp, Instruction
 from qiskit.converters import circuit_to_dag
 from qiskit.dagcircuit import DAGCircuit
 from qiskit.transpiler.basepasses import TransformationPass
@@ -130,7 +130,7 @@ class RestoreVerbatimBoxes(TransformationPass):
                     f"Internal error: verbatim barrier '{label}' has no matching box. "
                     f"This is a bug in the verbatim pass pipeline."
                 )
-            box_circuit, clbit_indices = verbatim_boxes.pop(label)
+            box_circuit, _clbit_indices = verbatim_boxes.pop(label)
             box_dag = circuit_to_dag(box_circuit)
             if is_placeholder:
                 # Placeholder carries both qubits and clbits — map both.

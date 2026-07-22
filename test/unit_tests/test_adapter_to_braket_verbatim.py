@@ -795,7 +795,7 @@ def test_verbatim_box_preserves_non_contiguous_qubit_order():
     assert [out.find_bit(q).index for q in cx.qubits] == [2, 0]
 
 
-def _build_target_2q():
+def _build_target_2q() -> Target:
     """Helper to build a minimal 2-qubit target with rx/h/cz/measure."""
     target = Target(num_qubits=2)
     theta = Parameter("theta")
@@ -825,7 +825,7 @@ def _build_target_2q():
         ),
     ],
 )
-def test_verbatim_box_with_clbits_no_panic(compile_kwargs):
+def test_verbatim_box_with_clbits_no_panic(compile_kwargs: dict):
     """Verbatim BoxOp with clbits does not panic during extract/restore pipeline."""
     body = QuantumCircuit(2, 2)
     body.rx(0.5, 0)
@@ -862,7 +862,7 @@ def test_verbatim_box_with_clbits_no_panic(compile_kwargs):
         ),
     ],
 )
-def test_verbatim_box_with_mcm_preserves_order(compile_kwargs):
+def test_verbatim_box_with_mcm_preserves_order(compile_kwargs: dict):
     """Verbatim BoxOp with mid-circuit measurement preserves operation order.
 
     Ensures measurements inside verbatim boxes remain in the correct position
