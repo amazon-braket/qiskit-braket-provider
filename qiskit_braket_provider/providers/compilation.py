@@ -23,6 +23,9 @@ from qiskit_braket_provider.providers.passes import (
     ExtractVerbatimBoxes,
     RestoreVerbatimBoxes,
 )
+from qiskit_braket_provider.providers.passes.verbatim_passes import (
+    VerbatimPlaceholder,
+)
 from qiskit_braket_provider.providers.target import (
     _SubstitutedTarget,
     aws_device_to_target,
@@ -206,6 +209,13 @@ def _compile(
                 )
             )
         ):
+            if has_verbatim_boxes and target:
+                # Register the VerbatimPlaceholder with the target so the
+                # transpiler treats it as a known directive. On the basis_gates
+                # path this isn't needed since VerbatimPlaceholder uses name
+                # 'barrier' which is auto-allowed.
+                if "barrier" not in target.operation_names:
+                    target.add_instruction(VerbatimPlaceholder(1, 0), name="barrier")
             pm = generate_preset_pass_manager(
                 optimization_level=optimization_level,
                 basis_gates=list(basis_gates) if basis_gates else None,

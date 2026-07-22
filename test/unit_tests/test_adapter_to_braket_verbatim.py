@@ -2,10 +2,10 @@
 
 import pytest
 from qiskit import QuantumCircuit
-from qiskit.circuit import Barrier, BoxOp
-from qiskit.circuit.library import CXGate, HGate, Measure, XGate
+from qiskit.circuit import Barrier, BoxOp, Parameter
+from qiskit.circuit.library import CXGate, CZGate, HGate, Measure, RXGate, XGate
 from qiskit.converters import circuit_to_dag, dag_to_circuit
-from qiskit.transpiler import PassManager, Target
+from qiskit.transpiler import InstructionProperties, PassManager, Target
 from qiskit.transpiler.exceptions import TranspilerError
 from qiskit.transpiler.passes import Optimize1qGates
 
@@ -793,3 +793,93 @@ def test_verbatim_box_preserves_non_contiguous_qubit_order():
     out = _compile(qc, basis_gates={"cx"}).circuits[0]
     cx = next(i for i in out.data if i.operation.name == "cx")
     assert [out.find_bit(q).index for q in cx.qubits] == [2, 0]
+
+
+def _build_target_2q():
+    """Helper to build a minimal 2-qubit target with rx/h/cz/measure."""
+    target = Target(num_qubits=2)
+    theta = Parameter("theta")
+    target.add_instruction(RXGate(theta), {(i,): InstructionProperties() for i in range(2)})
+    target.add_instruction(HGate(), {(i,): InstructionProperties() for i in range(2)})
+    target.add_instruction(
+        CZGate(), {(0, 1): InstructionProperties(), (1, 0): InstructionProperties()}
+    )
+    target.add_instruction(Measure(), {(i,): InstructionProperties() for i in range(2)})
+    return target
+
+
+@pytest.mark.parametrize(
+    "compile_kwargs",
+    [
+        pytest.param(
+            {"target": _build_target_2q(), "optimization_level": 3, "seed_transpiler": 42},
+            id="target_opt3",
+        ),
+        pytest.param(
+            {
+                "basis_gates": ["rx", "cz", "h", "measure"],
+                "optimization_level": 3,
+                "seed_transpiler": 42,
+            },
+            id="basis_gates_opt3",
+        ),
+    ],
+)
+def test_verbatim_box_with_clbits_no_panic(compile_kwargs):
+    """Verbatim BoxOp with clbits does not panic during extract/restore pipeline."""
+    body = QuantumCircuit(2, 2)
+    body.rx(0.5, 0)
+    body.cz(0, 1)
+
+    qc = QuantumCircuit(2, 2)
+    qc.h(0)
+    qc.append(BoxOp(body, label=VERBATIM_LABEL), qc.qubits, qc.clbits)
+    qc.measure(0, 0)
+    qc.measure(1, 1)
+
+    result = _compile(qc, **compile_kwargs)
+    circ = result.circuits[0]
+    ops = [instr.operation.name for instr in circ.data]
+    assert "rx" in ops
+    assert "cz" in ops
+    assert ops.count("measure") == 2
+
+
+@pytest.mark.parametrize(
+    "compile_kwargs",
+    [
+        pytest.param(
+            {"target": _build_target_2q(), "optimization_level": 3, "seed_transpiler": 42},
+            id="target_opt3",
+        ),
+        pytest.param(
+            {
+                "basis_gates": ["rx", "cz", "h", "measure"],
+                "optimization_level": 3,
+                "seed_transpiler": 42,
+            },
+            id="basis_gates_opt3",
+        ),
+    ],
+)
+def test_verbatim_box_with_mcm_preserves_order(compile_kwargs):
+    """Verbatim BoxOp with mid-circuit measurement preserves operation order.
+
+    Ensures measurements inside verbatim boxes remain in the correct position
+    relative to surrounding quantum gates after the extract/restore pipeline.
+    """
+    body = QuantumCircuit(2, 2)
+    body.rx(0.5, 0)
+    body.measure(0, 0)
+    body.h(0)
+    body.cz(0, 1)
+
+    qc = QuantumCircuit(2, 2)
+    qc.h(0)
+    qc.append(BoxOp(body, label=VERBATIM_LABEL), qc.qubits, qc.clbits)
+    qc.measure(1, 1)
+
+    result = _compile(qc, **compile_kwargs)
+    circ = result.circuits[0]
+    ops = [instr.operation.name for instr in circ.data]
+    assert ops == ["h", "rx", "measure", "h", "cz", "measure"]

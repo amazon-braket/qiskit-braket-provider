@@ -1,6 +1,6 @@
 """Transpiler passes for preserving verbatim boxes through compilation."""
 
-from qiskit.circuit import Barrier, BoxOp, QuantumCircuit
+from qiskit.circuit import Barrier, BoxOp, Instruction, QuantumCircuit
 from qiskit.converters import circuit_to_dag
 from qiskit.dagcircuit import DAGCircuit
 from qiskit.transpiler.basepasses import TransformationPass
@@ -17,6 +17,23 @@ def _is_verbatim_label(label: str | None, base: str) -> bool:
     if label is None:
         return False
     return label == base or (label.startswith(f"{base}__") and label[len(base) + 2 :].isdigit())
+
+
+class VerbatimPlaceholder(Instruction):
+    """A directive instruction used as a placeholder for verbatim boxes with clbits.
+
+    Uses the name ``'barrier'`` so the transpiler's basis translator automatically
+    allows it without needing explicit registration in the target or basis_gates.
+    Distinguished from real barriers by its label (set to the indexed verbatim label).
+    Unlike a real ``Barrier``, this instruction can carry classical bits.
+    """
+
+    _directive = True
+
+    def __init__(self, num_qubits: int, num_clbits: int, label: str | None = None):
+        super().__init__("barrier", num_qubits, num_clbits, [])
+        if label:
+            self.label = label
 
 
 class ExtractVerbatimBoxes(TransformationPass):
@@ -59,14 +76,15 @@ class ExtractVerbatimBoxes(TransformationPass):
                 continue
             label = _indexed_label(self._verbatim_box_name, index)
             verbatim_boxes[label] = (node.op.blocks[0], [dag.find_bit(c).index for c in node.cargs])
-            barrier = Barrier(len(node.qargs), label=label)
             if node.cargs:
-                # BoxOp has clbits — substitute_node requires matching width,
-                # so replace with a sub-DAG containing only the barrier on qubits.
-                qc = QuantumCircuit(len(node.qargs), len(node.cargs))
-                qc.append(barrier, list(range(len(node.qargs))))
-                dag.substitute_node_with_dag(node, circuit_to_dag(qc))
+                # Use a VerbatimPlaceholder that can carry both qubits and
+                # clbits. A plain Barrier cannot carry clbits, and the Rust
+                # substitute_node_with_dag panics when trying to route clbit
+                # wires through a barrier node that has no clbit edges.
+                placeholder = VerbatimPlaceholder(len(node.qargs), len(node.cargs), label=label)
+                dag.substitute_node(node, placeholder)
             else:
+                barrier = Barrier(len(node.qargs), label=label)
                 dag.substitute_node(node, barrier)
             index += 1
 
@@ -100,7 +118,9 @@ class RestoreVerbatimBoxes(TransformationPass):
             return dag
 
         for node in dag.topological_op_nodes():
-            if not isinstance(node.op, Barrier):
+            is_barrier = isinstance(node.op, Barrier)
+            is_placeholder = isinstance(node.op, VerbatimPlaceholder)
+            if not is_barrier and not is_placeholder:
                 continue
             label = getattr(node.op, "label", None)
             if not _is_verbatim_label(label, self._verbatim_box_name):
@@ -112,16 +132,10 @@ class RestoreVerbatimBoxes(TransformationPass):
                 )
             box_circuit, clbit_indices = verbatim_boxes.pop(label)
             box_dag = circuit_to_dag(box_circuit)
-            if clbit_indices:
-                # Build a replacement DAG that includes the box's clbits.
+            if is_placeholder:
+                # Placeholder carries both qubits and clbits — map both.
                 qubit_map = dict(zip(box_dag.qubits, node.qargs, strict=True))
-                clbit_map = dict(
-                    zip(
-                        box_dag.clbits,
-                        [dag.clbits[i] for i in clbit_indices],
-                        strict=True,
-                    )
-                )
+                clbit_map = dict(zip(box_dag.clbits, node.cargs, strict=True))
                 dag.substitute_node_with_dag(node, box_dag, wires={**qubit_map, **clbit_map})
             else:
                 dag.substitute_node_with_dag(node, box_dag)
