@@ -19,7 +19,10 @@ from qiskit_braket_provider.providers.adapter import (
     translate_sparse_pauli_op,
 )
 from qiskit_braket_provider.providers.braket_backend import BraketBackend
-from qiskit_braket_provider.providers.braket_primitive_task import BraketPrimitiveTask
+from qiskit_braket_provider.providers.braket_primitive_task import (
+    BraketPrimitiveTask,
+    run_split_program_set,
+)
 
 _DEFAULT_PRECISION = 0.015625  # Same value as BackendEstimatorV2
 
@@ -89,7 +92,7 @@ class BraketEstimator(BaseEstimatorV2):
                 estimated with its own executable(s). Qiskit's ``BackendEstimatorV2`` enables the
                 equivalent grouping by default. Default: ``False``.
         """
-        if not backend._supports_program_sets:
+        if backend._max_program_set_executables is None:
             raise ValueError("Braket device must support program sets")
         self._backend = backend
         self._verbatim = verbatim
@@ -139,9 +142,9 @@ class BraketEstimator(BaseEstimatorV2):
 
         shots = int(np.ceil(1.0 / (pub_precision if pub_precision is not None else precision) ** 2))
         program_set = ProgramSet(all_bindings, shots_per_executable=shots)
-        options = {"shots": None, **self._options}
+        tasks, index_map = run_split_program_set(self._backend, program_set, **self._options)
         return BraketPrimitiveTask(
-            self._backend._device.run(program_set, **options),
+            tasks,
             lambda result: BraketEstimator._translate_result(
                 result,
                 _JobMetadata(
@@ -149,6 +152,7 @@ class BraketEstimator(BaseEstimatorV2):
                 ),
             ),
             program_set,
+            index_map,
         )
 
     @staticmethod
