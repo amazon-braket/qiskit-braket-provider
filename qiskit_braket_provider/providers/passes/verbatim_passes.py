@@ -20,24 +20,22 @@ def _is_verbatim_label(label: str | None, base: str) -> bool:
 
 
 class VerbatimPlaceholder(Instruction):
-    """A directive instruction used as a placeholder for verbatim boxes with clbits.
+    """A directive instruction used as a placeholder for verbatim boxes.
 
     Uses the name ``'barrier'`` so the transpiler's basis translator automatically
     allows it without needing explicit registration in the target or basis_gates.
-    Distinguished from real barriers by its label (set to the indexed verbatim label).
     Unlike a real ``Barrier``, this instruction can carry classical bits.
     """
 
     _directive = True
 
-    def __init__(self, num_qubits: int, num_clbits: int, label: str | None = None):
+    def __init__(self, num_qubits: int, num_clbits: int, label: str):
         super().__init__("barrier", num_qubits, num_clbits, [])
-        if label:
-            self.label = label
+        self.label = label
 
 
 class ExtractVerbatimBoxes(TransformationPass):
-    """Swap verbatim ``BoxOp`` nodes for labeled barriers before transpilation.
+    """Swap verbatim ``BoxOp`` nodes for labeled placeholders before transpilation.
 
     The original box circuits are stashed in ``property_set["verbatim_boxes"]``
     as a dict mapping indexed labels to ``QuantumCircuit`` instances for
@@ -52,7 +50,7 @@ class ExtractVerbatimBoxes(TransformationPass):
         self._verbatim_box_name = verbatim_box_name
 
     def run(self, dag: DAGCircuit) -> DAGCircuit:
-        """Replace matching ``BoxOp`` nodes with labeled barriers.
+        """Replace matching ``BoxOp`` nodes with labeled placeholders.
 
         Raises:
             ValueError: If the DAG already contains a barrier whose label
@@ -75,15 +73,9 @@ class ExtractVerbatimBoxes(TransformationPass):
             if getattr(node.op, "label", None) != self._verbatim_box_name:
                 continue
             label = _indexed_label(self._verbatim_box_name, index)
-            verbatim_boxes[label] = (node.op.blocks[0], [dag.find_bit(c).index for c in node.cargs])
-            if node.cargs:
-                # Use a VerbatimPlaceholder that can carry both qubits and
-                # clbits. A plain Barrier cannot carry clbits.
-                placeholder = VerbatimPlaceholder(len(node.qargs), len(node.cargs), label=label)
-                dag.substitute_node(node, placeholder)
-            else:
-                barrier = Barrier(len(node.qargs), label=label)
-                dag.substitute_node(node, barrier)
+            verbatim_boxes[label] = node.op.blocks[0]
+            placeholder = VerbatimPlaceholder(len(node.qargs), len(node.cargs), label=label)
+            dag.substitute_node(node, placeholder)
             index += 1
 
         self.property_set["verbatim_boxes"] = verbatim_boxes
@@ -91,7 +83,7 @@ class ExtractVerbatimBoxes(TransformationPass):
 
 
 class RestoreVerbatimBoxes(TransformationPass):
-    """Replace labeled barriers with the original verbatim gate sequences.
+    """Replace labeled placeholders with the original verbatim gate sequences.
 
     Reads ``property_set["verbatim_boxes"]`` populated by
     :class:`ExtractVerbatimBoxes`.
@@ -105,10 +97,10 @@ class RestoreVerbatimBoxes(TransformationPass):
         self._verbatim_box_name = verbatim_box_name
 
     def run(self, dag: DAGCircuit) -> DAGCircuit:
-        """Splice stashed gate sequences back in place of labeled barriers.
+        """Splice stashed gate sequences back in place of labeled placeholders.
 
         Raises:
-            RuntimeError: If a labeled barrier has no matching stashed box.
+            RuntimeError: If a labeled placeholder has no matching stashed box.
             RuntimeError: If stashed boxes remain unconsumed after processing.
         """
         verbatim_boxes = self.property_set.get("verbatim_boxes", {})
@@ -116,27 +108,21 @@ class RestoreVerbatimBoxes(TransformationPass):
             return dag
 
         for node in dag.topological_op_nodes():
-            is_barrier = isinstance(node.op, Barrier)
-            is_placeholder = isinstance(node.op, VerbatimPlaceholder)
-            if not is_barrier and not is_placeholder:
+            if not isinstance(node.op, VerbatimPlaceholder):
                 continue
             label = getattr(node.op, "label", None)
             if not _is_verbatim_label(label, self._verbatim_box_name):
                 continue
             if label not in verbatim_boxes:
                 raise RuntimeError(
-                    f"Internal error: verbatim barrier '{label}' has no matching box. "
+                    f"Internal error: verbatim placeholder '{label}' has no matching box. "
                     f"This is a bug in the verbatim pass pipeline."
                 )
-            box_circuit, _clbit_indices = verbatim_boxes.pop(label)
+            box_circuit = verbatim_boxes.pop(label)
             box_dag = circuit_to_dag(box_circuit)
-            if is_placeholder:
-                # Placeholder carries both qubits and clbits — map both.
-                qubit_map = dict(zip(box_dag.qubits, node.qargs, strict=True))
-                clbit_map = dict(zip(box_dag.clbits, node.cargs, strict=True))
-                dag.substitute_node_with_dag(node, box_dag, wires={**qubit_map, **clbit_map})
-            else:
-                dag.substitute_node_with_dag(node, box_dag)
+            qubit_map = dict(zip(box_dag.qubits, node.qargs, strict=True))
+            clbit_map = dict(zip(box_dag.clbits, node.cargs, strict=True))
+            dag.substitute_node_with_dag(node, box_dag, wires={**qubit_map, **clbit_map})
 
         if verbatim_boxes:
             raise RuntimeError(

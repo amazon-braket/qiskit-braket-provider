@@ -210,7 +210,9 @@ def _compile(
             )
         ):
             if has_verbatim_boxes and target and "barrier" not in target.operation_names:
-                target.add_instruction(VerbatimPlaceholder(1, 0), name="barrier")
+                target.add_instruction(
+                    VerbatimPlaceholder(1, 0, label="verbatim"), name="barrier"
+                )
             pm = generate_preset_pass_manager(
                 optimization_level=optimization_level,
                 basis_gates=list(basis_gates) if basis_gates else None,
