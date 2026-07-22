@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.20.0 (2026-07-22)
+
+### Features
+
+ * support parametric function conversion from OQ3 to qiskit
+
 ## v0.19.0 (2026-07-21)
 
 ### Features
