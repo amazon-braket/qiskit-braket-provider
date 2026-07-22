@@ -27,7 +27,7 @@ from qiskit.transpiler import PassManager, Target
 from qiskit_ionq import add_equivalences
 
 from braket import experimental_capabilities as braket_expcaps
-from braket.aws import AwsDevice, AwsDeviceType  # noqa: F401
+from braket.aws import AwsDevice, AwsDeviceType  # ruff:ignore[unused-import]
 from braket.circuits import Circuit, Instruction, compiler_directives, measure
 from braket.circuits import Observable as BraketObservable
 from braket.circuits import gates as braket_gates
@@ -38,34 +38,35 @@ from braket.devices import Device
 from braket.ir.openqasm import Program
 from braket.parametric import FreeParameter, FreeParameterExpression, Parameterizable
 from qiskit_braket_provider.providers.compilation import (
-    _CompilationContext,  # noqa: F401
+    _CompilationContext,  # ruff:ignore[unused-import]
     _compile,
-    _default_target,  # noqa: F401
+    _default_target,  # ruff:ignore[unused-import]
 )
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
-    _BRAKET_SUPPORTED_NOISES,  # noqa: F401
-    _BRAKET_TO_QISKIT_NAMES,  # noqa: F401
+    _BRAKET_SUPPORTED_NOISES,  # ruff:ignore[unused-import]
+    _BRAKET_TO_QISKIT_NAMES,  # ruff:ignore[unused-import]
     _BRAKET_VERBATIM_BOX_NAME,
-    _CONTROLLED_GATES_BY_QUBIT_COUNT,  # noqa: F401
+    _CONTROLLED_GATES_BY_QUBIT_COUNT,  # ruff:ignore[unused-import]
     _EPS,
     _PAULI_MAP,
     _QISKIT_CONTROLLED_GATE_NAMES_TO_BRAKET_GATES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
+    _reverse_endianness,
 )
 from qiskit_braket_provider.providers.qasm_context import (
     _QiskitProgramContext,
     _sympy_to_qiskit,
 )
 from qiskit_braket_provider.providers.target import (
-    _get_controlled_gateset,  # noqa: F401
-    _SubstitutedTarget,  # noqa: F401
-    aws_device_to_target,  # noqa: F401
-    gateset_from_properties,  # noqa: F401
-    local_simulator_to_target,  # noqa: F401
-    native_angle_restrictions,  # noqa: F401
-    native_gate_connectivity,  # noqa: F401
-    native_gate_set,  # noqa: F401
+    _get_controlled_gateset,  # ruff:ignore[unused-import]
+    _SubstitutedTarget,  # ruff:ignore[unused-import]
+    aws_device_to_target,  # ruff:ignore[unused-import]
+    gateset_from_properties,  # ruff:ignore[unused-import]
+    local_simulator_to_target,  # ruff:ignore[unused-import]
+    native_angle_restrictions,  # ruff:ignore[unused-import]
+    native_gate_connectivity,  # ruff:ignore[unused-import]
+    native_gate_set,  # ruff:ignore[unused-import]
 )
 
 add_equivalences()
@@ -638,19 +639,6 @@ def _create_qiskit_kraus(gate_params: list[np.ndarray]) -> QiskitInstruction:
         assert param.shape[0] == param.shape[1], "Kraus operators must be square matrices."
         gate_params[i] = _reverse_endianness(param)
     return qiskit_qi.Kraus(gate_params)
-
-
-def _reverse_endianness(matrix: np.ndarray) -> np.ndarray:
-    n_q = int(np.log2(matrix.shape[0]))
-    # Convert multi-qubit Kraus from little to big endian notation
-    return (
-        np.transpose(
-            matrix.reshape([2] * n_q * 2),
-            list(range(n_q))[::-1] + list(range(n_q, 2 * n_q))[::-1],
-        ).reshape((2**n_q, 2**n_q))
-        if n_q > 1
-        else matrix
-    )
 
 
 def _create_qiskit_gate(

@@ -163,7 +163,7 @@ class TestBraketLocalBackend(TestCase):
         circuit = QuantumCircuit(1)
         circuit.h(0)
 
-        with self.assertRaises(Exception):  # noqa: B017
+        with self.assertRaises(Exception):  # ruff:ignore[assert-raises-exception]
             backend.run([circuit, circuit], shots=0)  # First run should pass
         braket_devices_run.assert_called()
 
