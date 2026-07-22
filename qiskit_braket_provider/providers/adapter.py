@@ -52,6 +52,7 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _PAULI_MAP,
     _QISKIT_CONTROLLED_GATE_NAMES_TO_BRAKET_GATES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
+    _reverse_endianness,
 )
 from qiskit_braket_provider.providers.qasm_context import (
     _QiskitProgramContext,
@@ -638,19 +639,6 @@ def _create_qiskit_kraus(gate_params: list[np.ndarray]) -> QiskitInstruction:
         assert param.shape[0] == param.shape[1], "Kraus operators must be square matrices."
         gate_params[i] = _reverse_endianness(param)
     return qiskit_qi.Kraus(gate_params)
-
-
-def _reverse_endianness(matrix: np.ndarray) -> np.ndarray:
-    n_q = int(np.log2(matrix.shape[0]))
-    # Convert multi-qubit Kraus from little to big endian notation
-    return (
-        np.transpose(
-            matrix.reshape([2] * n_q * 2),
-            list(range(n_q))[::-1] + list(range(n_q, 2 * n_q))[::-1],
-        ).reshape((2**n_q, 2**n_q))
-        if n_q > 1
-        else matrix
-    )
 
 
 def _create_qiskit_gate(
