@@ -23,9 +23,6 @@ from qiskit_braket_provider.providers.passes import (
     ExtractVerbatimBoxes,
     RestoreVerbatimBoxes,
 )
-from qiskit_braket_provider.providers.passes.verbatim_passes import (
-    VerbatimPlaceholder,
-)
 from qiskit_braket_provider.providers.target import (
     _SubstitutedTarget,
     aws_device_to_target,
@@ -209,8 +206,6 @@ def _compile(
                 )
             )
         ):
-            if has_verbatim_boxes and target and "barrier" not in target.operation_names:
-                target.add_instruction(VerbatimPlaceholder(1, 0, label="verbatim"), name="barrier")
             pm = generate_preset_pass_manager(
                 optimization_level=optimization_level,
                 basis_gates=list(basis_gates) if basis_gates else None,

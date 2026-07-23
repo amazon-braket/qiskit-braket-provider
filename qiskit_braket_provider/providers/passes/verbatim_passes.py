@@ -13,7 +13,7 @@ def _indexed_label(base: str, index: int) -> str:
 
 
 def _is_verbatim_label(label: str | None, base: str) -> bool:
-    """Check if a label is a verbatim barrier label (base or indexed)."""
+    """Check if a label is a verbatim placeholder label (base or indexed)."""
     if label is None:
         return False
     return label == base or (label.startswith(f"{base}__") and label[len(base) + 2 :].isdigit())
@@ -30,8 +30,7 @@ class VerbatimPlaceholder(Instruction):
     _directive = True
 
     def __init__(self, num_qubits: int, num_clbits: int, label: str):
-        super().__init__("barrier", num_qubits, num_clbits, [])
-        self.label = label
+        super().__init__("barrier", num_qubits, num_clbits, [], label=label)
 
 
 class ExtractVerbatimBoxes(TransformationPass):
@@ -89,7 +88,7 @@ class RestoreVerbatimBoxes(TransformationPass):
     :class:`ExtractVerbatimBoxes`.
 
     Args:
-        verbatim_box_name: Label used to identify placeholder barriers.
+        verbatim_box_name: Label used to identify verbatim placeholders.
     """
 
     def __init__(self, verbatim_box_name: str = _BRAKET_VERBATIM_BOX_NAME):
@@ -127,7 +126,7 @@ class RestoreVerbatimBoxes(TransformationPass):
         if verbatim_boxes:
             raise RuntimeError(
                 f"Internal error: stashed verbatim boxes were not restored "
-                f"(no matching barriers found): {list(verbatim_boxes.keys())}. "
-                f"Their barriers may have been removed during transpilation."
+                f"(no matching placeholders found): {list(verbatim_boxes.keys())}. "
+                f"Their placeholders may have been removed during transpilation."
             )
         return dag

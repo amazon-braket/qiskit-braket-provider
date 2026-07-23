@@ -43,6 +43,19 @@ def _make_box_circuit(num_qubits: int, gates: list[tuple[str, list[int]]]) -> Qu
     return qc
 
 
+def _build_target_2q() -> Target:
+    """Helper to build a minimal 2-qubit target with rx/h/cz/measure."""
+    target = Target(num_qubits=2)
+    theta = Parameter("theta")
+    target.add_instruction(RXGate(theta), {(i,): InstructionProperties() for i in range(2)})
+    target.add_instruction(HGate(), {(i,): InstructionProperties() for i in range(2)})
+    target.add_instruction(
+        CZGate(), {(0, 1): InstructionProperties(), (1, 0): InstructionProperties()}
+    )
+    target.add_instruction(Measure(), {(i,): InstructionProperties() for i in range(2)})
+    return target
+
+
 def _gate_info(braket_circuit: Circuit) -> list[tuple[str, list[int]]]:
     """Extract (name, target) list from a Braket circuit."""
     return [(instr.operator.name, instr.target) for instr in braket_circuit.instructions]
@@ -796,19 +809,6 @@ def test_verbatim_box_preserves_non_contiguous_qubit_order():
     out = _compile(qc, basis_gates={"cx"}).circuits[0]
     cx = next(i for i in out.data if i.operation.name == "cx")
     assert [out.find_bit(q).index for q in cx.qubits] == [2, 0]
-
-
-def _build_target_2q() -> Target:
-    """Helper to build a minimal 2-qubit target with rx/h/cz/measure."""
-    target = Target(num_qubits=2)
-    theta = Parameter("theta")
-    target.add_instruction(RXGate(theta), {(i,): InstructionProperties() for i in range(2)})
-    target.add_instruction(HGate(), {(i,): InstructionProperties() for i in range(2)})
-    target.add_instruction(
-        CZGate(), {(0, 1): InstructionProperties(), (1, 0): InstructionProperties()}
-    )
-    target.add_instruction(Measure(), {(i,): InstructionProperties() for i in range(2)})
-    return target
 
 
 @pytest.mark.parametrize(
