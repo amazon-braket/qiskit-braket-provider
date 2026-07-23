@@ -286,10 +286,7 @@ class AddBasisRotationAndMeasurement(TransformationPass):
 
         for result in result_pragmas:
             if isinstance(result, _BASIS_INVARIANT_RESULT_TYPES):
-                raise NotImplementedError(
-                    f"{type(result).__name__} result types are not yet supported "
-                    "end-to-end. Support will be added in a future release."
-                )
+                continue
 
             if isinstance(result, _Z_BASIS_RESULT_TYPES):
                 qubits = _qubits_for_z_basis_type(result, num_qubits)
