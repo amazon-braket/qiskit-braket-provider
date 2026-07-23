@@ -882,3 +882,19 @@ c[1] = measure q[1];
     circ = result.circuits[0]
     ops = [instr.operation.name for instr in circ.data]
     assert ops == ["h", "rx", "measure", "h", "cz", "measure"]
+
+
+def test_restore_skips_placeholder_with_non_matching_label():
+    """RestoreVerbatimBoxes ignores placeholders whose label doesn't match the verbatim pattern."""
+    qc = QuantumCircuit(NUM_QUBITS)
+    qc.append(VerbatimPlaceholder(NUM_QUBITS, 0, label="unrelated_label"), QUBIT_PAIR)
+
+    restore_pass = RestoreVerbatimBoxes(VERBATIM_LABEL)
+    restore_pass.property_set["verbatim_boxes"] = {}
+
+    dag = circuit_to_dag(qc)
+    restored = dag_to_circuit(restore_pass.run(dag))
+
+    assert len(restored.data) == 1
+    assert restored.data[0].operation.name == "barrier"
+    assert restored.data[0].operation.label == "unrelated_label"
