@@ -900,6 +900,8 @@ def test_restore_skips_placeholder_with_non_matching_label():
     dag = circuit_to_dag(qc)
     restored = dag_to_circuit(restore_pass.run(dag))
 
-    ops = [(instr.operation.name, getattr(instr.operation, "label", None)) for instr in restored.data]
+    ops = [
+        (instr.operation.name, getattr(instr.operation, "label", None)) for instr in restored.data
+    ]
     assert ("barrier", "unrelated_label") in ops
     assert ("h", None) in ops
