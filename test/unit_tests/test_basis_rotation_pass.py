@@ -388,12 +388,13 @@ def test_fresh_clbits_allocated():
     ],
     ids=["state_vector", "density_matrix", "amplitude"],
 )
-def test_basis_invariant_raises_not_implemented(pragmas: list):
-    """Basis-invariant types raise NotImplementedError until end-to-end support lands."""
+def test_basis_invariant_is_noop(pragmas: list):
+    """Basis-invariant types are skipped — no gates or measurements added."""
     qc = _circuit_with_result_pragmas(2, pragmas)
 
-    with pytest.raises(NotImplementedError, match="not yet supported end-to-end"):
-        _run_pragma_handling_pass(qc)
+    result = _run_pragma_handling_pass(qc)
+    ops = [instr.operation.name for instr in result.data]
+    assert "measure" not in ops
 
 
 @pytest.mark.parametrize(
