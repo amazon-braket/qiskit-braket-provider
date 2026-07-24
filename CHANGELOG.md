@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.20.1 (2026-07-24)
+
+### Bug Fixes and Other Changes
+
+ * resolve panic due to missing clbits on verbatim placeholder
+ * remove NotImplemented error for basis-invariant result types
+
 ## v0.20.0 (2026-07-22)
 
 ### Features
