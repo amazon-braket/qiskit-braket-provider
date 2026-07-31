@@ -11,7 +11,6 @@ from qiskit.transpiler.basepasses import TransformationPass
 
 from braket.ir.jaqcd import (
     Expectation,
-    Probability,
     Sample,
     Variance,
 )
@@ -266,9 +265,9 @@ class AddBasisRotationAndMeasurement(TransformationPass):
         # For physical-qubit sources ($N), Qiskit widens the register to the max
         # index; 'all' should skip gap qubits the customer never referenced.
         if any(q._register is None for q in dag.qubits):
-            all_qubits = sorted(
-                {dag.find_bit(q).index for node in dag.op_nodes() for q in node.qargs}
-            )
+            all_qubits = sorted({
+                dag.find_bit(q).index for node in dag.op_nodes() for q in node.qargs
+            })
         else:
             all_qubits = list(range(num_qubits))
         all_rotation_ops: list[RotationOp] = []
