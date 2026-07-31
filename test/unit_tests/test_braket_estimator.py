@@ -41,12 +41,10 @@ class TestBraketEstimator(TestCase):
             self.assertTrue(np.allclose(actual.data.evs, expected.data.evs, rtol=0.3, atol=0.2))
 
     @staticmethod
-    def _mock_run_batch_task(mock_run_batch: Mock) -> Mock:
+    def _mock_run_task(mock_run: Mock) -> Mock:
         mock_task = Mock()
         mock_task.id = "test-task-id"
-        batch = Mock()
-        batch.tasks = [mock_task]
-        mock_run_batch.return_value = batch
+        mock_run.return_value = mock_task
         return mock_task
 
     def test_program_sets_unsupported(self):
@@ -65,14 +63,13 @@ class TestBraketEstimator(TestCase):
         observable = SparsePauliOp(["ZZ"])
         pub = (qc, observable)
 
-        with patch.object(self.backend._device, "run_batch") as mock_run_batch:
-            self._mock_run_batch_task(mock_run_batch)
+        with patch.object(self.backend._device, "run") as mock_run:
+            self._mock_run_task(mock_run)
 
             job = self.estimator.run([pub], precision=0.01)
 
-            mock_run_batch.assert_called_once()
-            call_args = mock_run_batch.call_args
-            self.assertIsInstance(call_args[0][0][0], ProgramSet)
+            mock_run.assert_called_once()
+            self.assertIsInstance(mock_run.call_args.args[0], ProgramSet)
             self.assertIsInstance(job, BasePrimitiveJob)
 
     def test_parameterized_circuit(self):
@@ -85,12 +82,12 @@ class TestBraketEstimator(TestCase):
         param_values = np.array([[0.0], [np.pi / 4], [np.pi / 2]])
         pub = (qc, observable, param_values)
 
-        with patch.object(self.backend._device, "run_batch") as mock_run_batch:
-            self._mock_run_batch_task(mock_run_batch)
+        with patch.object(self.backend._device, "run") as mock_run:
+            self._mock_run_task(mock_run)
 
             job = self.estimator.run([pub], precision=0.01)
 
-            mock_run_batch.assert_called_once()
+            mock_run.assert_called_once()
             self.assertIsInstance(job, BasePrimitiveJob)
 
     def test_multiple_observables(self):
@@ -102,14 +99,13 @@ class TestBraketEstimator(TestCase):
         observables = [SparsePauliOp(["ZZ"]), SparsePauliOp(["XX"])]
         pub = (qc, observables)
 
-        with patch.object(self.backend._device, "run_batch") as mock_run_batch:
-            self._mock_run_batch_task(mock_run_batch)
+        with patch.object(self.backend._device, "run") as mock_run:
+            self._mock_run_task(mock_run)
 
-            self.estimator.run([pub], precision=0.01)
+            job = self.estimator.run([pub], precision=0.01)
 
-            mock_run_batch.assert_called_once()
-            program_set = mock_run_batch.call_args[0][0][0]
-            self.assertIsInstance(program_set, ProgramSet)
+            mock_run.assert_called_once()
+            self.assertIsInstance(job.program_set, ProgramSet)
 
     def test_multiple_pubs(self):
         """Test running multiple pubs."""
@@ -126,12 +122,12 @@ class TestBraketEstimator(TestCase):
         pub1 = (qc1, obs1)
         pub2 = (qc2, obs2)
 
-        with patch.object(self.backend._device, "run_batch") as mock_run_batch:
-            self._mock_run_batch_task(mock_run_batch)
+        with patch.object(self.backend._device, "run") as mock_run:
+            self._mock_run_task(mock_run)
 
             job = self.estimator.run([pub1, pub2], precision=0.01)
 
-            mock_run_batch.assert_called_once()
+            mock_run.assert_called_once()
             self.assertIsInstance(job, BasePrimitiveJob)
 
     def test_default_precision(self):
@@ -141,11 +137,12 @@ class TestBraketEstimator(TestCase):
         observable = SparsePauliOp(["Z"])
         pub = (qc, observable)
 
-        with patch.object(self.backend._device, "run_batch") as mock_run_batch:
-            self._mock_run_batch_task(mock_run_batch)
+        with patch.object(self.backend._device, "run") as mock_run:
+            self._mock_run_task(mock_run)
 
             job = self.estimator.run([pub])
 
+            mock_run.assert_called_once()
             self.assertIsInstance(job, BasePrimitiveJob)
 
     def test_custom_precision(self):
@@ -157,11 +154,12 @@ class TestBraketEstimator(TestCase):
 
         custom_precision = 0.05
 
-        with patch.object(self.backend._device, "run_batch") as mock_run_batch:
-            self._mock_run_batch_task(mock_run_batch)
+        with patch.object(self.backend._device, "run") as mock_run:
+            self._mock_run_task(mock_run)
 
             job = self.estimator.run([pub], precision=custom_precision)
 
+            mock_run.assert_called_once()
             self.assertIsInstance(job, BasePrimitiveJob)
 
     def test_complex_broadcasting(self):
@@ -189,15 +187,13 @@ class TestBraketEstimator(TestCase):
 
         pub = (qc, observables, parameter_values)
 
-        with patch.object(self.backend._device, "run_batch") as mock_run_batch:
-            self._mock_run_batch_task(mock_run_batch)
+        with patch.object(self.backend._device, "run") as mock_run:
+            self._mock_run_task(mock_run)
 
             job = self.estimator.run([pub], precision=0.01)
 
-            mock_run_batch.assert_called_once()
-            program_set = mock_run_batch.call_args[0][0][0]
-            self.assertIsInstance(program_set, ProgramSet)
-
+            mock_run.assert_called_once()
+            self.assertIsInstance(job.program_set, ProgramSet)
             self.assertIsInstance(job, BasePrimitiveJob)
 
     def test_broadcasting_with_scalar_observable(self):
@@ -210,12 +206,12 @@ class TestBraketEstimator(TestCase):
         observable = SparsePauliOp(["Z"])
         pub = (qc, observable, param_values)
 
-        with patch.object(self.backend._device, "run_batch") as mock_run_batch:
-            self._mock_run_batch_task(mock_run_batch)
+        with patch.object(self.backend._device, "run") as mock_run:
+            self._mock_run_task(mock_run)
 
             job = self.estimator.run([pub], precision=0.01)
 
-            mock_run_batch.assert_called_once()
+            mock_run.assert_called_once()
             self.assertIsInstance(job, BasePrimitiveJob)
 
     def test_broadcasting_with_array_observables(self):
@@ -233,12 +229,12 @@ class TestBraketEstimator(TestCase):
 
         pub = (qc, observables)
 
-        with patch.object(self.backend._device, "run_batch") as mock_run_batch:
-            self._mock_run_batch_task(mock_run_batch)
+        with patch.object(self.backend._device, "run") as mock_run:
+            self._mock_run_task(mock_run)
 
             job = self.estimator.run([pub], precision=0.01)
 
-            mock_run_batch.assert_called_once()
+            mock_run.assert_called_once()
             self.assertIsInstance(job, BasePrimitiveJob)
 
     def test_different_precisions_raises_error(self):

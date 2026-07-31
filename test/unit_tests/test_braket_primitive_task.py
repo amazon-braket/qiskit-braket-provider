@@ -2,13 +2,15 @@
 
 from collections import Counter
 from unittest import TestCase
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import numpy as np
 from qiskit.primitives import PrimitiveResult
 from qiskit.providers import JobStatus
 
 from braket.circuits import Circuit
+from braket.devices import LocalSimulator
+from braket.emulation import Emulator
 from braket.ir.openqasm import Program
 from braket.parametric import FreeParameter
 from braket.program_sets import CircuitBinding, ParameterSets, ProgramSet
@@ -255,3 +257,51 @@ class TestBraketPrimitiveTask(TestCase):
         device.run_batch.assert_called_once_with([program_set], shots=-1)
         self.assertEqual(tasks, [mock_task])
         self.assertEqual(index_map, [[0, 1]])
+
+    def test_run_split_program_set_does_not_split_local_simulator_program_sets(self):
+        """Test that a local simulator runs the original program set as one task."""
+        backend = Mock()
+        backend._device = LocalSimulator()
+        backend._max_program_set_executables = 1
+        program_set = ProgramSet(
+            [Circuit().x(0).measure(0), Circuit().h(0).measure(0)],
+            shots_per_executable=10,
+        )
+
+        tasks, index_map = run_split_program_set(backend, program_set)
+
+        self.assertEqual(len(tasks), 1)
+        self.assertIsNone(index_map)
+        result = tasks[0].result()
+        self.assertEqual(result.num_executables, 2)
+        self.assertEqual(result.task_metadata.requestedShots, 20)
+
+    def test_run_split_program_set_runs_emulator_program_sets_sequentially(self):
+        """Test that an emulator runs each split program set separately."""
+        backend = Mock()
+        device = Mock(spec=Emulator)
+        backend._device = device
+        backend._max_program_set_executables = 1
+        program_set = ProgramSet(
+            CircuitBinding(
+                Circuit().rx(0, FreeParameter("theta")),
+                input_sets={"theta": [0.1, 0.2]},
+            ),
+            shots_per_executable=10,
+        )
+        expected_program_sets, expected_index_map = program_set.split(1)
+        mock_tasks = [Mock(), Mock()]
+        device.run.side_effect = mock_tasks
+
+        tasks, index_map = run_split_program_set(backend, program_set, custom_option=True)
+
+        self.assertEqual(tasks, mock_tasks)
+        self.assertEqual(index_map, expected_index_map)
+        self.assertEqual(
+            device.run.call_args_list,
+            [
+                call(program_set, shots=None, custom_option=True)
+                for program_set in expected_program_sets
+            ],
+        )
+        device.run_batch.assert_not_called()

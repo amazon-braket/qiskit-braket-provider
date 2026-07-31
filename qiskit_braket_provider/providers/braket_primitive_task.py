@@ -3,10 +3,10 @@ from collections.abc import Callable
 from qiskit.primitives import BasePrimitiveJob, PrimitiveResult, PubResult
 from qiskit.providers import JobStatus
 
-from braket.devices.local_simulator import LocalSimulator
+from braket.devices import LocalSimulator
+from braket.emulation import Emulator
 from braket.program_sets import ProgramSet
 from braket.tasks import ProgramSetQuantumTaskResult, QuantumTask
-from braket.tasks.local_quantum_task import LocalQuantumTask
 from qiskit_braket_provider.providers.braket_backend import BraketBackend
 from qiskit_braket_provider.providers.braket_quantum_task import _TASK_STATUS_MAP
 
@@ -114,26 +114,17 @@ class BraketPrimitiveTask(BasePrimitiveJob[PrimitiveResult[PubResult], JobStatus
 
 def run_split_program_set(
     backend: BraketBackend, program_set: ProgramSet, **options: object
-) -> tuple[list[QuantumTask], list[list[int]]]:
+) -> tuple[list[QuantumTask], list[list[int]] | None]:
     """Split and run a program set according to the device executable limit."""
     device = backend._device
-    program_sets, index_map = program_set.split(backend._max_program_set_executables)
+    run_options = {**options, "shots": None}
     if isinstance(device, LocalSimulator):
-        tasks = []
-        for sub_program_set in program_sets:
-            run_options = dict(options)
-            if "shots" not in run_options:
-                run_options["shots"] = sub_program_set.total_shots
-            batch = device.run_batch([sub_program_set], **run_options)
-            tasks.extend(
-                batch.tasks
-                if hasattr(batch, "tasks")
-                else [LocalQuantumTask(result) for result in batch.results()]
-            )
+        return [device.run(program_set, **run_options)], None
+
+    program_sets, index_map = program_set.split(backend._max_program_set_executables)
+    if isinstance(device, Emulator):
+        tasks = [device.run(sub_program_set, **run_options) for sub_program_set in program_sets]
         return tasks, index_map
 
-    run_options = dict(options)
-    if "shots" not in run_options:
-        run_options["shots"] = -1
-    batch = device.run_batch(program_sets, **run_options)
+    batch = device.run_batch(program_sets, **{**options, "shots": -1})
     return batch.tasks, index_map

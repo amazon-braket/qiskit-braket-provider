@@ -19,7 +19,6 @@ from braket.circuits import Circuit
 from braket.device_schema import DeviceActionType
 from braket.devices import Device, LocalSimulator
 from braket.emulation.emulator import Emulator
-from braket.emulation.passes.generic import ProgramSetValidator
 from braket.program_sets import ProgramSet
 from braket.tasks.local_quantum_task import LocalQuantumTask
 
@@ -55,23 +54,6 @@ def _device_max_program_set_executables(device: Device) -> int | None:
         if DeviceActionType.OPENQASM_PROGRAM_SET in action
         else None
     )
-
-
-def _emulator_max_program_set_executables(emulator: Emulator) -> int | None:
-    """Maximum program-set executables accepted by the emulated device.
-
-    An emulator has no ``properties``, so this reads the source device's actions
-    off the emulator's ``ProgramSetValidator`` pass instead.
-    """
-    for emulator_pass in emulator._pass_manager._passes:
-        if (
-            isinstance(emulator_pass, ProgramSetValidator)
-            and DeviceActionType.OPENQASM_PROGRAM_SET in emulator_pass.device_actions
-        ):
-            return emulator_pass.device_actions[
-                DeviceActionType.OPENQASM_PROGRAM_SET
-            ].maximumExecutables
-    return None
 
 
 class BraketBackend(BackendV2, ABC, Generic[T]):
@@ -131,7 +113,7 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
         )
 
 
-class BraketLocalBackend(BraketBackend[LocalSimulator]):
+class BraketLocalBackend(BraketBackend[Device]):
     """Runs quantum circuits on a Braket local simulator or device emulator.
 
     Wraps a ``LocalSimulator`` selected by ``name``, or a pre-built ``device``
@@ -172,13 +154,7 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
         if device is None:
             device = LocalSimulator(backend=name)
             target = target or local_simulator_to_target(device)
-        BackendV2.__init__(self, name=name or device.name, **fields)
-        self._device = device
-        self._max_program_set_executables = (
-            _emulator_max_program_set_executables(device)
-            if self._is_emulator
-            else _device_max_program_set_executables(device)
-        )
+        super().__init__(device, name or device.name, **fields)
         self._target = target
         self._qubit_labels = qubit_labels
         self._gateset = None if self._is_emulator else self.get_gateset()
