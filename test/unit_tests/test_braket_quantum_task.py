@@ -291,10 +291,19 @@ class TestBraketJobStatus:
     @pytest.mark.parametrize(
         "task_states, expected_status",
         [
-            (["COMPLETED", "FAILED"], JobStatus.ERROR),
-            (["COMPLETED", "CANCELLED"], JobStatus.CANCELLED),
+            (["COMPLETED", "FAILED"], JobStatus.DONE),
+            (["COMPLETED", "CANCELLED"], JobStatus.DONE),
+            (["COMPLETED", "FAILED", "CANCELLED"], JobStatus.DONE),
+            (["COMPLETED", "QUEUED"], JobStatus.RUNNING),
             (["COMPLETED", "COMPLETED"], JobStatus.DONE),
+            (["CANCELLED", "FAILED"], JobStatus.ERROR),
+            (["CANCELLED", "QUEUED"], JobStatus.RUNNING),
+            (["CANCELLING", "CANCELLED"], JobStatus.CANCELLED),
+            (["FAILED", "FAILED"], JobStatus.ERROR),
+            (["FAILED", "QUEUED"], JobStatus.RUNNING),
             (["RUNNING", "RUNNING"], JobStatus.RUNNING),
+            (["INITIALIZED", "INITIALIZED"], JobStatus.INITIALIZING),
+            (["INITIALIZED", "QUEUED"], JobStatus.QUEUED),
             (["QUEUED", "QUEUED"], JobStatus.QUEUED),
         ],
     )

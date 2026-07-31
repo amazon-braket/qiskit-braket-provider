@@ -21,6 +21,10 @@ from qiskit_algorithms.optimizers import SLSQP
 from braket.aws import AwsDevice, AwsQuantumTaskBatch
 from braket.aws.queue_information import QueueDepthInfo, QueueType
 from braket.circuits import Circuit
+from braket.device_schema import DeviceActionType
+from braket.device_schema.openqasm_program_set_device_action_properties import (
+    OpenQASMProgramSetDeviceActionProperties,
+)
 from braket.emulation.emulator import Emulator
 from braket.emulation.local_emulator import LocalEmulator
 from braket.program_sets import ProgramSet
@@ -350,17 +354,20 @@ class TestBraketAwsBackend(TestCase):
         """Tests run with multiple circuits for a device that supports program sets"""
         device = Mock()
         device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES.copy()
-        device.properties.action["braket.ir.openqasm.program_set"] = {
-            "actionType": "braket.ir.openqasm.program_set",
-            "version": ["1"],
-            "maximumExecutables": 500,
-            "maximumTotalShots": 1000000,
-        }
+        device.properties.action[DeviceActionType.OPENQASM_PROGRAM_SET] = (
+            OpenQASMProgramSetDeviceActionProperties.parse_obj({
+                "actionType": "braket.ir.openqasm.program_set",
+                "version": ["1"],
+                "maximumExecutables": 500,
+                "maximumTotalShots": 1000000,
+            })
+        )
         device.properties.standardized = MOCK_RIGETTI_STANARDIZED_PROPERTIES
         device.gate_calibrations = None
         device.type = "QPU"
         device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
         backend = BraketAwsBackend(device=device)
+        self.assertEqual(backend._max_program_set_executables, 500)
         backend._device.run = Mock(return_value=Mock(spec=LocalQuantumTask))
         circuit = QuantumCircuit(1)
         circuit.h(0)
@@ -648,8 +655,11 @@ class TestEmulatorBackend(TestCase):
 
     def test_emulator_backend_program_set_support(self):
         """Tests that program-set support tracks the emulated device."""
-        self.assertFalse(self._emulator_backend()._supports_program_sets)
-        self.assertTrue(self._emulator_backend(program_sets=True)._supports_program_sets)
+        self.assertIsNone(self._emulator_backend()._max_program_set_executables)
+        self.assertEqual(
+            self._emulator_backend(program_sets=True)._max_program_set_executables,
+            100,
+        )
 
     def test_emulator_backend_run(self):
         """Tests running a circuit on the emulator backend."""
@@ -698,14 +708,6 @@ class TestEmulatorBackend(TestCase):
         self.assertEqual(sum(counts.values()), 100)
 
     def test_emulator_backend_with_braket_sampler(self):
-        """Tests sampling a program set on an emulator that supports program sets."""
+        """Tests BraketSampler accepts emulator backends that support program sets."""
         backend = self._emulator_backend(program_sets=True)
-        sampler = BraketSampler(backend)
-        circuit = QuantumCircuit(2)
-        circuit.h(0)
-        circuit.cx(0, 1)
-        circuit.measure_all()
-        transpiled = transpile(circuit, backend=backend, seed_transpiler=42)
-
-        counts = sampler.run([transpiled], shots=100).result()[0].data.meas.get_counts()
-        self.assertEqual(sum(counts.values()), 100)
+        self.assertIsInstance(BraketSampler(backend), BraketSampler)

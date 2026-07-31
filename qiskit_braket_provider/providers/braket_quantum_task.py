@@ -15,13 +15,36 @@ from braket.tasks.local_quantum_task import LocalQuantumTask
 
 _TASK_STATUS_MAP = {
     "INITIALIZED": JobStatus.INITIALIZING,
-    "QUEUED": JobStatus.INITIALIZING,
+    "QUEUED": JobStatus.QUEUED,
     "FAILED": JobStatus.ERROR,
     "CANCELLING": JobStatus.CANCELLED,
     "CANCELLED": JobStatus.CANCELLED,
     "COMPLETED": JobStatus.DONE,
     "RUNNING": JobStatus.RUNNING,
 }
+
+
+def _aggregate_task_status(braket_task_states: set[str]) -> JobStatus:
+    task_states = {_TASK_STATUS_MAP[state] for state in braket_task_states}
+    if JobStatus.DONE in task_states:
+        return (
+            JobStatus.DONE
+            if task_states.issubset({JobStatus.DONE, JobStatus.ERROR, JobStatus.CANCELLED})
+            else JobStatus.RUNNING
+        )
+    if JobStatus.ERROR in task_states:
+        return (
+            JobStatus.ERROR
+            if task_states.issubset({JobStatus.ERROR, JobStatus.CANCELLED})
+            else JobStatus.RUNNING
+        )
+    if JobStatus.CANCELLED in task_states:
+        return JobStatus.CANCELLED if len(task_states) == 1 else JobStatus.RUNNING
+    if JobStatus.RUNNING in task_states:
+        return JobStatus.RUNNING
+    if task_states == {JobStatus.INITIALIZING}:
+        return JobStatus.INITIALIZING
+    return JobStatus.QUEUED
 
 
 def retry_if_result_none(result: object) -> bool:
@@ -204,21 +227,12 @@ class BraketQuantumTask(JobV1):
     def status(self, use_cached_value: bool = False) -> JobStatus:
         if isinstance(self._tasks, QuantumTask):
             return _TASK_STATUS_MAP[self._tasks.state()]
-        braket_tasks_states = [
+        braket_tasks_states = {
             (
                 task.state()
                 if isinstance(task, LocalQuantumTask)
                 else task.state(use_cached_value=use_cached_value)
             )
             for task in self._tasks
-        ]
-
-        if "FAILED" in braket_tasks_states:
-            return JobStatus.ERROR
-        if "CANCELLED" in braket_tasks_states:
-            return JobStatus.CANCELLED
-        if all(state == "COMPLETED" for state in braket_tasks_states):
-            return JobStatus.DONE
-        if all(state == "RUNNING" for state in braket_tasks_states):
-            return JobStatus.RUNNING
-        return JobStatus.QUEUED
+        }
+        return _aggregate_task_status(braket_tasks_states)
