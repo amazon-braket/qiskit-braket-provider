@@ -131,30 +131,58 @@ class TestBraketPrimitiveTask(TestCase):
         with self.assertRaises(ValueError):
             BraketPrimitiveTask([], lambda _result: PrimitiveResult([]), None)
 
-    def test_aggregate_status(self):
-        """Test aggregate status precedence for split primitive tasks."""
-        completed_task = Mock()
-        completed_task.id = "completed-task"
-        completed_task.state.return_value = "COMPLETED"
+    def test_cancel_continues_after_failure(self):
+        """Test that one cancellation failure does not prevent later attempts."""
         failed_task = Mock()
         failed_task.id = "failed-task"
-        failed_task.state.return_value = "FAILED"
+        failed_task.cancel.side_effect = RuntimeError("Cancellation failed")
+        cancelled_task = Mock()
+        cancelled_task.id = "cancelled-task"
         task = BraketPrimitiveTask(
-            [completed_task, failed_task],
+            [failed_task, cancelled_task],
             lambda _result: PrimitiveResult([]),
             None,
         )
-        self.assertEqual(task.status(), JobStatus.ERROR)
 
-        queued_task = Mock()
-        queued_task.id = "queued-task"
-        queued_task.state.return_value = "QUEUED"
-        task = BraketPrimitiveTask(
-            [completed_task, queued_task],
-            lambda _result: PrimitiveResult([]),
-            None,
-        )
-        self.assertEqual(task.status(), JobStatus.INITIALIZING)
+        with self.assertWarnsRegex(UserWarning, "failed-task"):
+            task.cancel()
+
+        failed_task.cancel.assert_called_once()
+        cancelled_task.cancel.assert_called_once()
+
+    def test_aggregate_status(self):
+        """Test aggregate status precedence for split primitive tasks."""
+        cases = [
+            (["COMPLETED", "FAILED"], JobStatus.DONE),
+            (["COMPLETED", "CANCELLED"], JobStatus.DONE),
+            (["COMPLETED", "FAILED", "CANCELLED"], JobStatus.DONE),
+            (["COMPLETED", "QUEUED"], JobStatus.RUNNING),
+            (["CANCELLED", "FAILED"], JobStatus.ERROR),
+            (["CANCELLED", "QUEUED"], JobStatus.RUNNING),
+            (["CANCELLING", "CANCELLED"], JobStatus.CANCELLED),
+            (["FAILED", "FAILED"], JobStatus.ERROR),
+            (["FAILED", "QUEUED"], JobStatus.RUNNING),
+            (["RUNNING", "QUEUED"], JobStatus.RUNNING),
+            (["INITIALIZED", "INITIALIZED"], JobStatus.INITIALIZING),
+            (["INITIALIZED", "QUEUED"], JobStatus.QUEUED),
+            (["QUEUED", "QUEUED"], JobStatus.QUEUED),
+        ]
+
+        for task_states, expected_status in cases:
+            with self.subTest(task_states=task_states):
+                mock_tasks = []
+                for index, state in enumerate(task_states):
+                    mock_task = Mock()
+                    mock_task.id = f"task-{index}"
+                    mock_task.state.return_value = state
+                    mock_tasks.append(mock_task)
+                task = BraketPrimitiveTask(
+                    mock_tasks,
+                    lambda _result: PrimitiveResult([]),
+                    None,
+                )
+
+                self.assertEqual(task.status(), expected_status)
 
     def test_multiple_tasks_are_tracked_and_merged(self):
         """Test that split program set task results are merged before translation."""

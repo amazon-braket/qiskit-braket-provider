@@ -1,3 +1,4 @@
+import warnings
 from collections.abc import Callable
 
 from qiskit.primitives import BasePrimitiveJob, PrimitiveResult, PubResult
@@ -8,7 +9,7 @@ from braket.emulation import Emulator
 from braket.program_sets import ProgramSet
 from braket.tasks import ProgramSetQuantumTaskResult, QuantumTask
 from qiskit_braket_provider.providers.braket_backend import BraketBackend
-from qiskit_braket_provider.providers.braket_quantum_task import _TASK_STATUS_MAP
+from qiskit_braket_provider.providers.braket_quantum_task import _aggregate_task_status
 
 _TASK_ID_DIVIDER = ";"
 
@@ -45,7 +46,6 @@ class BraketPrimitiveTask(BasePrimitiveJob[PrimitiveResult[PubResult], JobStatus
         job_id = _TASK_ID_DIVIDER.join(task.id for task in tasks)
         super().__init__(job_id=job_id)
         self._tasks = tasks
-        self._task = tasks[0]
         self._result_translator = result_translator
         self._program_set = program_set
         self._index_map = index_map
@@ -81,7 +81,13 @@ class BraketPrimitiveTask(BasePrimitiveJob[PrimitiveResult[PubResult], JobStatus
 
     def cancel(self) -> None:
         for task in self._tasks:
-            task.cancel()
+            try:
+                task.cancel()
+            except Exception as ex:  # ruff: ignore[blind-except]
+                warnings.warn(
+                    f"Failed to cancel Braket task {task.id}: {ex}",
+                    stacklevel=2,
+                )
 
     def job_id(self) -> str:
         return _TASK_ID_DIVIDER.join(task.id for task in self._tasks)
@@ -99,17 +105,7 @@ class BraketPrimitiveTask(BasePrimitiveJob[PrimitiveResult[PubResult], JobStatus
         return self._get_task_status() in [JobStatus.DONE, JobStatus.ERROR, JobStatus.CANCELLED]
 
     def _get_task_status(self) -> JobStatus:
-        statuses = [_TASK_STATUS_MAP[task.state()] for task in self._tasks]
-        if JobStatus.ERROR in statuses:
-            return JobStatus.ERROR
-        if JobStatus.CANCELLED in statuses:
-            return JobStatus.CANCELLED
-        if not all(status == JobStatus.DONE for status in statuses):
-            if JobStatus.RUNNING in statuses:
-                return JobStatus.RUNNING
-            if JobStatus.INITIALIZING in statuses:
-                return JobStatus.INITIALIZING
-        return statuses[0]
+        return _aggregate_task_status({task.state() for task in self._tasks})
 
 
 def run_split_program_set(
