@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 from qiskit import QuantumCircuit
+from qiskit.circuit import Qubit
 from qiskit.transpiler import PassManager
 
 from braket.ir.jaqcd import (
@@ -245,6 +246,23 @@ def test_multi_qubit_cases(pragmas: list, num_qubits: int, expected_ops: list):
     added = _get_ops_after_base(result, base_count)
 
     assert added == expected_ops
+
+
+def test_orphan_qubits_all_target_covers_only_touched():
+    """'all' targets should skip qubits the customer never referenced on
+    orphan-qubit sources (physical qubit references)."""
+    qc = QuantumCircuit()
+    for _ in range(4):
+        qc.add_bits([Qubit()])
+    qc.z(1)
+    qc.z(3)
+    qc.metadata = {"braket_result_pragmas": [Probability(targets=None)]}
+
+    result = _run_pragma_handling_pass(qc)
+    added = _get_ops_after_base(result, len(qc.data) - 2)
+
+    measured = sorted(op[1][0] for op in added if op[0] == "measure")
+    assert measured == [1, 3]
 
 
 def test_hermitian_observable_applies_unitary():
