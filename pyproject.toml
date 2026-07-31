@@ -39,17 +39,17 @@ extend-select = [
     # "SLF",  # flake8-self (~41 errors)
     "SLOT",   # flake8-slots
     "TC",     # flake8-type-checking
-    "TID251", # flake8-tidy-imports
+    "banned-api", # flake8-tidy-imports
     # "TRY",  # tryceratops
     "UP",     # pyupgrade
     "YTT",    # flake8-2020
 ]
 extend-ignore = [
-    "N818",   # QiskitBraketException is public API
-    "TC001",  # imports used at runtime
-    "TC002",  # braket imports used at runtime in type annotations
-    "ANN002", # missing annotation on *args
-    "ANN003", # missing annotation on **kwargs
+    "error-suffix-on-exception-name",   # QiskitBraketException is public API
+    "typing-only-first-party-import",  # imports used at runtime
+    "typing-only-third-party-import",  # braket imports used at runtime in type annotations
+    "missing-type-args", # missing annotation on *args
+    "missing-type-kwargs", # missing annotation on **kwargs
 ]
 
 [tool.ruff.lint.isort]

@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 _TASK_ID_DIVIDER = ";"
 
-T = TypeVar("T", bound=Device, covariant=True)  # noqa: PLC0105
+T = TypeVar("T", bound=Device, covariant=True)  # ruff:ignore[type-name-incorrect-variance]
 
 
 def _device_max_program_set_executables(device: Device) -> int | None:

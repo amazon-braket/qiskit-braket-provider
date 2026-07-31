@@ -7,6 +7,7 @@ adapter.py, target.py, qasm_context.py, and compilation.py.
 from collections.abc import Callable
 from math import inf, pi
 
+import numpy as np
 import qiskit.circuit.library as qiskit_gates
 import qiskit.quantum_info as qiskit_qi
 from qiskit.circuit import Instruction as QiskitInstruction
@@ -19,6 +20,15 @@ from braket import experimental_capabilities as braket_expcaps
 from braket.circuits import gates as braket_gates
 from braket.circuits import noises as braket_noises
 from braket.circuits import observables as braket_observables
+from braket.ir.jaqcd import (
+    Amplitude,
+    DensityMatrix,
+    Expectation,
+    Probability,
+    Sample,
+    StateVector,
+    Variance,
+)
 from qiskit_braket_provider.providers import braket_instructions
 
 _BRAKET_TO_QISKIT_NAMES = {
@@ -246,3 +256,36 @@ _TRANSPILER_GATE_SUBSTITUTES: dict[tuple[str, tuple[float | str, ...]], "QiskitI
     ("rx", (pi / 2,)): qiskit_gates.SXGate(),
     ("rx", (-pi / 2,)): qiskit_gates.SXdgGate(),
 }
+
+_BASIS_INVARIANT_RESULT_TYPES = (StateVector, DensityMatrix, Amplitude)
+_Z_BASIS_RESULT_TYPES = (Probability,)
+_OBSERVABLE_RESULT_TYPES = (Expectation, Sample, Variance)
+_OBSERVABLE_TO_BASIS = {
+    "z": "z",
+    "i": "i",
+    "x": "x",
+    "y": "y",
+    "h": "h",
+}
+_IDENTITY_BASIS = "i"
+
+
+def _reverse_endianness(matrix: np.ndarray) -> np.ndarray:
+    """Reverse qubit endianness of a matrix (Braket big-endian ↔ Qiskit little-endian).
+
+    For single-qubit matrices this is a no-op. For multi-qubit matrices, the tensor
+    factor ordering is reversed.
+
+    Args:
+        matrix: Square matrix of dimension 2^n x 2^n.
+
+    Returns:
+        Matrix with reversed qubit ordering.
+    """
+    n_q = int(np.log2(matrix.shape[0]))
+    if n_q <= 1:
+        return matrix
+    return np.transpose(
+        matrix.reshape([2] * n_q * 2),
+        list(range(n_q))[::-1] + list(range(n_q, 2 * n_q))[::-1],
+    ).reshape((2**n_q, 2**n_q))

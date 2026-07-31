@@ -306,7 +306,7 @@ OPENQASM 3.0;
 box {
     h $0;
 """
-    with pytest.raises(Exception):  # noqa: B017
+    with pytest.raises(Exception):  # ruff:ignore[assert-raises-exception]
         to_qiskit(qasm)
 
 

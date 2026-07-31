@@ -20,7 +20,7 @@ from pathlib import Path
 from pygments.formatters import LatexFormatter
 
 project = "Qiskit-Braket provider"
-copyright = f"{datetime.datetime.now(tz=datetime.UTC).year}, Amazon.com"  # noqa: A001
+copyright = f"{datetime.datetime.now(tz=datetime.UTC).year}, Amazon.com"  # ruff:ignore[builtin-variable-shadowing]
 author = "Amazon Web Services"
 
 # The full version, including alpha/beta/rc tags

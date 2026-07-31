@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.20.1 (2026-07-24)
+
+### Bug Fixes and Other Changes
+
+ * resolve panic due to missing clbits on verbatim placeholder
+ * remove NotImplemented error for basis-invariant result types
+
+## v0.20.0 (2026-07-22)
+
+### Features
+
+ * support parametric function conversion from OQ3 to qiskit
+
+## v0.19.0 (2026-07-21)
+
+### Features
+
+ * add basis rotation pass
+
+### Bug Fixes and Other Changes
+
+ * fix errors due to new ruff version
+
+## v0.18.1 (2026-07-16)
+
+### Bug Fixes and Other Changes
+
+ * preserve OpenQASM 3 barriers in to_qiskit
+ * barrier scope and bare-barrier handling in to_qiskit
+ * to_qiskit for IQM experimental operators (cc_prx, measure_ff)
+
 ## v0.18.0 (2026-07-10)
 
 ### Features
