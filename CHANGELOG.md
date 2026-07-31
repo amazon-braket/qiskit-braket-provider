@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.20.2 (2026-07-31)
+
+### Bug Fixes and Other Changes
+
+ * scope 'all' to touched qubits for physical-qubit sources
+
 ## v0.20.1 (2026-07-24)
 
 ### Bug Fixes and Other Changes
