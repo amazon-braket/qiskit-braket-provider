@@ -149,7 +149,6 @@ if (c[0] == 1) {
 
 
 def test_mcm_branch_empty_bodies():
-    """A branching statement conditioned on MCM with no quantum ops raises ValueError."""
     qasm = """
 OPENQASM 3.0;
 qubit[1] q;
@@ -159,8 +158,12 @@ if (c == 1) {
     int[8] x = 0;
 }
 """
-    with pytest.raises(ValueError, match="empty bodies"):
-        to_qiskit(qasm)
+    qc = to_qiskit(qasm)
+    if_else_ops = _get_if_else_ops(qc)
+    assert len(if_else_ops) == 1
+    true_body, false_body = if_else_ops[0].operation.params
+    assert list(true_body.data) == []
+    assert false_body is None
 
 
 @pytest.mark.parametrize(

@@ -425,12 +425,6 @@ class _QiskitProgramContext(AbstractProgramContext):
 
         actual_false = false_body if false_body.data else None
 
-        if not true_body.data and not actual_false:
-            raise ValueError(
-                "Branching statement conditioned on a measurement has empty bodies. "
-                "Both if and else branches contain no quantum operations."
-            )
-
         # Sync parent and both bodies to the same bit layout (IfElseOp requires it).
         self._extend_bits(main, true_body)
         self._extend_bits(main, false_body)
