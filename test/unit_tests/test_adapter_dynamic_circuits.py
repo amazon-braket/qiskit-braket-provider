@@ -148,15 +148,20 @@ if (c[0] == 1) {
     assert false_body is None
 
 
-def test_mcm_branch_empty_bodies():
-    qasm = """
+@pytest.mark.parametrize(
+    "body",
+    ["int[8] x = 0;", ""],
+    ids=["classical_only", "empty"],
+)
+def test_mcm_branch_empty_bodies(body: str):
+    qasm = f"""
 OPENQASM 3.0;
 qubit[1] q;
 bit c;
 c = measure q[0];
-if (c == 1) {
-    int[8] x = 0;
-}
+if (c == 1) {{
+    {body}
+}}
 """
     qc = to_qiskit(qasm)
     if_else_ops = _get_if_else_ops(qc)
