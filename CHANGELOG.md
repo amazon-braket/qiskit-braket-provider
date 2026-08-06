@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.21.1 (2026-08-06)
+
+### Bug Fixes and Other Changes
+
+ * handle empty if statement
+
 ## v0.21.0 (2026-08-03)
 
 ### Features
