@@ -43,6 +43,16 @@ please ensure that:
    ```
    runs the minimal environment, but will fail on first failed test will all print outputs to STDOUT. 
 
+3. Tutorial notebooks under `docs/tutorials/` are integration-tested in the
+   [amazon-braket-examples](https://github.com/amazon-braket/amazon-braket-examples) repository.
+   When you change a tutorial, update the matching notebook under `examples/qiskit/` and run:
+
+   ```shell script
+   pytest test/integ_tests/test_all_notebooks.py -k "qiskit-2 or qiskit-3 or qiskit-4 or qiskit-5 or qiskit-6 or qiskit-7 or qiskit-8"
+   ```
+
+   See `docs/tutorials/index.rst` for the tutorial-to-example mapping.
+
 
 ### PR Title Format
 
