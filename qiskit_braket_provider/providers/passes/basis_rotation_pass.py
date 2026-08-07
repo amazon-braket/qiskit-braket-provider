@@ -11,7 +11,6 @@ from qiskit.transpiler.basepasses import TransformationPass
 
 from braket.ir.jaqcd import (
     Expectation,
-    Probability,
     Sample,
     Variance,
 )
@@ -95,22 +94,6 @@ def _rotation_gates_for_hermitian(
     return [(UnitaryGate(unitary), targets)], eigenvalues
 
 
-def _qubits_for_z_basis_type(result: Probability, num_qubits: int) -> set[int]:
-    """Return the set of qubit indices to measure for a Z-basis result type.
-
-    Args:
-        result: A Probability result type.
-        num_qubits: Total number of qubits in the circuit.
-
-    Returns:
-        Set of qubit indices to measure. No rotation is needed for Z-basis types.
-    """
-    targets = result.targets
-    if targets is not None:
-        return set(targets)
-    return set(range(num_qubits))
-
-
 def _check_basis_conflict(
     qubit_bases: dict[int, Hashable], qubit: int, basis_key: Hashable
 ) -> bool:
@@ -157,13 +140,13 @@ def _check_basis_conflict(
 
 
 def _plan_for_observable_type(
-    result: Expectation | Sample | Variance, num_qubits: int
+    result: Expectation | Sample | Variance, targets: list[int]
 ) -> tuple[list[RotationOp], dict[int, Hashable], dict[tuple[int, ...], np.ndarray]]:
     """Compute the rotation/measurement plan for an observable result type.
 
     Args:
         result: An Expectation, Sample, or Variance result type.
-        num_qubits: Total number of qubits in the circuit.
+        targets: The qubit indices this observable applies to.
 
     Returns:
         Tuple of (rotation_ops, qubit_bases, eigenvalues_by_qubits) where:
@@ -176,7 +159,6 @@ def _plan_for_observable_type(
             there are more observables than target qubits.
     """
     observable = result.observable
-    targets = result.targets if result.targets is not None else list(range(num_qubits))
 
     if len(set(targets)) != len(targets):
         raise ValueError(f"All targets in a result-type pragma must be unique: {targets}")
@@ -280,6 +262,14 @@ class AddBasisRotationAndMeasurement(TransformationPass):
             )
 
         num_qubits = dag.num_qubits()
+        # For physical-qubit sources ($N), Qiskit widens the register to the max
+        # index; 'all' should skip gap qubits the customer never referenced.
+        if any(q._register is None for q in dag.qubits):
+            all_qubits = sorted({
+                dag.find_bit(q).index for node in dag.op_nodes() for q in node.qargs
+            })
+        else:
+            all_qubits = list(range(num_qubits))
         all_rotation_ops: list[RotationOp] = []
         all_qubit_bases: dict[int, Hashable] = {}
         all_eigenvalues: dict[tuple[int, ...], np.ndarray] = {}
@@ -289,14 +279,14 @@ class AddBasisRotationAndMeasurement(TransformationPass):
                 continue
 
             if isinstance(result, _Z_BASIS_RESULT_TYPES):
-                qubits = _qubits_for_z_basis_type(result, num_qubits)
-                for qubit in qubits:
+                for qubit in result.targets if result.targets is not None else all_qubits:
                     _check_basis_conflict(all_qubit_bases, qubit, "z")
                 continue
 
             if isinstance(result, _OBSERVABLE_RESULT_TYPES):
+                targets = result.targets if result.targets is not None else all_qubits
                 rotation_ops, qubit_bases, eigenvalues_by_qubits = _plan_for_observable_type(
-                    result, num_qubits
+                    result, targets
                 )
                 for qubit_group, eigenvalues in eigenvalues_by_qubits.items():
                     if qubit_group not in all_eigenvalues:

@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.21.1 (2026-08-06)
+
+### Bug Fixes and Other Changes
+
+ * handle empty if statement
+
+## v0.21.0 (2026-08-03)
+
+### Features
+
+ * Automatically split/merge large program sets
+
+## v0.20.2 (2026-07-31)
+
+### Bug Fixes and Other Changes
+
+ * scope 'all' to touched qubits for physical-qubit sources
+
 ## v0.20.1 (2026-07-24)
 
 ### Bug Fixes and Other Changes
