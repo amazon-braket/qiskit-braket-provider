@@ -1,6 +1,7 @@
 """Tests for Qiskit to Braket adapter."""
 
 import copy
+import warnings
 from unittest import TestCase
 from unittest.mock import MagicMock, Mock, patch
 
@@ -1627,6 +1628,109 @@ rx(sin(theta) + 2.0*phi) q[0];"""
         expected = QuantumCircuit(1)
         expected.rx(qiskit_theta.sin() + 2.0 * qiskit_phi, 0)
         self.assertEqual(qiskit_circuit, expected)
+
+    def test_qubit_mapping_warning_fires_when_optimization_remaps_qubits(self):
+        """Tests that a UserWarning is issued when optimization_level > 0 and a
+        coupling_map cause qubit remapping with add_measurements=False.
+
+        Without measurements there is no way to recover the logical-to-physical
+        qubit mapping from the Braket circuit output alone. The warning alerts
+        callers before this information is silently lost. Resolves issue #287.
+        """
+
+        qc = QuantumCircuit(6)
+        qc.h(0)
+        qc.h(0)
+        qc.rz(0.1, 1)
+        qc.rz(-0.1, 1)
+        qc.cx(2, 3)
+        qc.cx(3, 4)
+        qc.cx(4, 5)
+
+        cmap = [[0, 1], [1, 0], [1, 2], [2, 1], [2, 3], [3, 2], [3, 4], [4, 3], [4, 5], [5, 4]]
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            to_braket(
+                qc,
+                add_measurements=False,
+                optimization_level=2,
+                coupling_map=cmap,
+                seed_transpiler=42,
+            )
+
+        mapping_warnings = [x for x in w if "remap" in str(x.message)]
+        self.assertEqual(
+            len(mapping_warnings),
+            1,
+            msg="Expected exactly one UserWarning about qubit remapping when "
+            "optimization_level > 0 and add_measurements=False.",
+        )
+        self.assertIn("add_measurements=True", str(mapping_warnings[0].message))
+
+    def test_no_qubit_mapping_warning_with_measurements(self):
+        """No qubit-remapping warning when add_measurements=True.
+        Resolves issue #287.
+        """
+
+        qc = QuantumCircuit(4)
+        qc.cx(0, 1)
+        qc.cx(1, 2)
+        qc.cx(2, 3)
+        cmap = [[0, 1], [1, 0], [1, 2], [2, 1], [2, 3], [3, 2]]
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            to_braket(
+                qc,
+                add_measurements=True,
+                optimization_level=2,
+                coupling_map=cmap,
+                seed_transpiler=42,
+            )
+
+        mapping_warnings = [x for x in w if "remap" in str(x.message)]
+        self.assertEqual(len(mapping_warnings), 0)
+
+    def test_no_qubit_mapping_warning_without_coupling_map(self):
+        """No qubit-remapping warning when no coupling_map or target.
+        Resolves issue #287.
+        """
+
+        qc = QuantumCircuit(4)
+        qc.cx(0, 1)
+        qc.cx(1, 2)
+        qc.cx(2, 3)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            to_braket(qc, add_measurements=False, optimization_level=2)
+
+        mapping_warnings = [x for x in w if "remap" in str(x.message)]
+        self.assertEqual(len(mapping_warnings), 0)
+
+    def test_no_qubit_mapping_warning_with_trivial_layout(self):
+        """No qubit-remapping warning when optimization_level=0 (trivial layout).
+        Resolves issue #287.
+        """
+
+        qc = QuantumCircuit(4)
+        qc.cx(0, 1)
+        qc.cx(1, 2)
+        qc.cx(2, 3)
+        cmap = [[0, 1], [1, 0], [1, 2], [2, 1], [2, 3], [3, 2]]
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            to_braket(
+                qc,
+                add_measurements=False,
+                optimization_level=0,
+                coupling_map=cmap,
+            )
+
+        mapping_warnings = [x for x in w if "remap" in str(x.message)]
+        self.assertEqual(len(mapping_warnings), 0)
 
     def test_unsupported_parameter_division(self):
         """Tests if TypeError is raised for parameter division."""

@@ -119,6 +119,14 @@ def _check_positional(pos: _T, kw: _T, name: str) -> _T:
     return pos
 
 
+def _has_nontrivial_layout(circuit: QuantumCircuit) -> bool:
+    """Return True if the transpiler assigned a non-identity qubit permutation."""
+    if circuit.layout is None:
+        return False
+    layout = circuit.layout.initial_index_layout(filter_ancillas=False)
+    return layout is not None and layout != list(range(len(layout)))
+
+
 @overload
 def to_braket(
     circuits: _Translatable = ...,
@@ -270,6 +278,18 @@ def to_braket(
         )
         for circ in result.circuits
     ]
+    if not add_measurements and any(_has_nontrivial_layout(c) for c in result.circuits):
+        warnings.warn(
+            "Transpilation with optimization_level > 0 and a coupling_map or target "
+            "may remap qubits. When add_measurements=False the logical-to-physical "
+            "qubit mapping is not reflected by measurement assignments and can be "
+            "hard to recover from the output circuit. "
+            "Consider using add_measurements=True, optimization_level=0, or "
+            "removing the coupling_map (which implicitly assumes a virtual-to-physical "
+            "mapping) if qubit correspondence must be preserved.",
+            UserWarning,
+            stacklevel=2,
+        )
     return translated[0] if single_instance else translated
 
 
