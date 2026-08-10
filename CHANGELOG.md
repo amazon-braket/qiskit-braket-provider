@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.22.0 (2026-08-10)
+
+### Features
+
+ * warn when qubit mapping may be lost with add_measurements=False
+
 ## v0.21.1 (2026-08-06)
 
 ### Bug Fixes and Other Changes
