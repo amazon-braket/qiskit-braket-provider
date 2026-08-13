@@ -19,7 +19,10 @@ from braket.program_sets import CircuitBinding, ParameterSets, ProgramSet
 from braket.tasks import ProgramSetQuantumTaskResult
 from qiskit_braket_provider.providers.adapter import rename_parameter, to_braket
 from qiskit_braket_provider.providers.braket_backend import BraketBackend
-from qiskit_braket_provider.providers.braket_primitive_task import BraketPrimitiveTask
+from qiskit_braket_provider.providers.braket_primitive_task import (
+    BraketPrimitiveTask,
+    run_split_program_set,
+)
 
 _DEFAULT_SHOTS = 1024  # Same value as BackendSamplerV2
 
@@ -52,7 +55,7 @@ class BraketSampler(BaseSamplerV2):
         verbatim: bool = False,
         optimization_level: int = 0,
         **options,
-    ):
+    ) -> None:
         """
         Initialize the Braket sampler.
 
@@ -71,7 +74,7 @@ class BraketSampler(BaseSamplerV2):
 
                 Default: 0.
         """
-        if not backend._supports_program_sets:
+        if backend._max_program_set_executables is None:
             raise ValueError("Braket device must support program sets")
         self._backend = backend
         self._verbatim = verbatim
@@ -101,8 +104,9 @@ class BraketSampler(BaseSamplerV2):
             parameter_indices.append(indices)
         shots_per_executable = pub_shots if pub_shots is not None else shots
         program_set = ProgramSet(circuit_bindings, shots_per_executable=shots_per_executable)
+        tasks, index_map = run_split_program_set(self._backend, program_set, **self._options)
         return BraketPrimitiveTask(
-            self._backend._device.run(program_set, **self._options),
+            tasks,
             lambda result: BraketSampler._translate_result(
                 result,
                 _JobMetadata(
@@ -112,6 +116,7 @@ class BraketSampler(BaseSamplerV2):
                 ),
             ),
             program_set,
+            index_map,
         )
 
     @staticmethod
@@ -136,9 +141,9 @@ class BraketSampler(BaseSamplerV2):
         param_indices = np.fromiter(np.ndindex(param_values.shape), dtype=object).flatten()
         return CircuitBinding(
             circuit,
-            input_sets=BraketSampler._translate_parameters(
-                [param_values[pi] for pi in param_indices]
-            ),
+            input_sets=BraketSampler._translate_parameters([
+                param_values[pi] for pi in param_indices
+            ]),
         ), param_indices
 
     @staticmethod
@@ -192,11 +197,11 @@ class BraketSampler(BaseSamplerV2):
                 for creg in circuit.cregs
             ]
             shape = pub.shape
-            measurements = np.array(
-                [executable_result.measurements for executable_result in program_result]
-            )
+            measurements = np.array([
+                executable_result.measurements for executable_result in program_result
+            ])
             arrays = {
-                item.creg_name: np.zeros(shape + (shots, item.num_bytes), dtype=np.uint8)
+                item.creg_name: np.zeros((*shape, shots, item.num_bytes), dtype=np.uint8)
                 for item in meas_info
             }
             for i, samples in enumerate(measurements):

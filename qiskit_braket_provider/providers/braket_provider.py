@@ -26,18 +26,21 @@ class BraketProvider:
          BraketBackend[Harmony],
          BraketBackend[Lucy],
          BraketBackend[SV1],
-         BraketBackend[TN1],
          BraketBackend[dm1]]
     """
 
-    def get_backend(self, name=None, **kwargs):
+    def get_backend(
+        self, name: str | None = None, emulator: bool = False, **kwargs
+    ) -> BraketAwsBackend | BraketLocalBackend:
         """Return a single backend matching the specified filters.
 
         Args:
             name (str): name of the selected backend
+            emulator (bool): return a local emulator backend for the selected device
+                instead of the device itself. Only QPUs have emulators. Default: ``False``.
             **kwargs: dict with additional options for filtering and storing aws session
         Returns:
-            BraketAwsBackend: a backend matching the filters.
+            BraketAwsBackend | BraketLocalBackend: a backend matching the filters.
         Raises:
             QiskitBackendNotFoundError: if no backend could be found or
             more than one backend matches the filters.
@@ -47,9 +50,17 @@ class BraketProvider:
             raise QiskitBackendNotFoundError("More than one backend matches the criteria")
         if not backends:
             raise QiskitBackendNotFoundError("No backend matches the criteria")
-        return backends[0]
+        backend = backends[0]
+        if emulator:
+            assert isinstance(backend, BraketAwsBackend)  # only QPUs have emulators
+            return backend.emulator()
+        return backend
 
-    def backends(self, name=None, **kwargs):
+    def backends(
+        self,
+        name: str | None = None,
+        **kwargs,
+    ) -> list[BraketAwsBackend | BraketLocalBackend]:
         """Return a list of backends matching the specified filters.
 
         Args:
@@ -95,12 +106,12 @@ class BraketProvider:
 class AWSBraketProvider(BraketProvider):
     """AWSBraketProvider class for accessing Amazon Braket backends."""
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, **kwargs) -> None:
         """This throws a deprecation warning on subclassing."""
         warnings.warn(f"{cls.__name__} is deprecated.", DeprecationWarning, stacklevel=2)
         super().__init_subclass__(**kwargs)
 
-    def __init__(self):
+    def __init__(self) -> None:
         """This throws a deprecation warning on initialization."""
         warnings.warn(
             f"{self.__class__.__name__} is deprecated. Use BraketProvider instead",

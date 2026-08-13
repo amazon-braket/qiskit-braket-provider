@@ -1,9 +1,4 @@
-<!-- Copyright Contributors to the Qiskit project. -->
-
-# Code of Conduct
-All members of this project agree to adhere to the Qiskit Code of Conduct listed at [https://github.com/Qiskit/qiskit/blob/master/CODE_OF_CONDUCT.md](https://github.com/Qiskit/qiskit/blob/master/CODE_OF_CONDUCT.md)
-
-----
-
-License: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/),
-Copyright Contributors to Qiskit.
+## Code of Conduct
+This project has adopted the [Amazon Open Source Code of Conduct](https://aws.github.io/code-of-conduct).
+For more information see the [Code of Conduct FAQ](https://aws.github.io/code-of-conduct-faq) or contact
+opensource-codeofconduct@amazon.com with any additional questions or comments.

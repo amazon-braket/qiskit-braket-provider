@@ -1,13 +1,13 @@
 """Amazon Braket backends."""
 
+from __future__ import annotations
+
 import copy
-import datetime
 import enum
 import logging
 import warnings
 from abc import ABC
-from collections.abc import Callable, Iterable
-from typing import Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from qiskit import QuantumCircuit
 from qiskit.providers import BackendV2, Options, QubitProperties
@@ -18,10 +18,11 @@ from braket.aws.queue_information import QueueDepthInfo
 from braket.circuits import Circuit
 from braket.device_schema import DeviceActionType
 from braket.devices import Device, LocalSimulator
+from braket.emulation.emulator import Emulator
 from braket.program_sets import ProgramSet
 from braket.tasks.local_quantum_task import LocalQuantumTask
 
-from .. import version
+from .._version import __version__
 from ..exception import QiskitBraketException
 from .adapter import (
     aws_device_to_target,
@@ -33,24 +34,38 @@ from .adapter import (
 )
 from .braket_quantum_task import BraketQuantumTask
 
+if TYPE_CHECKING:
+    import datetime
+    from collections.abc import Callable, Iterable
+
+    from .braket_provider import BraketProvider
+
 logger = logging.getLogger(__name__)
 
 _TASK_ID_DIVIDER = ";"
 
-T = TypeVar("T", bound=Device, covariant=True)  # noqa: PLC0105
+T = TypeVar("T", bound=Device, covariant=True)  # ruff:ignore[type-name-incorrect-variance]
+
+
+def _device_max_program_set_executables(device: Device) -> int | None:
+    action = device.properties.action
+    return (
+        action[DeviceActionType.OPENQASM_PROGRAM_SET].maximumExecutables
+        if DeviceActionType.OPENQASM_PROGRAM_SET in action
+        else None
+    )
 
 
 class BraketBackend(BackendV2, ABC, Generic[T]):
     """Base Qiskit backend for Amazon Braket devices."""
 
-    def __init__(self, device: T, name: str, **fields):
+    def __init__(self, device: T, name: str, **fields) -> None:
         super().__init__(name=name, **fields)
         self._device = device
-        self._supports_program_sets = (
-            DeviceActionType.OPENQASM_PROGRAM_SET in self._device.properties.action
-        )
+        self._qubit_labels: tuple[int, ...] | None = None
+        self._max_program_set_executables = _device_max_program_set_executables(self._device)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"BraketBackend[{self.name}]"
 
     @property
@@ -60,9 +75,9 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
 
         Unlike the qubits in the target, these labels are not necessarily contiguous.
         """
-        return None
+        return self._qubit_labels
 
-    def _validate_meas_level(self, meas_level: enum.Enum | int):
+    def _validate_meas_level(self, meas_level: enum.Enum | int) -> None:
         if isinstance(meas_level, enum.Enum):
             meas_level = meas_level.value
         if meas_level != 2:
@@ -82,11 +97,15 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
         """
         if native:
             return native_gate_set(self._device.properties)
-        else:
-            action = self._device.properties.action.get(DeviceActionType.OPENQASM)
-            return gateset_from_properties(action) if action else None
+        action = self._device.properties.action.get(DeviceActionType.OPENQASM)
+        return gateset_from_properties(action) if action else None
 
-    def _run_program_set(self, braket_circuits: list[Circuit], shots: int | None, **options):
+    def _run_program_set(
+        self,
+        braket_circuits: list[Circuit],
+        shots: int | None,
+        **options,
+    ) -> BraketQuantumTask:
         program_set = ProgramSet(braket_circuits, shots_per_executable=shots)
         task = self._device.run(program_set, **options)
         return BraketQuantumTask(
@@ -94,10 +113,22 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
         )
 
 
-class BraketLocalBackend(BraketBackend[LocalSimulator]):
-    """Runs quantum circuits on the Braket local simulator."""
+class BraketLocalBackend(BraketBackend[Device]):
+    """Runs quantum circuits on a Braket local simulator or device emulator.
 
-    def __init__(self, name: str = "default", **fields):
+    Wraps a ``LocalSimulator`` selected by ``name``, or a pre-built ``device``
+    such as the emulator from ``AwsDevice.emulator()`` when one is given.
+    """
+
+    def __init__(
+        self,
+        name: str = "default",
+        *,
+        device: Device | None = None,
+        target: Target | None = None,
+        qubit_labels: tuple[int, ...] | None = None,
+        **fields,
+    ) -> None:
         """Initialize the backend.
 
         Example:
@@ -109,24 +140,41 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
 
         Args:
             name (str): Name of backend. Default: ``default``.
+            device (Device | None): A pre-built local device to run on, such as the
+                emulator from ``AwsDevice.emulator()``. Defaults to a ``LocalSimulator``
+                selected by ``name``. Default: ``None``.
+            target (Target | None): Target for the backend. Built from the local
+                simulator when omitted, required when ``device`` is supplied.
+                Default: ``None``.
+            qubit_labels (tuple[int, ...] | None): Qubit labels of the device, in
+                ascending order. Default: ``None``.
             **fields: Extra arguments.
         """
-        simulator = LocalSimulator(backend=name)
-        super().__init__(simulator, name or simulator.name, **fields)
-        self._target = local_simulator_to_target(self._device)
-        self._gateset = self.get_gateset()
-        self.status = self._device.status
+        self._is_emulator = isinstance(device, Emulator)
+        if device is None:
+            device = LocalSimulator(backend=name)
+            target = target or local_simulator_to_target(device)
+        super().__init__(device, name or device.name, **fields)
+        self._target = target
+        self._qubit_labels = qubit_labels
+        self._gateset = None if self._is_emulator else self.get_gateset()
+        self.status = device.status
 
     @property
-    def target(self):
+    def emulator(self) -> bool:
+        """bool: Whether this backend runs on a device emulator rather than a simulator."""
+        return self._is_emulator
+
+    @property
+    def target(self) -> Target:
         return self._target
 
     @property
-    def max_circuits(self):
+    def max_circuits(self) -> None:
         return None
 
     @classmethod
-    def _default_options(cls):
+    def _default_options(cls) -> Options:
         return Options()
 
     @property
@@ -155,16 +203,25 @@ class BraketLocalBackend(BraketBackend[LocalSimulator]):
         raise NotImplementedError(f"Control channel is not supported by {self.name}.")
 
     def run(
-        self, run_input: QuantumCircuit | list[QuantumCircuit], *, shots: int = 1024, **options
+        self,
+        run_input: QuantumCircuit | list[QuantumCircuit],
+        *,
+        shots: int = 1024,
+        **options,
     ) -> BraketQuantumTask:
         convert_input = [run_input] if isinstance(run_input, QuantumCircuit) else list(run_input)
         verbatim = options.pop("verbatim", False)
         circuits: list[Circuit] = [
-            to_braket(circ, target=self._target if not verbatim else None, verbatim=verbatim)
+            to_braket(
+                circ,
+                target=self._target if not verbatim else None,
+                qubit_labels=self._qubit_labels,
+                verbatim=verbatim,
+            )
             for circ in convert_input
         ]
 
-        if shots == 0:
+        if shots == 0 and not self._is_emulator:
             circuits = [x.state_vector() for x in circuits]
         if "meas_level" in options:
             self._validate_meas_level(options["meas_level"])
@@ -200,7 +257,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
     def __init__(
         self,
         arn: str | None = None,
-        provider=None,
+        provider: BraketProvider | None = None,
         name: str | None = None,
         description: str | None = None,
         online_date: datetime.datetime | None = None,
@@ -208,7 +265,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         *,
         device: AwsDevice | None = None,
         **fields,
-    ):
+    ) -> None:
         """Initialize the backend.
 
         Example:
@@ -242,9 +299,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
             backend_version=backend_version,
             **fields,
         )
-        self._device.aws_session.add_braket_user_agent(
-            f"QiskitBraketProvider/{version.__version__}"
-        )
+        self._device.aws_session.add_braket_user_agent(f"QiskitBraketProvider/{__version__}")
         self._target = aws_device_to_target(device=self._device)
         self._qubit_labels = (
             tuple(sorted(self._device.topology_graph.nodes))
@@ -270,20 +325,37 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
             tasks=[AwsQuantumTask(arn=task_id) for task_id in task_ids],
         )
 
+    def emulator(self) -> BraketLocalBackend:
+        """Return a local backend that emulates this device's gate set, connectivity
+        and noise. Available for QPUs only, not for Braket managed simulators.
+
+        Returns:
+            BraketLocalBackend: A local backend that runs this device's emulator.
+
+        Example:
+            >>> backend = BraketProvider().get_backend("Aria 1")
+            >>> emulator_backend = backend.emulator()
+            >>> emulator_backend.run(transpiled_circuit, shots=10).result().get_counts()
+            {"100": 6, "001": 4}
+        """
+        return BraketLocalBackend(
+            name=self._device.name,
+            device=self._device.emulator(),
+            target=self._target,
+            qubit_labels=self._qubit_labels,
+            description=f"Emulator for AWS Device: {self._device.name}.",
+        )
+
     @property
-    def target(self):
+    def target(self) -> Target:
         return self._target
 
     @property
-    def max_circuits(self):
+    def max_circuits(self) -> None:
         return None
 
-    @property
-    def qubit_labels(self) -> tuple[int, ...] | None:
-        return self._qubit_labels
-
     @classmethod
-    def _default_options(cls):
+    def _default_options(cls) -> Options:
         return Options()
 
     def qubit_properties(self, qubit: int | list[int]) -> QubitProperties | list[QubitProperties]:
@@ -357,7 +429,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         num_processes: int | None = None,
         pass_manager: PassManager | None = None,
         **options,
-    ):
+    ) -> BraketQuantumTask:
         """Execute ``QuantumCircuit``s on a ``BraketAwsBackend``
 
         Args:
@@ -390,13 +462,13 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
             del options["meas_level"]
 
         # Always use target for simulator
-        target, basis_gates = self._target_and_basis_gates(native, pass_manager)
+        target, basis_gates, qubit_labels = self._resolve_compilation_args(native, pass_manager)
         braket_circuits = (
             to_braket(circuits, qubit_labels=self._qubit_labels, verbatim=True)
             if verbatim
             else to_braket(
                 circuits,
-                qubit_labels=self._qubit_labels,
+                qubit_labels=qubit_labels,
                 target=target,
                 basis_gates=basis_gates,
                 angle_restrictions=(
@@ -410,27 +482,35 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         )
         return (
             self._run_program_set(braket_circuits, shots, **options)
-            if self._supports_program_sets and shots != 0 and len(braket_circuits) > 1
+            if self._max_program_set_executables is not None
+            and shots != 0
+            and len(braket_circuits) > 1
             else self._run_batch(braket_circuits, shots, **options)
         )
 
-    def _target_and_basis_gates(
+    def _resolve_compilation_args(
         self, native: bool, pass_manager: PassManager
-    ) -> tuple[Target | None, set[str] | None]:
+    ) -> tuple[Target | None, set[str] | None, tuple[int, ...] | None]:
+        """Resolve the target, basis gates and qubit labels for circuit conversion."""
         if pass_manager:
-            return None, None
+            return None, None, self._qubit_labels
         if native or self._device.type == AwsDeviceType.SIMULATOR:
             # Always use target for simulator
-            return self._target, None
-        return None, self._gateset
+            return self._target, None, self._qubit_labels
+        return None, self._gateset, None
 
-    def _run_batch(self, braket_circuits: list[Circuit], shots: int, **options):
+    def _run_batch(
+        self,
+        braket_circuits: list[Circuit],
+        shots: int,
+        **options,
+    ) -> BraketQuantumTask:
         batch_task = self._device.run_batch(braket_circuits, shots=shots, **options)
         tasks: list[AwsQuantumTask] = batch_task.tasks
         task_id = _TASK_ID_DIVIDER.join(task.id for task in tasks)
         return BraketQuantumTask(task_id=task_id, tasks=tasks, backend=self, shots=shots)
 
-    def __deepcopy__(self, memo):
+    def __deepcopy__(self, memo: dict[int, Any]) -> BraketAwsBackend:
         """Create deepcopy of the BraketBackend.
 
         Note: the underlying self._device, and thus self._device.aws_session
@@ -447,7 +527,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
 class AWSBraketBackend(BraketAwsBackend):
     """AWSBraketBackend."""
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, **kwargs) -> None:
         """This throws a deprecation warning on subclassing."""
         warnings.warn(f"{cls.__name__} is deprecated.", DeprecationWarning, stacklevel=2)
         super().__init_subclass__(**kwargs)
@@ -455,13 +535,13 @@ class AWSBraketBackend(BraketAwsBackend):
     def __init__(
         self,
         device: AwsDevice,
-        provider=None,
+        provider: BraketProvider | None = None,
         name: str | None = None,
         description: str | None = None,
         online_date: datetime.datetime | None = None,
         backend_version: str | None = None,
         **fields,
-    ):
+    ) -> None:
         """This throws a deprecation warning on initialization."""
         warnings.warn(
             f"{self.__class__.__name__} is deprecated. Use BraketAwsBackend instead",

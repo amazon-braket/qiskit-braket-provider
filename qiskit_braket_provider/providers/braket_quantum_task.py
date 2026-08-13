@@ -1,6 +1,7 @@
 """Amazon Braket task."""
 
 from datetime import UTC, datetime
+from itertools import starmap
 
 from qiskit.providers import BackendV2, JobStatus, JobV1
 from qiskit.quantum_info import Statevector
@@ -14,7 +15,7 @@ from braket.tasks.local_quantum_task import LocalQuantumTask
 
 _TASK_STATUS_MAP = {
     "INITIALIZED": JobStatus.INITIALIZING,
-    "QUEUED": JobStatus.INITIALIZING,
+    "QUEUED": JobStatus.QUEUED,
     "FAILED": JobStatus.ERROR,
     "CANCELLING": JobStatus.CANCELLED,
     "CANCELLED": JobStatus.CANCELLED,
@@ -23,7 +24,30 @@ _TASK_STATUS_MAP = {
 }
 
 
-def retry_if_result_none(result):
+def _aggregate_task_status(braket_task_states: set[str]) -> JobStatus:
+    task_states = {_TASK_STATUS_MAP[state] for state in braket_task_states}
+    if JobStatus.DONE in task_states:
+        return (
+            JobStatus.DONE
+            if task_states.issubset({JobStatus.DONE, JobStatus.ERROR, JobStatus.CANCELLED})
+            else JobStatus.RUNNING
+        )
+    if JobStatus.ERROR in task_states:
+        return (
+            JobStatus.ERROR
+            if task_states.issubset({JobStatus.ERROR, JobStatus.CANCELLED})
+            else JobStatus.RUNNING
+        )
+    if JobStatus.CANCELLED in task_states:
+        return JobStatus.CANCELLED if len(task_states) == 1 else JobStatus.RUNNING
+    if JobStatus.RUNNING in task_states:
+        return JobStatus.RUNNING
+    if task_states == {JobStatus.INITIALIZING}:
+        return JobStatus.INITIALIZING
+    return JobStatus.QUEUED
+
+
+def retry_if_result_none(result: object) -> bool:
     """Retry on result function."""
     return result is None
 
@@ -73,7 +97,7 @@ class BraketQuantumTask(JobV1):
         backend: BackendV2,
         tasks: list[LocalQuantumTask] | list[AwsQuantumTask] | AwsQuantumTask,
         **metadata,
-    ):
+    ) -> None:
         """BraketQuantumTask for execution of circuits on Amazon Braket or locally.
 
         Args:
@@ -94,7 +118,7 @@ class BraketQuantumTask(JobV1):
         """int: The number of shots for the task."""
         return self.metadata["metadata"].get("shots", 0)
 
-    def submit(self):
+    def submit(self) -> None:
         return
 
     def queue_position(self) -> QuantumTaskQueueInfo:
@@ -134,6 +158,7 @@ class BraketQuantumTask(JobV1):
                     "We don't provide queue information for the LocalQuantumTask."
                 )
             return AwsQuantumTask(self.task_id()).queue_position()
+        return None
 
     def task_id(self) -> str:
         """Return a unique id identifying the task."""
@@ -168,16 +193,18 @@ class BraketQuantumTask(JobV1):
                 status=status,
             )
 
-        experiment_results = [
-            _result_from_circuit_task(task, result)
-            for task, result in zip(
-                tasks,
-                AwsQuantumTaskBatch._retrieve_results(
-                    tasks, AwsQuantumTaskBatch.MAX_CONNECTIONS_DEFAULT
+        experiment_results = list(
+            starmap(
+                _result_from_circuit_task,
+                zip(
+                    tasks,
+                    AwsQuantumTaskBatch._retrieve_results(
+                        tasks, AwsQuantumTaskBatch.MAX_CONNECTIONS_DEFAULT
+                    ),
+                    strict=True,
                 ),
-                strict=True,
             )
-        ]
+        )
         status = self.status(use_cached_value=True)
 
         return Result(
@@ -190,7 +217,7 @@ class BraketQuantumTask(JobV1):
             status=status,
         )
 
-    def cancel(self):
+    def cancel(self) -> None:
         if isinstance(self._tasks, QuantumTask):
             self._tasks.cancel()
         else:
@@ -200,22 +227,12 @@ class BraketQuantumTask(JobV1):
     def status(self, use_cached_value: bool = False) -> JobStatus:
         if isinstance(self._tasks, QuantumTask):
             return _TASK_STATUS_MAP[self._tasks.state()]
-        braket_tasks_states = [
+        braket_tasks_states = {
             (
                 task.state()
                 if isinstance(task, LocalQuantumTask)
                 else task.state(use_cached_value=use_cached_value)
             )
             for task in self._tasks
-        ]
-
-        if "FAILED" in braket_tasks_states:
-            return JobStatus.ERROR
-        elif "CANCELLED" in braket_tasks_states:
-            return JobStatus.CANCELLED
-        elif all(state == "COMPLETED" for state in braket_tasks_states):
-            return JobStatus.DONE
-        elif all(state == "RUNNING" for state in braket_tasks_states):
-            return JobStatus.RUNNING
-        else:
-            return JobStatus.QUEUED
+        }
+        return _aggregate_task_status(braket_tasks_states)

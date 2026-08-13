@@ -1,0 +1,540 @@
+"""Tests for BraketEstimator."""
+
+from collections.abc import Iterable
+from itertools import product
+from unittest import TestCase
+from unittest.mock import MagicMock, Mock, patch
+
+import numpy as np
+from qiskit import QuantumCircuit
+from qiskit.circuit import Parameter
+from qiskit.primitives import BackendEstimatorV2, BasePrimitiveJob
+from qiskit.primitives.containers.bindings_array import BindingsArray
+from qiskit.primitives.containers.estimator_pub import EstimatorPub, EstimatorPubLike
+from qiskit.primitives.containers.observables_array import ObservablesArray
+from qiskit.quantum_info import SparsePauliOp
+
+from braket.program_sets import ProgramSet
+from qiskit_braket_provider.providers import BraketLocalBackend
+from qiskit_braket_provider.providers.braket_estimator import (
+    BraketEstimator,
+    _JobMetadata,
+    _PubMetadata,
+)
+from qiskit_braket_provider.providers.braket_primitive_task import BraketPrimitiveTask
+
+
+class TestBraketEstimator(TestCase):
+    """Tests for BraketEstimator."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.backend = BraketLocalBackend()
+        self.estimator = BraketEstimator(self.backend)
+        self.estimator_backend = BackendEstimatorV2(backend=self.backend)
+
+    def assert_correct_results(self, task: BraketPrimitiveTask, pubs: Iterable[EstimatorPubLike]):
+        """Compares the results from BraketEstimator and BackendEstimatorV2"""
+        for actual, expected in zip(
+            task.result(), self.estimator_backend.run(pubs).result(), strict=True
+        ):
+            self.assertTrue(np.allclose(actual.data.evs, expected.data.evs, rtol=0.3, atol=0.2))
+
+    @staticmethod
+    def _mock_run_task(mock_run: Mock) -> Mock:
+        mock_task = Mock()
+        mock_task.id = "test-task-id"
+        mock_run.return_value = mock_task
+        return mock_task
+
+    def test_program_sets_unsupported(self):
+        """Tests that initialization raises a ValueError if program sets aren't supported"""
+        backend = BraketLocalBackend()
+        backend._max_program_set_executables = None
+        with self.assertRaises(ValueError):
+            BraketEstimator(backend)
+
+    def test_simple_pub(self):
+        """Test a simple pub with no broadcasting."""
+        qc = QuantumCircuit(2)
+        qc.h(0)
+        qc.cx(0, 1)
+
+        observable = SparsePauliOp(["ZZ"])
+        pub = (qc, observable)
+
+        with patch.object(self.backend._device, "run") as mock_run:
+            self._mock_run_task(mock_run)
+
+            job = self.estimator.run([pub], precision=0.01)
+
+            mock_run.assert_called_once()
+            self.assertIsInstance(mock_run.call_args.args[0], ProgramSet)
+            self.assertIsInstance(job, BasePrimitiveJob)
+
+    def test_parameterized_circuit(self):
+        """Test with a parameterized circuit."""
+        theta = Parameter("θ")
+        qc = QuantumCircuit(1)
+        qc.ry(theta, 0)
+
+        observable = SparsePauliOp(["Z"])
+        param_values = np.array([[0.0], [np.pi / 4], [np.pi / 2]])
+        pub = (qc, observable, param_values)
+
+        with patch.object(self.backend._device, "run") as mock_run:
+            self._mock_run_task(mock_run)
+
+            job = self.estimator.run([pub], precision=0.01)
+
+            mock_run.assert_called_once()
+            self.assertIsInstance(job, BasePrimitiveJob)
+
+    def test_multiple_observables(self):
+        """Test with multiple observables."""
+        qc = QuantumCircuit(2)
+        qc.h(0)
+        qc.cx(0, 1)
+
+        observables = [SparsePauliOp(["ZZ"]), SparsePauliOp(["XX"])]
+        pub = (qc, observables)
+
+        with patch.object(self.backend._device, "run") as mock_run:
+            self._mock_run_task(mock_run)
+
+            job = self.estimator.run([pub], precision=0.01)
+
+            mock_run.assert_called_once()
+            self.assertIsInstance(job.program_set, ProgramSet)
+
+    def test_multiple_pubs(self):
+        """Test running multiple pubs."""
+        qc1 = QuantumCircuit(1)
+        qc1.h(0)
+
+        qc2 = QuantumCircuit(2)
+        qc2.h(0)
+        qc2.cx(0, 1)
+
+        obs1 = SparsePauliOp(["Z"])
+        obs2 = SparsePauliOp(["ZZ"])
+
+        pub1 = (qc1, obs1)
+        pub2 = (qc2, obs2)
+
+        with patch.object(self.backend._device, "run") as mock_run:
+            self._mock_run_task(mock_run)
+
+            job = self.estimator.run([pub1, pub2], precision=0.01)
+
+            mock_run.assert_called_once()
+            self.assertIsInstance(job, BasePrimitiveJob)
+
+    def test_default_precision(self):
+        """Test that default precision is used when not specified."""
+        qc = QuantumCircuit(1)
+        qc.h(0)
+        observable = SparsePauliOp(["Z"])
+        pub = (qc, observable)
+
+        with patch.object(self.backend._device, "run") as mock_run:
+            self._mock_run_task(mock_run)
+
+            job = self.estimator.run([pub])
+
+            mock_run.assert_called_once()
+            self.assertIsInstance(job, BasePrimitiveJob)
+
+    def test_custom_precision(self):
+        """Test using custom precision."""
+        qc = QuantumCircuit(1)
+        qc.h(0)
+        observable = SparsePauliOp(["Z"])
+        pub = (qc, observable)
+
+        custom_precision = 0.05
+
+        with patch.object(self.backend._device, "run") as mock_run:
+            self._mock_run_task(mock_run)
+
+            job = self.estimator.run([pub], precision=custom_precision)
+
+            mock_run.assert_called_once()
+            self.assertIsInstance(job, BasePrimitiveJob)
+
+    def test_complex_broadcasting(self):
+        """Test with complex broadcasting shapes (2, 3, 6)."""
+        theta = Parameter("θ")
+        phi = Parameter("φ")
+        qc = QuantumCircuit(2)
+        qc.ry(theta, 0)
+        qc.rx(phi, 1)
+        qc.cx(0, 1)
+
+        # Parameter values with shape (3, 6)
+        rng = np.random.default_rng(42)
+        param_data = {
+            "θ": rng.uniform(0, 2 * np.pi, size=(3, 6)),
+            "φ": rng.uniform(0, 2 * np.pi, size=(3, 6)),
+        }
+        parameter_values = BindingsArray(param_data)
+
+        # Observables with shape (2, 3, 1)
+        observables = [
+            [[SparsePauliOp(["ZZ"])], [SparsePauliOp(["XX"])], [SparsePauliOp(["YY"])]],
+            [[SparsePauliOp(["ZI"])], [SparsePauliOp(["IZ"])], [SparsePauliOp(["XI"])]],
+        ]
+
+        pub = (qc, observables, parameter_values)
+
+        with patch.object(self.backend._device, "run") as mock_run:
+            self._mock_run_task(mock_run)
+
+            job = self.estimator.run([pub], precision=0.01)
+
+            mock_run.assert_called_once()
+            self.assertIsInstance(job.program_set, ProgramSet)
+            self.assertIsInstance(job, BasePrimitiveJob)
+
+    def test_broadcasting_with_scalar_observable(self):
+        """Test broadcasting with scalar observable and array parameters."""
+        theta = Parameter("θ")
+        qc = QuantumCircuit(1)
+        qc.ry(theta, 0)
+
+        param_values = np.linspace(0, np.pi, 5)
+        observable = SparsePauliOp(["Z"])
+        pub = (qc, observable, param_values)
+
+        with patch.object(self.backend._device, "run") as mock_run:
+            self._mock_run_task(mock_run)
+
+            job = self.estimator.run([pub], precision=0.01)
+
+            mock_run.assert_called_once()
+            self.assertIsInstance(job, BasePrimitiveJob)
+
+    def test_broadcasting_with_array_observables(self):
+        """Test broadcasting with array observables and scalar parameters."""
+        qc = QuantumCircuit(2)
+        qc.h(0)
+        qc.cx(0, 1)
+
+        observables = [
+            SparsePauliOp(["ZZ"]),
+            SparsePauliOp(["XX"]),
+            SparsePauliOp(["YY"]),
+            SparsePauliOp(["ZI"]),
+        ]
+
+        pub = (qc, observables)
+
+        with patch.object(self.backend._device, "run") as mock_run:
+            self._mock_run_task(mock_run)
+
+            job = self.estimator.run([pub], precision=0.01)
+
+            mock_run.assert_called_once()
+            self.assertIsInstance(job, BasePrimitiveJob)
+
+    def test_different_precisions_raises_error(self):
+        """Test that pubs with different precisions raise an error."""
+        qc = QuantumCircuit(1)
+        qc.h(0)
+        observable = SparsePauliOp(["Z"])
+
+        # Create pubs with different precisions
+        obs_array = ObservablesArray([observable])
+        pub1 = EstimatorPub(circuit=qc, observables=obs_array, precision=0.01)
+        pub2 = EstimatorPub(circuit=qc, observables=obs_array, precision=0.02)
+
+        with self.assertRaises(ValueError) as context:
+            self.estimator.run([pub1, pub2])
+
+        self.assertIn("same precision", str(context.exception))
+
+    def test_run_splits_program_set_by_device_executable_limit(self):
+        """Test that program sets larger than the device executable limit are split."""
+        qc = QuantumCircuit(4)
+        qc.h(0)
+        labels = ["".join(label) for label in product("IXYZ", repeat=4)][1:102]
+        observables = [SparsePauliOp(label) for label in labels]
+        pub = (qc, observables)
+        mock_task_1 = Mock()
+        mock_task_1.id = "task-1"
+        mock_task_2 = Mock()
+        mock_task_2.id = "task-2"
+
+        batch = Mock()
+        batch.tasks = [mock_task_1, mock_task_2]
+        device = Mock()
+        device.run_batch.return_value = batch
+        self.estimator._backend._device = device
+
+        task = self.estimator.run([pub], precision=0.05)
+
+        self.assertEqual(task.program_set.total_executables, 101)
+        self.assertEqual(task.tasks, (mock_task_1, mock_task_2))
+        device.run_batch.assert_called_once()
+        self.assertEqual(
+            [program_set.total_executables for program_set in device.run_batch.call_args.args[0]],
+            [100, 1],
+        )
+        self.assertEqual(device.run_batch.call_args.kwargs, {"shots": -1})
+
+    def test_non_broadcastable_shapes_raises_error(self):
+        """Test that non-broadcastable shapes raise an error."""
+        theta = Parameter("θ")
+        qc = QuantumCircuit(1)
+        qc.ry(theta, 0)
+
+        # Create observables with shape (3,)
+        observables = [SparsePauliOp(["Z"]), SparsePauliOp(["X"]), SparsePauliOp(["Y"])]
+
+        # Create parameter values with shape (2, 1) - not broadcastable with (3,)
+        param_values = np.array([[0.0], [np.pi / 4]])
+
+        pub = (qc, observables, param_values)
+
+        with patch.object(self.backend._device, "run") as mock_run:
+            mock_task = Mock()
+            mock_task.id = "test-task-id"
+            mock_run.return_value = mock_task
+
+            with self.assertRaises(ValueError) as context:
+                self.estimator.run([pub], precision=0.01)
+
+            self.assertIn("not broadcastable", str(context.exception))
+
+    def test_run_local_single_observable_or_parameter(self):
+        """Tests that correct results are returned when there is only one observable or parameter"""
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        circuit.ry(Parameter("θ"), 0)
+        observables = [SparsePauliOp("ZX"), SparsePauliOp("XZ")]
+        parameters = [np.pi / 3, np.pi / 6]
+        pubs = [
+            (circuit, observables[0], parameters),
+            (circuit, observables, parameters[0]),
+            (circuit, observables[1], parameters[1]),
+        ]
+        task = self.estimator.run(pubs)
+        program_set = task.program_set
+        self.assertEqual(len(program_set), 3)
+        self.assertEqual(len(program_set[0]), 2)
+        self.assertEqual(len(program_set[1]), 2)
+        self.assertEqual(len(program_set[2]), 1)
+        self.assert_correct_results(task, pubs)
+
+    def test_run_local_no_parameters(self):
+        """Tests that correct results are returned for circuits with no parameters"""
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        circuit.ry(np.pi / 3, 0)
+        observables = [SparsePauliOp("ZX"), SparsePauliOp("XZ")]
+        pubs = [(circuit, observables), (circuit, observables[0])]
+        task = self.estimator.run(pubs)
+        program_set = task.program_set
+        self.assertEqual(len(program_set), 2)
+        self.assertEqual(len(program_set[0]), 2)
+        self.assertEqual(len(program_set[1]), 1)
+        self.assert_correct_results(task, pubs)
+
+    def test_run_local_pauli_sum(self):
+        """Tests that correct results are returned when one observable is a Pauli sum"""
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        circuit.ry(Parameter("θ[0]"), 0)
+        circuit.rz(Parameter("θ[1]"), 0)
+        circuit.cx(0, 1)
+        circuit.h(0)
+
+        num_params = 20
+        pub = (
+            circuit,
+            [
+                [SparsePauliOp("ZZ")],
+                [SparsePauliOp("ZX")],
+                [SparsePauliOp("XZ")],
+                [SparsePauliOp(["ZX", "XZ"], [0.3, 0.8])],
+            ],
+            np.vstack([
+                np.linspace(-np.pi, np.pi, num_params),
+                np.linspace(-4 * np.pi, 4 * np.pi, num_params),
+            ]).T,
+        )
+
+        task = self.estimator.run([pub])
+        program_set = task.program_set
+        self.assertEqual(len(program_set), 2)
+        self.assertEqual(len(program_set[0]), num_params * 2)
+        self.assertEqual(len(program_set[1]), num_params * 3)
+        self.assert_correct_results(task, [pub])
+
+    def test_run_local_all_pauli_sums(self):
+        """Tests that correct results are returned when all observables are Pauli sums"""
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        circuit.ry(Parameter("theta"), 0)
+        circuit.rz(Parameter("phi"), 0)
+        circuit.cx(0, 1)
+        circuit.h(0)
+
+        num_params = 20
+        pub = (
+            circuit,
+            [
+                [SparsePauliOp(["XX", "IY"], [0.5, 0.5])],
+                [SparsePauliOp(["YY", "ZI", "XY"], [0.5, 0.5, 0.1])],
+            ],
+            np.vstack([
+                np.linspace(-np.pi, np.pi, num_params),
+                np.linspace(-4 * np.pi, 4 * np.pi, num_params),
+            ]).T,
+        )
+
+        task = self.estimator.run([pub])
+        program_set = task.program_set
+        self.assertEqual(len(program_set), 2)
+        self.assertEqual(len(program_set[0]), num_params * 2)
+        self.assertEqual(len(program_set[1]), num_params * 3)
+        self.assert_correct_results(task, [pub])
+
+    def test_run_local_broadcasting(self):
+        """Tests that correct results are returned with broadcasted arrays"""
+        circuit = QuantumCircuit(3)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        circuit.ry(Parameter("θ"), 0)
+        circuit.h(2)
+
+        num_steps = 6
+        pub = (
+            circuit,
+            [
+                [[SparsePauliOp(["IZZ"])], [SparsePauliOp(["IZX"])], [SparsePauliOp(["III"])]],
+                [[SparsePauliOp(["IXZ"])], [SparsePauliOp(["IXX"])], [SparsePauliOp(["YYY"])]],
+            ],
+            np.array(  # shape (3, 6)
+                [
+                    np.linspace(0, 2 * np.pi, num_steps),
+                    np.linspace(0, np.pi, num_steps),
+                    np.linspace(np.pi, 2 * np.pi, num_steps),
+                ]
+            ),
+        )
+
+        task = self.estimator.run([pub])
+        program_set = task.program_set
+        self.assertEqual(len(program_set), 3)
+        for entry in task.program_set:
+            self.assertEqual(len(entry), num_steps * 2)
+        self.assert_correct_results(task, [pub])
+
+    def test_abelian_grouping_reduces_executables(self):
+        """Grouping co-measures qubit-wise-commuting observables, cutting Braket executables."""
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        # Z-basis {ZZ, IZ, ZI}, X-basis {XX, XI}, Y-basis {YY}: 6 observables, 3 commuting groups.
+        observables = [SparsePauliOp(p) for p in ["ZZ", "IZ", "ZI", "XX", "XI", "YY"]]
+        pub = (circuit, observables)
+
+        ungrouped = BraketEstimator(self.backend, abelian_grouping=False).run([pub], precision=0.05)
+        grouped = BraketEstimator(self.backend, abelian_grouping=True).run([pub], precision=0.05)
+
+        self.assertEqual(ungrouped.program_set.total_executables, 6)
+        self.assertEqual(grouped.program_set.total_executables, 3)
+        self.assert_correct_results(grouped, [pub])
+
+    def test_abelian_grouping_matches_reference_no_parameters(self):
+        """Grouped estimates match BackendEstimatorV2 for mixed commuting / sum / identity terms."""
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        observables = [
+            SparsePauliOp(["ZZ", "ZI", "II"], [1.0, 0.5, 0.25]),  # commuting terms plus identity
+            SparsePauliOp(["XX", "YY"], [0.5, 0.5]),  # spans two measurement bases
+            SparsePauliOp("XI"),
+        ]
+        pub = (circuit, observables)
+        task = BraketEstimator(self.backend, abelian_grouping=True).run([pub], precision=0.02)
+        self.assert_correct_results(task, [pub])
+
+    def test_abelian_grouping_partial_support_identity_basis(self):
+        """A group acting on only some qubits measures identity on the untouched qubits.
+
+        ``IX`` and ``IZ`` don't qubit-wise commute, so each forms its own single-term group whose
+        shared basis is identity on the qubit no term acts on, exercising the identity branch of
+        the per-qubit basis construction.
+        """
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        observables = [SparsePauliOp("IX"), SparsePauliOp("IZ")]
+        pub = (circuit, observables)
+        task = BraketEstimator(self.backend, abelian_grouping=True).run([pub], precision=0.02)
+        self.assert_correct_results(task, [pub])
+
+    def test_abelian_grouping_matches_reference_parameterized(self):
+        """Grouped estimates match BackendEstimatorV2 with parameters and broadcasting."""
+        circuit = QuantumCircuit(2)
+        circuit.h(0)
+        circuit.cx(0, 1)
+        circuit.ry(Parameter("θ"), 0)
+        num_steps = 5
+        pub = (
+            circuit,
+            [[SparsePauliOp("ZZ")], [SparsePauliOp("ZI")], [SparsePauliOp("XX")]],
+            np.linspace(0, np.pi, num_steps),
+        )
+        task = BraketEstimator(self.backend, abelian_grouping=True).run([pub], precision=0.03)
+        self.assert_correct_results(task, [pub])
+
+    def test_abelian_grouping_parity_reconstruction_exact(self):
+        """Deterministically pin the grouped parity reconstruction without the simulator.
+
+        Feeds a hand-built bitstring array through ``_translate_result`` and asserts exact
+        expectation values. The single-qubit observables have distinct values so a qubit-to-column
+        swap would change the result and fail the test.
+        """
+        # One Z-basis group binding over 2 qubits; columns chosen so <Z_q0> != <Z_q1>.
+        measurements = np.array([[0, 0], [0, 1], [0, 1], [1, 1]])
+        # col0 = [0,0,0,1] -> <Z on q0> = +0.5 ; col1 = [0,1,1,1] -> <Z on q1> = -0.5
+
+        # task_result[binding][param].measurements -> the hand-built bitstrings
+        composite_entry = Mock(entries=[Mock(measurements=measurements)])
+        task_result = MagicMock()
+        task_result.__getitem__.return_value = composite_entry
+
+        circuit = QuantumCircuit(2)
+        observables = [
+            SparsePauliOp("ZZ"),  # support q0, q1            -> 0.0
+            SparsePauliOp("IZ"),  # Z on q0 (little-endian)   -> +0.5
+            SparsePauliOp("ZI"),  # Z on q1                   -> -0.5
+            SparsePauliOp(["II"], [0.5]),  # identity         -> 0.5 * 1
+        ]
+        pub = EstimatorPub.coerce((circuit, observables))
+
+        pub_meta = _PubMetadata(
+            num_bindings=1,
+            binding_to_result_map={},
+            sum_binding_indices=set(),
+            grouped_binding_map={
+                0: [
+                    (0, 0, 1.0, (0, 1)),
+                    (1, 0, 1.0, (0,)),
+                    (2, 0, 1.0, (1,)),
+                    (3, 0, 0.5, ()),
+                ]
+            },
+            grouped_colmap={0: {0: 0, 1: 1}},
+        )
+        metadata = _JobMetadata(pubs=[pub], pub_metadata=[pub_meta], precision=0.01, shots=4)
+
+        evs = BraketEstimator._translate_result(task_result, metadata)[0].data.evs
+        np.testing.assert_allclose(evs, [0.0, 0.5, -0.5, 0.5])

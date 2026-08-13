@@ -1,41 +1,34 @@
-# This code is part of Qiskit.
-#
-# (C) Copyright IBM 2022.
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Portions Copyright IBM 2022.
 #
 # This code is licensed under the Apache License, Version 2.0. You may
-# obtain a copy of this license in the LICENSE.txt file in the root directory
+# obtain a copy of this license in the LICENSE file in the root directory
 # of this source tree or at http://www.apache.org/licenses/LICENSE-2.0.
 #
 # Any modifications or derivative works of this code must retain this
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
-# pylint: disable=invalid-name
-
 """
 Sphinx documentation builder
 """
 
 # General options:
-import os
-from typing import Any
+import datetime
+from pathlib import Path
+
+from pygments.formatters import LatexFormatter
 
 project = "Qiskit-Braket provider"
-copyright = "2022"  # pylint: disable=redefined-builtin
-author = "Qiskit team"
+copyright = f"{datetime.datetime.now(tz=datetime.UTC).year}, Amazon.com"  # ruff:ignore[builtin-variable-shadowing]
+author = "Amazon Web Services"
 
 # The full version, including alpha/beta/rc tags
-version_path = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "..",
-    "qiskit_braket_provider",
-    "version.py",
-)
-version_dict: dict[str, Any] | None = {}
-with open(version_path) as fp:
-    exec(fp.read(), version_dict)  # noqa: S102
-version = version_dict["__version__"]
-release = version_dict["__version__"]
+with (Path(__file__).resolve().parent / ".." / "qiskit_braket_provider" / "_version.py").open(
+    encoding="utf-8"
+) as f:
+    version = f.readlines()[-1].split()[-1].strip("\"'")
+release = version
 
 extensions = [
     "sphinx.ext.napoleon",
@@ -44,12 +37,11 @@ extensions = [
     "sphinx.ext.mathjax",
     "sphinx.ext.viewcode",
     "sphinx.ext.extlinks",
-    "jupyter_sphinx",
     "sphinx_autodoc_typehints",
     "IPython.sphinxext.ipython_console_highlighting",
-    "reno.sphinxext",
     "nbsphinx",
     "qiskit_sphinx_theme",
+    "sphinxcontrib.rsvgconverter",
 ]
 templates_path = ["_templates"]
 numfig = True
@@ -76,3 +68,12 @@ exclude_patterns = ["_build", "**.ipynb_checkpoints"]
 
 html_theme = "qiskit-ecosystem"
 html_title = f"{project} {release}"
+
+# LaTeX options (for PDF builds on Read the Docs)
+latex_engine = "lualatex"
+latex_elements = {
+    "preamble": rf"""
+\providecommand{{\mathbfit}}[1]{{\boldsymbol{{#1}}}}
+{LatexFormatter().get_style_defs()}
+""",
+}

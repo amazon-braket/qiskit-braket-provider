@@ -3,6 +3,7 @@ __pycache__
 .DS_Store
 
 venv/
+.venv*/
 .idea/
 *.iml
 .vscode/
@@ -53,4 +54,3 @@ ENV/
 
 # Sphinx
 docs/stubs/
-docs/_build/

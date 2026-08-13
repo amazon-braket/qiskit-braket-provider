@@ -1,0 +1,162 @@
+# Changelog
+
+## v0.22.0 (2026-08-10)
+
+### Features
+
+ * warn when qubit mapping may be lost with add_measurements=False
+
+## v0.21.1 (2026-08-06)
+
+### Bug Fixes and Other Changes
+
+ * handle empty if statement
+
+## v0.21.0 (2026-08-03)
+
+### Features
+
+ * Automatically split/merge large program sets
+
+## v0.20.2 (2026-07-31)
+
+### Bug Fixes and Other Changes
+
+ * scope 'all' to touched qubits for physical-qubit sources
+
+## v0.20.1 (2026-07-24)
+
+### Bug Fixes and Other Changes
+
+ * resolve panic due to missing clbits on verbatim placeholder
+ * remove NotImplemented error for basis-invariant result types
+
+## v0.20.0 (2026-07-22)
+
+### Features
+
+ * support parametric function conversion from OQ3 to qiskit
+
+## v0.19.0 (2026-07-21)
+
+### Features
+
+ * add basis rotation pass
+
+### Bug Fixes and Other Changes
+
+ * fix errors due to new ruff version
+
+## v0.18.1 (2026-07-16)
+
+### Bug Fixes and Other Changes
+
+ * preserve OpenQASM 3 barriers in to_qiskit
+ * barrier scope and bare-barrier handling in to_qiskit
+ * to_qiskit for IQM experimental operators (cc_prx, measure_ff)
+
+## v0.18.0 (2026-07-10)
+
+### Features
+
+ * changes in the context to parse result pragmas
+
+## v0.17.5 (2026-07-08)
+
+### Bug Fixes and Other Changes
+
+ * register Braket-native two-qubit gates in to_qiskit
+
+## v0.17.4 (2026-07-06)
+
+### Bug Fixes and Other Changes
+
+ * correctly write measures across multiple bit registers in to_qiskit
+
+## v0.17.3 (2026-06-30)
+
+### Bug Fixes and Other Changes
+
+ * update tests & tutorials to current Braket devices
+
+## v0.17.2 (2026-06-29)
+
+### Bug Fixes and Other Changes
+
+ * allocate missing qubits in add_measure for physical-qubit refs
+ * Preserve if/measure inside verbatim box in to_qiskit
+ * Share parent bits in control-flow body circuits in to_qiskit
+
+## v0.17.1 (2026-06-25)
+
+### Bug Fixes and Other Changes
+
+ * classical bit in box
+
+## v0.17.0 (2026-06-22)
+
+### Features
+
+ * add abelian grouping of commuting observables to BraketEstimator
+ * add verbatim support from Circuits to QuantumCircuit
+
+## v0.16.0 (2026-06-17)
+
+### Features
+
+ * add device emulator support
+
+### Bug Fixes and Other Changes
+
+ * Don't use qubit labels for virtual qubits
+ * allow empty circuit in _get_circuits
+
+## v0.15.0 (2026-06-16)
+
+### Features
+
+ * support Braket parameter functions in to_qiskit
+
+## v0.14.4 (2026-05-19)
+
+### Bug Fixes and Other Changes
+
+ * use new default simulator interface
+
+## v0.14.3 (2026-05-06)
+
+### Bug Fixes and Other Changes
+
+ * fixed missing layout after _substitute call
+
+## v0.14.2 (2026-04-29)
+
+### Bug Fixes and Other Changes
+
+ * unify MCM-dependency check in _QiskitProgramContext
+ * missing layout bug
+
+## v0.14.1 (2026-04-29)
+
+### Bug Fixes and Other Changes
+
+ * Ignore barriers if unsupported
+
+## v0.14.0 (2026-04-27)
+
+### Features
+
+ * adding loop support for OpenQASM
+
+### Bug Fixes and Other Changes
+
+ * remove pylint config and stale pylint comments
+
+## v0.13.1 (2026-04-23)
+
+### Bug Fixes and Other Changes
+
+ * fix / feature: Add barrier to Target
+ * add more ruff checks and fix raised errors
+ * adjust coupling_map logic
+ * Fix documentation wording in 4_tutorial_native_programming.ipynb
