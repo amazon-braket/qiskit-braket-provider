@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.22.1 (2026-08-13)
+
+### Bug Fixes and Other Changes
+
+ * typo in 5_tutorial_transpilation.ipynb
+
 ## v0.22.0 (2026-08-10)
 
 ### Features
