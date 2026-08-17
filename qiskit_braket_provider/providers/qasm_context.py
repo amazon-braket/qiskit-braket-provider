@@ -15,6 +15,7 @@ from qiskit.circuit import (
     Barrier,
     BoxOp,
     CircuitInstruction,
+    ClassicalRegister,
     Clbit,
     ForLoopOp,
     Gate,
@@ -62,6 +63,8 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_VERBATIM_BOX_NAME,
     _SYMPY_FUNCTION_TO_QISKIT_METHOD,
 )
+
+_OUTPUT_VARIABLES_KEY = "braket_output_variables"
 
 
 def _qiskit_numeric_power(exp: Expr) -> int | float:
@@ -214,6 +217,34 @@ class _QiskitProgramContext(AbstractProgramContext):
             # this is used to deal with Qiskit's QuantumCircuit storing all classical bits in a flat list
             self._clbit_offset[name] = self._active_circuit.num_clbits
             self._active_circuit.add_bits([Clbit() for _ in range(size)])
+
+    def add_output_declaration(self, name: str, var_type: ClassicalType) -> None:
+        """Group an OpenQASM output variable's bits into a named classical register.
+
+        The declared type is also recorded in the circuit metadata, since a ``QuantumCircuit``
+        has no native way to mark a register as an output.
+
+        Args:
+            name (str): The declared output variable name.
+            var_type (ClassicalType): The evaluated declared type.
+
+        Raises:
+            TypeError: If the declared type is not a bit or bit register, the
+                only output types a Qiskit circuit can report.
+        """
+        if not isinstance(var_type, BitType):
+            raise TypeError(
+                f"Output variable {name!r} of type {type(var_type).__name__} is not "
+                f"supported; only bit output variables can be converted."
+            )
+        active = self._active_circuit
+        offset = self._clbit_offset[name]
+        size = var_type.size.value if var_type.size is not None else 1
+        active.add_register(
+            ClassicalRegister(bits=active.clbits[offset : offset + size], name=name)
+        )
+        metadata = self._circuit_stack[0].metadata
+        metadata.setdefault(_OUTPUT_VARIABLES_KEY, {})[name] = var_type
 
     def is_builtin_gate(self, name: str) -> bool:
         return name in _BRAKET_GATE_NAME_TO_QISKIT_GATE
