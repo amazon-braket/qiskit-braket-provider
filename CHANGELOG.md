@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.23.0 (2026-08-18)
+
+### Features
+
+ * Support OpenQASM output variables
+
 ## v0.22.1 (2026-08-13)
 
 ### Bug Fixes and Other Changes
