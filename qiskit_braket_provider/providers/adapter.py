@@ -537,6 +537,7 @@ def to_qiskit(
     circuit: Circuit | Program | str,
     add_measurements: bool = True,
     verbatim_box_name: str = _BRAKET_VERBATIM_BOX_NAME,
+    physical_qubit_labels: Sequence[int] | None = None,
 ) -> QuantumCircuit:
     """Return a Qiskit quantum circuit from a Braket quantum circuit.
 
@@ -545,6 +546,12 @@ def to_qiskit(
         add_measurements (bool): Whether to append measurements in the conversion
         verbatim_box_name (str): Name to use for BoxOp labels when converting verbatim boxes.
             Default: "verbatim"
+        physical_qubit_labels (Sequence[int] | None): Device physical qubit labels in
+            Qiskit-index order (as ``sorted(topology.nodes)``). When provided, ``$N``
+            references in a ``Program`` or ``str`` source resolve to the matching
+            Qiskit index; unknown labels raise ``ValueError``. When ``None``, ``$N``
+            maps to Qiskit index ``N`` (legacy). Ignored for ``Circuit`` inputs.
+            Default: ``None``.
 
     Returns:
         QuantumCircuit: Qiskit quantum circuit
@@ -571,15 +578,32 @@ def to_qiskit(
 
         >>> qiskit_circuit = to_qiskit(openqasm_program, verbatim_box_name="my_verbatim")
         >>> # All verbatim boxes will have the label "my_verbatim"
+
+        Translate ``$N`` references through a device-specific label mapping:
+
+        >>> # IQM Garnet has 20 qubits labeled 1..20. Passing the labels lets
+        >>> # the top-of-range reference resolve into the 20-qubit target
+        >>> # (Qiskit index 19) instead of overflowing at raw index 20.
+        >>> garnet_labels = tuple(range(1, 21))
+        >>> qc = to_qiskit(
+        ...     Program(source="OPENQASM 3.0;\\nx $20;"),
+        ...     physical_qubit_labels=garnet_labels,
+        ... )
+        >>> qc.num_qubits  # 20, not 21
+        20
     """
     if isinstance(circuit, Program):
         return (
-            Interpreter(_QiskitProgramContext(verbatim_box_name))
+            Interpreter(_QiskitProgramContext(verbatim_box_name, physical_qubit_labels))
             .run(circuit.source, inputs=circuit.inputs)
             .circuit
         )
     if isinstance(circuit, str):
-        return Interpreter(_QiskitProgramContext(verbatim_box_name)).run(circuit).circuit
+        return (
+            Interpreter(_QiskitProgramContext(verbatim_box_name, physical_qubit_labels))
+            .run(circuit)
+            .circuit
+        )
     if not isinstance(circuit, Circuit):
         raise TypeError(f"Expected a Circuit, got {type(circuit)} instead.")
 
