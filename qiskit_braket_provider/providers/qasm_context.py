@@ -110,12 +110,21 @@ class _QiskitProgramContext(AbstractProgramContext):
 
     num_qubits: int
 
-    def __init__(self, verbatim_box_name: str = _BRAKET_VERBATIM_BOX_NAME) -> None:
+    def __init__(
+        self,
+        verbatim_box_name: str = _BRAKET_VERBATIM_BOX_NAME,
+        physical_qubit_labels: Sequence[int] | None = None,
+    ) -> None:
         """Initialize the Qiskit program context.
 
         Args:
             verbatim_box_name: Name to use for BoxOp labels when converting verbatim boxes.
                 Default: "verbatim"
+            physical_qubit_labels: Device physical qubit labels in Qiskit-index order
+                (as ``sorted(topology.nodes)``). When provided, ``$N`` references are
+                resolved to the matching Qiskit index and unknown labels raise
+                ``ValueError``. When ``None``, ``$N`` maps directly to Qiskit index
+                ``N``. Default: ``None``.
         """
         super().__init__()
         self._circuit_stack: list[QuantumCircuit] = [QuantumCircuit()]
@@ -124,6 +133,39 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._verbatim_box_name = verbatim_box_name
         self._clbit_offset: dict[str, int] = {}
         self._result_types: list[Results] = []
+        self._label_to_qiskit_index: dict[int, int] | None = (
+            {label: i for i, label in enumerate(physical_qubit_labels)}
+            if physical_qubit_labels
+            else None
+        )
+
+    def get_qubits(self, qubits: Identifier | IndexedIdentifier) -> tuple[int, ...]:
+        """Resolve an OpenQASM qubit reference to Qiskit qubit indices.
+
+        Args:
+            qubits: The OpenQASM qubit reference to resolve.
+
+        Returns:
+            tuple[int, ...]: The Qiskit qubit indices the reference targets.
+
+        Raises:
+            ValueError: If ``qubits`` is a ``$N`` reference whose label is not
+                present in the ``physical_qubit_labels`` supplied at
+                construction time.
+        """
+        indices = super().get_qubits(qubits)
+        if self._label_to_qiskit_index is None:
+            return indices
+        # Only a bare Identifier can have a name like "$N"; IndexedIdentifier's
+        # .name is a nested Identifier for the register (e.g. `q`), so its outer
+        # .name attribute is not a str and never starts with "$".
+        name = getattr(qubits, "name", None)
+        if not isinstance(name, str) or not name.startswith("$"):
+            return indices
+        try:
+            return tuple(self._label_to_qiskit_index[label] for label in indices)
+        except KeyError as e:
+            raise ValueError(f"Physical qubit ${e.args[0]} is not on the target device.") from None
 
     @property
     def _active_circuit(self) -> QuantumCircuit:
