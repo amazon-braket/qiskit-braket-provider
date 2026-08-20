@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.23.1 (2026-08-20)
+
+### Bug Fixes and Other Changes
+
+ * translate physical qubits through device label mapping
+
 ## v0.23.0 (2026-08-18)
 
 ### Features
