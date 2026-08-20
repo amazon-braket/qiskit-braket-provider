@@ -128,3 +128,21 @@ def test_circuit_input_ignores_labels():
     without = to_qiskit(circuit)
     assert with_labels.num_qubits == without.num_qubits
     assert [i.operation.name for i in with_labels.data] == [i.operation.name for i in without.data]
+
+
+def test_pragma_target_translated_through_labels():
+    # Pragma parsing goes through qubit_mapping.get_by_identifier directly (not
+    # through _QiskitProgramContext.get_qubits), so putting the translation on
+    # the QubitTable is what makes result pragmas store Qiskit indices, not raw
+    # Braket labels.
+    source = (
+        "OPENQASM 3.0;\nbit[1] b;\nx $20;\nb[0] = measure $20;\n"
+        "#pragma braket result expectation z($20)\n"
+    )
+    qc = to_qiskit(Program(source=source), physical_qubit_labels=ONE_INDEXED_LABELS)
+    pragmas = qc.metadata["braket_result_pragmas"]
+    assert len(pragmas) == 1
+    # The pragma target should hold the Qiskit qubit index (19), not the raw
+    # Braket label (20). AddBasisRotationAndMeasurement dereferences the value
+    # via dag.qubits[target] on the compact circuit.
+    assert pragmas[0].targets == [19]

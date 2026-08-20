@@ -8,7 +8,7 @@ mid-circuit measurement.
 from collections.abc import Iterator, Sequence
 from math import prod
 from numbers import Number
-from typing import Any
+from typing import Any, cast
 
 from qiskit import QuantumCircuit
 from qiskit.circuit import (
@@ -55,6 +55,7 @@ from braket.default_simulator.openqasm.parser.openqasm_ast import (
 )
 from braket.default_simulator.openqasm.program_context import (
     AbstractProgramContext,
+    QubitTable,
 )
 from braket.ir.jaqcd import AdjointGradient
 from braket.ir.jaqcd.program_v1 import Results
@@ -96,6 +97,43 @@ def _sympy_to_qiskit(
     raise TypeError(f"unrecognized parameter type in conversion: {type(expr)}")
 
 
+class _LabelMappedQubitTable(QubitTable):
+    """QubitTable that translates ``$N`` references through a device label map.
+
+    ``$N`` references resolve to the Qiskit qubit index of Braket label ``N`` in
+    the caller's ``physical_qubit_labels`` (sorted-topology order) rather than
+    to raw index ``N``. Declared register lookups (``q[i]``) go through the
+    base implementation unchanged.
+
+    Placed on ``AbstractProgramContext.qubit_mapping`` so both gate-op
+    resolution (via ``AbstractProgramContext.get_qubits``) and pragma parsing
+    (via ``parse_braket_pragma(body, qubit_mapping)``) share one translation
+    point.
+    """
+
+    def __init__(self, label_to_qiskit_index: dict[int, int] | None = None) -> None:
+        super().__init__()
+        self._label_to_qiskit_index = label_to_qiskit_index
+
+    def get_by_identifier(self, identifier: Identifier | IndexedIdentifier) -> tuple[int]:
+        indices = super().get_by_identifier(identifier)
+        if self._label_to_qiskit_index is None:
+            return indices
+        # $N references arrive as a bare Identifier whose name starts with "$".
+        # IndexedIdentifier (register access) has a nested Identifier for .name
+        # so its .name attribute is not a str.
+        name = getattr(identifier, "name", None)
+        if not isinstance(name, str) or not name.startswith("$"):
+            return indices
+        try:
+            return cast(
+                "tuple[int]",
+                tuple(self._label_to_qiskit_index[label] for label in indices),
+            )
+        except KeyError as e:
+            raise ValueError(f"Physical qubit ${e.args[0]} is not on the target device.") from None
+
+
 class _QiskitProgramContext(AbstractProgramContext):
     """Program context for converting OpenQASM 3 programs to Qiskit circuits.
 
@@ -133,39 +171,17 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._verbatim_box_name = verbatim_box_name
         self._clbit_offset: dict[str, int] = {}
         self._result_types: list[Results] = []
-        self._label_to_qiskit_index: dict[int, int] | None = (
+        # Build a reverse label map and install a QubitTable subclass that
+        # translates $N references through it. Placing the translation on
+        # self.qubit_mapping (rather than overriding get_qubits) covers both
+        # gate-op resolution and parse_braket_pragma, which receive the same
+        # QubitTable instance.
+        label_to_qiskit_index: dict[int, int] | None = (
             {label: i for i, label in enumerate(physical_qubit_labels)}
             if physical_qubit_labels
             else None
         )
-
-    def get_qubits(self, qubits: Identifier | IndexedIdentifier) -> tuple[int, ...]:
-        """Resolve an OpenQASM qubit reference to Qiskit qubit indices.
-
-        Args:
-            qubits: The OpenQASM qubit reference to resolve.
-
-        Returns:
-            tuple[int, ...]: The Qiskit qubit indices the reference targets.
-
-        Raises:
-            ValueError: If ``qubits`` is a ``$N`` reference whose label is not
-                present in the ``physical_qubit_labels`` supplied at
-                construction time.
-        """
-        indices = super().get_qubits(qubits)
-        if self._label_to_qiskit_index is None:
-            return indices
-        # Only a bare Identifier can have a name like "$N"; IndexedIdentifier's
-        # .name is a nested Identifier for the register (e.g. `q`), so its outer
-        # .name attribute is not a str and never starts with "$".
-        name = getattr(qubits, "name", None)
-        if not isinstance(name, str) or not name.startswith("$"):
-            return indices
-        try:
-            return tuple(self._label_to_qiskit_index[label] for label in indices)
-        except KeyError as e:
-            raise ValueError(f"Physical qubit ${e.args[0]} is not on the target device.") from None
+        self.qubit_mapping = _LabelMappedQubitTable(label_to_qiskit_index)
 
     @property
     def _active_circuit(self) -> QuantumCircuit:
@@ -199,6 +215,20 @@ class _QiskitProgramContext(AbstractProgramContext):
             raise NotImplementedError(
                 "AdjointGradient result type is not supported in the Qiskit compilation pipeline."
             )
+        # parse_braket_pragma resolves multi-target references through
+        # qubit_table.get_by_identifier (which our _LabelMappedQubitTable covers)
+        # but visitGateOperand short-circuits $N observable targets and returns
+        # the raw label. Rewrite result.targets through the same label map so
+        # downstream passes (AddBasisRotationAndMeasurement) can index the
+        # compact Qiskit circuit correctly.
+        label_to_qiskit_index = getattr(self.qubit_mapping, "_label_to_qiskit_index", None)
+        if label_to_qiskit_index is not None and getattr(result, "targets", None):
+            try:
+                result.targets = [label_to_qiskit_index[label] for label in result.targets]
+            except KeyError as e:
+                raise ValueError(
+                    f"Physical qubit ${e.args[0]} is not on the target device."
+                ) from None
         self._result_types.append(result)
         qc = self._circuit_stack[0]
         qc.metadata["braket_result_pragmas"] = self._result_types
