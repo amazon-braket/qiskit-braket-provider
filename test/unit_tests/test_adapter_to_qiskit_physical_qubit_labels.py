@@ -130,21 +130,41 @@ def test_circuit_input_ignores_labels():
     assert [i.operation.name for i in with_labels.data] == [i.operation.name for i in without.data]
 
 
-def test_pragma_target_translated_through_labels():
+@pytest.mark.parametrize(
+    ("pragma_body", "expected_targets"),
+    [
+        pytest.param("expectation z($20)", [19], id="standard_observable"),
+        pytest.param("sample x($1) @ x($20)", [0, 19], id="tensor_product_observable"),
+        pytest.param("variance y($10)", [9], id="variance"),
+        pytest.param("probability $1, $20", [0, 19], id="multi_target_probability"),
+        pytest.param("density_matrix $1, $2", [0, 1], id="multi_target_density_matrix"),
+    ],
+)
+def test_pragma_targets_translated_through_labels(pragma_body: str, expected_targets: list[int]):
     source = (
-        "OPENQASM 3.0;\nbit[1] b;\nx $20;\nb[0] = measure $20;\n"
-        "#pragma braket result expectation z($20)\n"
+        "OPENQASM 3.0;\nbit[1] b;\nx $1;\nb[0] = measure $1;\n"
+        f"#pragma braket result {pragma_body}\n"
     )
     qc = to_qiskit(Program(source=source), physical_qubit_labels=ONE_INDEXED_LABELS)
     pragmas = qc.metadata["braket_result_pragmas"]
     assert len(pragmas) == 1
-    # The pragma target should hold the Qiskit qubit index (19), not the raw
-    # Braket label (20). AddBasisRotationAndMeasurement dereferences the value
-    # via dag.qubits[target] on the compact circuit.
-    assert pragmas[0].targets == [19]
+    assert pragmas[0].targets == expected_targets
 
 
 def test_pragma_target_off_device_raises():
-    source = "OPENQASM 3.0;\nbit[1] b;\nx $1;\nb[0] = measure $1;\n#pragma braket result expectation z($21)\n"
+    source = (
+        "OPENQASM 3.0;\nbit[1] b;\nx $1;\nb[0] = measure $1;\n"
+        "#pragma braket result expectation z($21)\n"
+    )
     with pytest.raises(ValueError, match=r"\$21 is not on"):
         to_qiskit(Program(source=source), physical_qubit_labels=ONE_INDEXED_LABELS)
+
+
+def test_pragma_targets_legacy_no_labels():
+    source = (
+        "OPENQASM 3.0;\nbit[1] b;\nx $0;\nb[0] = measure $0;\n"
+        "#pragma braket result expectation z($0)\n"
+    )
+    qc = to_qiskit(Program(source=source))
+    pragmas = qc.metadata["braket_result_pragmas"]
+    assert pragmas[0].targets == [0]

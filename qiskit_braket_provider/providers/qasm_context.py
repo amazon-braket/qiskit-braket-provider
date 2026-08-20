@@ -210,19 +210,6 @@ class _QiskitProgramContext(AbstractProgramContext):
             raise NotImplementedError(
                 "AdjointGradient result type is not supported in the Qiskit compilation pipeline."
             )
-        # parse_braket_pragma resolves multi-target references through
-        # qubit_table.get_by_identifier but visitGateOperand short-circuits
-        # $N observable targets and returns the raw label. Rewrite result.targets
-        # through the same label map so downstream passes (AddBasisRotationAndMeasurement)
-        # can index the compact Qiskit circuit correctly.
-        label_to_qiskit_index = getattr(self.qubit_mapping, "_label_to_qiskit_index", None)
-        if label_to_qiskit_index is not None and getattr(result, "targets", None):
-            try:
-                result.targets = [label_to_qiskit_index[label] for label in result.targets]
-            except KeyError as e:
-                raise ValueError(
-                    f"Physical qubit ${e.args[0]} is not on the target device."
-                ) from None
         self._result_types.append(result)
         qc = self._circuit_stack[0]
         qc.metadata["braket_result_pragmas"] = self._result_types
