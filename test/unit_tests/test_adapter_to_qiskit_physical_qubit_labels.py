@@ -142,3 +142,9 @@ def test_pragma_target_translated_through_labels():
     # Braket label (20). AddBasisRotationAndMeasurement dereferences the value
     # via dag.qubits[target] on the compact circuit.
     assert pragmas[0].targets == [19]
+
+
+def test_pragma_target_off_device_raises():
+    source = "OPENQASM 3.0;\nbit[1] b;\nx $1;\nb[0] = measure $1;\n#pragma braket result expectation z($21)\n"
+    with pytest.raises(ValueError, match=r"\$21 is not on"):
+        to_qiskit(Program(source=source), physical_qubit_labels=ONE_INDEXED_LABELS)
