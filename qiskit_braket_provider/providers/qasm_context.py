@@ -124,7 +124,7 @@ class _QiskitProgramContext(AbstractProgramContext):
                 (as ``sorted(topology.nodes)``). When provided, ``$N`` references are
                 resolved to the matching Qiskit index and unknown labels raise
                 ``ValueError``. When ``None``, ``$N`` maps directly to Qiskit index
-                ``N`` (legacy). Default: ``None``.
+                ``N``. Default: ``None``.
         """
         super().__init__()
         self._circuit_stack: list[QuantumCircuit] = [QuantumCircuit()]
@@ -141,11 +141,6 @@ class _QiskitProgramContext(AbstractProgramContext):
 
     def get_qubits(self, qubits: Identifier | IndexedIdentifier) -> tuple[int, ...]:
         """Resolve an OpenQASM qubit reference to Qiskit qubit indices.
-
-        Overrides ``AbstractProgramContext.get_qubits`` to translate physical
-        qubit references (``$N``) through ``physical_qubit_labels`` when one
-        was supplied at construction time. Declared register references
-        (``q[i]``) go through the base implementation unchanged.
 
         Args:
             qubits: The OpenQASM qubit reference to resolve.

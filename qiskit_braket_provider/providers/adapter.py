@@ -550,7 +550,7 @@ def to_qiskit(
             Qiskit-index order (as ``sorted(topology.nodes)``). When provided, ``$N``
             references in a ``Program`` or ``str`` source resolve to the matching
             Qiskit index; unknown labels raise ``ValueError``. When ``None``, ``$N``
-            maps to Qiskit index ``N`` (legacy). Ignored for ``Circuit`` inputs.
+            maps to Qiskit index ``N``. Ignored for ``Circuit`` inputs.
             Default: ``None``.
 
     Returns:
@@ -578,19 +578,6 @@ def to_qiskit(
 
         >>> qiskit_circuit = to_qiskit(openqasm_program, verbatim_box_name="my_verbatim")
         >>> # All verbatim boxes will have the label "my_verbatim"
-
-        Translate ``$N`` references through a device-specific label mapping:
-
-        >>> # IQM Garnet has 20 qubits labeled 1..20. Passing the labels lets
-        >>> # the top-of-range reference resolve into the 20-qubit target
-        >>> # (Qiskit index 19) instead of overflowing at raw index 20.
-        >>> garnet_labels = tuple(range(1, 21))
-        >>> qc = to_qiskit(
-        ...     Program(source="OPENQASM 3.0;\\nx $20;"),
-        ...     physical_qubit_labels=garnet_labels,
-        ... )
-        >>> qc.num_qubits  # 20, not 21
-        20
     """
     if isinstance(circuit, Program):
         return (
