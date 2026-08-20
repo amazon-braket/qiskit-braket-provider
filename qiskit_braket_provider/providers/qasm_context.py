@@ -171,11 +171,6 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._verbatim_box_name = verbatim_box_name
         self._clbit_offset: dict[str, int] = {}
         self._result_types: list[Results] = []
-        # Build a reverse label map and install a QubitTable subclass that
-        # translates $N references through it. Placing the translation on
-        # self.qubit_mapping (rather than overriding get_qubits) covers both
-        # gate-op resolution and parse_braket_pragma, which receive the same
-        # QubitTable instance.
         label_to_qiskit_index: dict[int, int] | None = (
             {label: i for i, label in enumerate(physical_qubit_labels)}
             if physical_qubit_labels
@@ -216,11 +211,10 @@ class _QiskitProgramContext(AbstractProgramContext):
                 "AdjointGradient result type is not supported in the Qiskit compilation pipeline."
             )
         # parse_braket_pragma resolves multi-target references through
-        # qubit_table.get_by_identifier (which our _LabelMappedQubitTable covers)
-        # but visitGateOperand short-circuits $N observable targets and returns
-        # the raw label. Rewrite result.targets through the same label map so
-        # downstream passes (AddBasisRotationAndMeasurement) can index the
-        # compact Qiskit circuit correctly.
+        # qubit_table.get_by_identifier but visitGateOperand short-circuits
+        # $N observable targets and returns the raw label. Rewrite result.targets
+        # through the same label map so downstream passes (AddBasisRotationAndMeasurement)
+        # can index the compact Qiskit circuit correctly.
         label_to_qiskit_index = getattr(self.qubit_mapping, "_label_to_qiskit_index", None)
         if label_to_qiskit_index is not None and getattr(result, "targets", None):
             try:

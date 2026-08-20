@@ -131,10 +131,6 @@ def test_circuit_input_ignores_labels():
 
 
 def test_pragma_target_translated_through_labels():
-    # Pragma parsing goes through qubit_mapping.get_by_identifier directly (not
-    # through _QiskitProgramContext.get_qubits), so putting the translation on
-    # the QubitTable is what makes result pragmas store Qiskit indices, not raw
-    # Braket labels.
     source = (
         "OPENQASM 3.0;\nbit[1] b;\nx $20;\nb[0] = measure $20;\n"
         "#pragma braket result expectation z($20)\n"
