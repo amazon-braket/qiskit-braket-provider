@@ -8,7 +8,7 @@ mid-circuit measurement.
 from collections.abc import Iterator, Sequence
 from math import prod
 from numbers import Number
-from typing import Any, cast
+from typing import Any
 
 from qiskit import QuantumCircuit
 from qiskit.circuit import (
@@ -98,38 +98,20 @@ def _sympy_to_qiskit(
 
 
 class _LabelMappedQubitTable(QubitTable):
-    """QubitTable that translates ``$N`` references through a device label map.
-
-    ``$N`` references resolve to the Qiskit qubit index of Braket label ``N`` in
-    the caller's ``physical_qubit_labels`` (sorted-topology order) rather than
-    to raw index ``N``. Declared register lookups (``q[i]``) go through the
-    base implementation unchanged.
-
-    Placed on ``AbstractProgramContext.qubit_mapping`` so both gate-op
-    resolution (via ``AbstractProgramContext.get_qubits``) and pragma parsing
-    (via ``parse_braket_pragma(body, qubit_mapping)``) share one translation
-    point.
-    """
+    """QubitTable that translates ``$N`` references through a device label map."""
 
     def __init__(self, label_to_qiskit_index: dict[int, int] | None = None) -> None:
         super().__init__()
         self._label_to_qiskit_index = label_to_qiskit_index
 
-    def get_by_identifier(self, identifier: Identifier | IndexedIdentifier) -> tuple[int]:
+    def get_by_identifier(self, identifier: Identifier | IndexedIdentifier) -> tuple[int, ...]:
         indices = super().get_by_identifier(identifier)
         if self._label_to_qiskit_index is None:
             return indices
-        # $N references arrive as a bare Identifier whose name starts with "$".
-        # IndexedIdentifier (register access) has a nested Identifier for .name
-        # so its .name attribute is not a str.
-        name = getattr(identifier, "name", None)
-        if not isinstance(name, str) or not name.startswith("$"):
+        if not isinstance(identifier, Identifier) or not identifier.name.startswith("$"):
             return indices
         try:
-            return cast(
-                "tuple[int]",
-                tuple(self._label_to_qiskit_index[label] for label in indices),
-            )
+            return tuple(self._label_to_qiskit_index[label] for label in indices)
         except KeyError as e:
             raise ValueError(f"Physical qubit ${e.args[0]} is not on the target device.") from None
 

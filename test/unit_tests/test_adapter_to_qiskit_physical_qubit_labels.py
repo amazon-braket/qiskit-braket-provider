@@ -138,6 +138,11 @@ def test_circuit_input_ignores_labels():
         pytest.param("variance y($10)", [9], id="variance"),
         pytest.param("probability $1, $20", [0, 19], id="multi_target_probability"),
         pytest.param("density_matrix $1, $2", [0, 1], id="multi_target_density_matrix"),
+        pytest.param(
+            "expectation hermitian([[0+0im, 1+0im], [1+0im, 0+0im]]) $6",
+            [5],
+            id="hermitian_observable",
+        ),
     ],
 )
 def test_pragma_targets_translated_through_labels(pragma_body: str, expected_targets: list[int]):
@@ -149,6 +154,39 @@ def test_pragma_targets_translated_through_labels(pragma_body: str, expected_tar
     pragmas = qc.metadata["braket_result_pragmas"]
     assert len(pragmas) == 1
     assert pragmas[0].targets == expected_targets
+
+
+@pytest.mark.parametrize(
+    ("pragma_body", "expected_targets"),
+    [
+        pytest.param("expectation z($9)", [8], id="standard_observable_after_hole"),
+        pytest.param("probability $0, $9", [0, 8], id="multi_target_around_hole"),
+        pytest.param("sample x($107)", [106], id="top_of_range"),
+    ],
+)
+def test_pragma_targets_translated_through_noncontiguous_labels(
+    pragma_body: str, expected_targets: list[int]
+):
+    source = (
+        "OPENQASM 3.0;\nbit[1] b;\nx $0;\nb[0] = measure $0;\n"
+        f"#pragma braket result {pragma_body}\n"
+    )
+    qc = to_qiskit(Program(source=source), physical_qubit_labels=NONCONTIGUOUS_LABELS)
+    pragmas = qc.metadata["braket_result_pragmas"]
+    assert len(pragmas) == 1
+    assert pragmas[0].targets == expected_targets
+
+
+def test_pragma_declared_register_targets_not_translated():
+    source = (
+        "OPENQASM 3.0;\nqubit[2] q;\nbit[2] b;\nh q[0];\ncnot q[0], q[1];\n"
+        "b[0] = measure q[0];\nb[1] = measure q[1];\n"
+        "#pragma braket result probability q[0], q[1]\n"
+    )
+    qc = to_qiskit(Program(source=source), physical_qubit_labels=ONE_INDEXED_LABELS)
+    pragmas = qc.metadata["braket_result_pragmas"]
+    assert len(pragmas) == 1
+    assert pragmas[0].targets == [0, 1]
 
 
 def test_pragma_target_off_device_raises():
