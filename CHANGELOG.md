@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.23.2 (2026-08-21)
+
+### Bug Fixes and Other Changes
+
+ * pragma physical qubit labels
+
 ## v0.23.1 (2026-08-20)
 
 ### Bug Fixes and Other Changes
