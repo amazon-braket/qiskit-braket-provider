@@ -55,6 +55,7 @@ from braket.default_simulator.openqasm.parser.openqasm_ast import (
 )
 from braket.default_simulator.openqasm.program_context import (
     AbstractProgramContext,
+    QubitTable,
 )
 from braket.ir.jaqcd import AdjointGradient
 from braket.ir.jaqcd.program_v1 import Results
@@ -96,6 +97,25 @@ def _sympy_to_qiskit(
     raise TypeError(f"unrecognized parameter type in conversion: {type(expr)}")
 
 
+class _LabelMappedQubitTable(QubitTable):
+    """QubitTable that translates ``$N`` references through a device label map."""
+
+    def __init__(self, label_to_qiskit_index: dict[int, int] | None = None) -> None:
+        super().__init__()
+        self._label_to_qiskit_index = label_to_qiskit_index
+
+    def get_by_identifier(self, identifier: Identifier | IndexedIdentifier) -> tuple[int, ...]:
+        indices = super().get_by_identifier(identifier)
+        if self._label_to_qiskit_index is None:
+            return indices
+        if not isinstance(identifier, Identifier) or not identifier.name.startswith("$"):
+            return indices
+        try:
+            return tuple(self._label_to_qiskit_index[label] for label in indices)
+        except KeyError as e:
+            raise ValueError(f"Physical qubit ${e.args[0]} is not on the target device.") from None
+
+
 class _QiskitProgramContext(AbstractProgramContext):
     """Program context for converting OpenQASM 3 programs to Qiskit circuits.
 
@@ -133,39 +153,12 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._verbatim_box_name = verbatim_box_name
         self._clbit_offset: dict[str, int] = {}
         self._result_types: list[Results] = []
-        self._label_to_qiskit_index: dict[int, int] | None = (
+        label_to_qiskit_index: dict[int, int] | None = (
             {label: i for i, label in enumerate(physical_qubit_labels)}
             if physical_qubit_labels
             else None
         )
-
-    def get_qubits(self, qubits: Identifier | IndexedIdentifier) -> tuple[int, ...]:
-        """Resolve an OpenQASM qubit reference to Qiskit qubit indices.
-
-        Args:
-            qubits: The OpenQASM qubit reference to resolve.
-
-        Returns:
-            tuple[int, ...]: The Qiskit qubit indices the reference targets.
-
-        Raises:
-            ValueError: If ``qubits`` is a ``$N`` reference whose label is not
-                present in the ``physical_qubit_labels`` supplied at
-                construction time.
-        """
-        indices = super().get_qubits(qubits)
-        if self._label_to_qiskit_index is None:
-            return indices
-        # Only a bare Identifier can have a name like "$N"; IndexedIdentifier's
-        # .name is a nested Identifier for the register (e.g. `q`), so its outer
-        # .name attribute is not a str and never starts with "$".
-        name = getattr(qubits, "name", None)
-        if not isinstance(name, str) or not name.startswith("$"):
-            return indices
-        try:
-            return tuple(self._label_to_qiskit_index[label] for label in indices)
-        except KeyError as e:
-            raise ValueError(f"Physical qubit ${e.args[0]} is not on the target device.") from None
+        self.qubit_mapping = _LabelMappedQubitTable(label_to_qiskit_index)
 
     @property
     def _active_circuit(self) -> QuantumCircuit:
