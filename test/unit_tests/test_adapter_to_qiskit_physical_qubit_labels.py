@@ -177,16 +177,28 @@ def test_pragma_targets_translated_through_noncontiguous_labels(
     assert pragmas[0].targets == expected_targets
 
 
-def test_pragma_declared_register_targets_not_translated():
+@pytest.mark.parametrize(
+    ("pragma_body", "expected_targets"),
+    [
+        pytest.param("probability q[0], q[1]", [0, 1], id="indexed_register"),
+        pytest.param("probability q", [0, 1], id="bare_register_broadcast"),
+    ],
+)
+def test_pragma_declared_register_targets_not_translated(
+    pragma_body: str, expected_targets: list[int]
+):
+    # Register references (q[i] and bare q) go through the base QubitTable
+    # path — the label map only applies to $N references. Targets must resolve
+    # unchanged even with physical_qubit_labels set.
     source = (
-        "OPENQASM 3.0;\nqubit[2] q;\nbit[2] b;\nh q[0];\ncnot q[0], q[1];\n"
+        "OPENQASM 3.0;\nqubit[2] q;\nbit[2] b;\n"
         "b[0] = measure q[0];\nb[1] = measure q[1];\n"
-        "#pragma braket result probability q[0], q[1]\n"
+        f"#pragma braket result {pragma_body}\n"
     )
     qc = to_qiskit(Program(source=source), physical_qubit_labels=ONE_INDEXED_LABELS)
     pragmas = qc.metadata["braket_result_pragmas"]
     assert len(pragmas) == 1
-    assert pragmas[0].targets == [0, 1]
+    assert pragmas[0].targets == expected_targets
 
 
 def test_pragma_target_off_device_raises():
