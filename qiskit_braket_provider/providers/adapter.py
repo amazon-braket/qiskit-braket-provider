@@ -13,7 +13,7 @@ from typing import Any, TypeAlias, TypeVar, overload
 import numpy as np
 import qiskit.circuit.library as qiskit_gates
 import qiskit.quantum_info as qiskit_qi
-from qiskit import QuantumCircuit
+from qiskit import QuantumCircuit, qasm3
 from qiskit.circuit import (
     BoxOp,
     ControlledGate,
@@ -52,7 +52,13 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _PAULI_MAP,
     _QISKIT_CONTROLLED_GATE_NAMES_TO_BRAKET_GATES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
+    _QISKIT_TO_BRAKET_OQ3_NAMES,
     _reverse_endianness,
+)
+from qiskit_braket_provider.providers.oq3_utils import _post_process_oq3
+from qiskit_braket_provider.providers.passes import (
+    ConsolidateClbits,
+    WrapInVerbatimBox,
 )
 from qiskit_braket_provider.providers.qasm_context import (
     _QiskitProgramContext,
@@ -732,3 +738,188 @@ def convert_qiskit_to_braket_circuits(
     )
     for circuit in circuits:
         yield to_braket(circuit)
+
+
+_RESERVED_OQ3_KEYWORDS = frozenset({"measure", "barrier", "box"})
+
+
+def _collect_basis_gates(instructions: Iterable[QiskitInstruction]) -> set[str]:
+    """Collect non-reserved gate names from instructions, descending into BoxOps.
+
+    Reserved OpenQASM 3 statement keywords (``measure``, ``barrier``, ``box``) are
+    excluded because ``qasm3.dumps`` rejects them as ``basis_gates``. Nested boxes
+    are traversed so their inner gates are also collected.
+    """
+    gates: set[str] = set()
+    for instr in instructions:
+        name = instr.operation.name
+        if name == "box":
+            for block in instr.operation.blocks:
+                gates |= _collect_basis_gates(block.data)
+        elif name not in _RESERVED_OQ3_KEYWORDS:
+            gates.add(name)
+    return gates
+
+
+def to_oq3(
+    circuit: QuantumCircuit,
+    *,
+    basis_gates: Collection[str] | None = None,
+    qubit_labels: Sequence[int] | None = None,
+    should_wrap_verbatim: bool = False,
+    verbatim_box_name: str = _BRAKET_VERBATIM_BOX_NAME,
+) -> str:
+    """Convert a compiled Qiskit QuantumCircuit to a Braket-compatible OpenQASM 3 string.
+
+    This function applies OQ3-preparation passes (classical bit consolidation,
+    optional verbatim wrapping) and serializes the circuit to OpenQASM 3 with
+    Braket-compatible gate names and qubit addressing.
+
+    Args:
+        circuit: A compiled Qiskit QuantumCircuit ready for serialization.
+        basis_gates: Gate names to treat as basis gates during serialization.
+            These should be **Qiskit** gate names (the function handles renaming
+            to Braket names internally). If ``None``, all gates in the circuit are
+            treated as basis gates.
+        qubit_labels: Physical qubit indices for the target device. If provided,
+            virtual qubits are remapped to physical qubit notation (``$0``, ``$1``, etc.).
+        should_wrap_verbatim: Whether to wrap the circuit in a verbatim box.
+        verbatim_box_name: Label for verbatim BoxOp identification.
+
+    Returns:
+        An OpenQASM 3 string compatible with Amazon Braket.
+    """
+    pm = PassManager()
+    pm.append(ConsolidateClbits())
+    if should_wrap_verbatim:
+        pm.append(WrapInVerbatimBox(verbatim_box_name))
+    circuit = pm.run(circuit)
+
+    if basis_gates is None:
+        basis_gates = list(_collect_basis_gates(circuit.data))
+
+    needs_renaming = bool(set(basis_gates) & _QISKIT_TO_BRAKET_OQ3_NAMES.keys())
+
+    oq3_source = qasm3.dumps(
+        circuit,
+        includes=[],
+        basis_gates=list(basis_gates),
+        disable_constants=True,
+    )
+
+    output_names = (circuit.metadata or {}).get("braket_output_variables", {})
+    return _post_process_oq3(
+        oq3_source,
+        qubit_labels,
+        rename_gates=needs_renaming,
+        output_names=output_names,
+    )
+
+
+@overload
+def compile_to_oq3(
+    circuits: QuantumCircuit,
+    **kwargs,
+) -> str: ...
+
+
+@overload
+def compile_to_oq3(  # type: ignore[overload-cannot-match]
+    circuits: Iterable[QuantumCircuit],
+    **kwargs,
+) -> list[str]: ...
+
+
+def compile_to_oq3(  # type: ignore[misc]
+    circuits: QuantumCircuit | Iterable[QuantumCircuit],
+    *,
+    qubit_labels: Sequence[int] | None = None,
+    target: Target | None = None,
+    verbatim: bool = False,
+    basis_gates: Collection[str] | None = None,
+    coupling_map: list[list[int]] | None = None,
+    optimization_level: int = 0,
+    callback: Callable | None = None,
+    num_processes: int | None = None,
+    pass_manager: PassManager | None = None,
+    braket_device: Device | None = None,
+    verbatim_box_name: str = _BRAKET_VERBATIM_BOX_NAME,
+    layout_method: str | None = None,
+    routing_method: str | None = None,
+    seed_transpiler: int | None = None,
+) -> str | list[str]:
+    """Compile Qiskit circuits to Braket-compatible OpenQASM 3 strings.
+
+    This is the primary entry point for the OQ3 output path. It orchestrates:
+    1. Compilation via Qiskit's transpiler (with verbatim box preservation)
+    2. Serialization to OpenQASM 3 with Braket-compatible formatting
+
+    The compilation step reuses the existing ``_compile()`` pipeline, including
+    verbatim box extraction/restoration and device-aware transpilation.
+
+    Args:
+        circuits: One or more Qiskit QuantumCircuits to compile.
+        qubit_labels: Physical qubit indices on the target device.
+        target: A Qiskit transpiler target describing device constraints.
+        verbatim: If ``True``, wrap the circuit in a verbatim box (no compilation
+            by QBP or the service).
+        basis_gates: Gate names supported by the target device (Qiskit names).
+        coupling_map: Qubit connectivity as ``[control, target]`` pairs.
+        optimization_level: Transpiler optimization level (0-3). Default: 0.
+        callback: Callback function passed to the transpiler.
+        num_processes: Number of parallel processes for transpilation.
+        pass_manager: A custom Qiskit PassManager.
+        braket_device: A Braket Device to derive target and qubit labels from.
+        verbatim_box_name: Label identifying verbatim BoxOp nodes.
+        layout_method: Layout method for the transpiler.
+        routing_method: Routing method for the transpiler.
+        seed_transpiler: Seed for reproducible transpilation.
+
+    Returns:
+        An OpenQASM 3 string (single circuit) or list of strings (multiple circuits).
+
+    Raises:
+        ValueError: If mutually exclusive compilation options are specified.
+        TypeError: If inputs are not QuantumCircuits.
+    """
+    single_instance = isinstance(circuits, QuantumCircuit)
+    if single_instance:
+        circuits = [circuits]
+
+    result = _compile(
+        circuits,
+        qubit_labels=qubit_labels,
+        target=target,
+        verbatim=verbatim if not pass_manager else None,
+        basis_gates=basis_gates,
+        coupling_map=coupling_map,
+        optimization_level=optimization_level,
+        callback=callback,
+        num_processes=num_processes,
+        pass_manager=pass_manager,
+        braket_device=braket_device,
+        verbatim_box_name=verbatim_box_name,
+        layout_method=layout_method,
+        routing_method=routing_method,
+        seed_transpiler=seed_transpiler,
+    )
+
+    should_wrap_verbatim = (
+        verbatim or pass_manager is not None or target is not None or braket_device is not None
+    )
+    effective_basis_gates = result.basis_gates
+    if effective_basis_gates is None and result.target is not None:
+        effective_basis_gates = set(result.target.operation_names) - {"measure", "barrier"}
+
+    oq3_strings = [
+        to_oq3(
+            circ,
+            basis_gates=effective_basis_gates,
+            qubit_labels=result.qubit_labels,
+            should_wrap_verbatim=should_wrap_verbatim,
+            verbatim_box_name=verbatim_box_name,
+        )
+        for circ in result.circuits
+    ]
+
+    return oq3_strings[0] if single_instance else oq3_strings
