@@ -15,7 +15,7 @@ class ConsolidateClbits(TransformationPass):
 
     "Plain" means any bit not declared ``output`` in the source program.
     Registers named in the circuit's ``"braket_output_variables"`` metadata
-    are kept as-is so ``_post_process_oq3`` can re-emit them as 
+    are kept as-is so ``_post_process_oq3`` can re-emit them as
     ``output bit[N] name;`` declarations.
 
     The underlying Clbit objects are reused as the new register's members, so

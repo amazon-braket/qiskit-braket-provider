@@ -84,7 +84,11 @@ _QISKIT_TO_BRAKET_OQ3_NAMES: dict[str, str] = {
 
 _GATE_RENAME_PATTERN = re.compile(
     r"(?<![a-zA-Z_])"
-    r"(" + "|".join(re.escape(name) for name in sorted(_QISKIT_TO_BRAKET_OQ3_NAMES, key=len, reverse=True)) + r")"
+    r"("
+    + "|".join(
+        re.escape(name) for name in sorted(_QISKIT_TO_BRAKET_OQ3_NAMES, key=len, reverse=True)
+    )
+    + r")"
     r"(?=\s|[(])"
 )
 

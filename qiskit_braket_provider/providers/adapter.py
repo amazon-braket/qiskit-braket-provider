@@ -9,6 +9,7 @@ sequences that should not be optimized.
 import warnings
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from typing import Any, TypeAlias, TypeVar, overload
+
 import numpy as np
 import qiskit.circuit.library as qiskit_gates
 import qiskit.quantum_info as qiskit_qi
@@ -54,14 +55,14 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _QISKIT_TO_BRAKET_OQ3_NAMES,
     _reverse_endianness,
 )
-from qiskit_braket_provider.providers.qasm_context import (
-    _QiskitProgramContext,
-    _sympy_to_qiskit,
-)
 from qiskit_braket_provider.providers.oq3_utils import _post_process_oq3
 from qiskit_braket_provider.providers.passes import (
     ConsolidateClbits,
     WrapInVerbatimBox,
+)
+from qiskit_braket_provider.providers.qasm_context import (
+    _QiskitProgramContext,
+    _sympy_to_qiskit,
 )
 from qiskit_braket_provider.providers.target import (
     _get_controlled_gateset,  # ruff:ignore[unused-import]
@@ -823,13 +824,13 @@ def compile_to_oq3(
 
 
 @overload
-def compile_to_oq3(
+def compile_to_oq3(  # type: ignore[misc]
     circuits: Iterable[QuantumCircuit],
     **kwargs,
 ) -> list[str]: ...
 
 
-def compile_to_oq3(
+def compile_to_oq3(  # type: ignore[misc]
     circuits: QuantumCircuit | Iterable[QuantumCircuit],
     *,
     qubit_labels: Sequence[int] | None = None,
@@ -904,10 +905,7 @@ def compile_to_oq3(
     )
 
     should_wrap_verbatim = (
-        verbatim
-        or pass_manager is not None
-        or target is not None
-        or braket_device is not None
+        verbatim or pass_manager is not None or target is not None or braket_device is not None
     )
     effective_basis_gates = result.basis_gates
     if effective_basis_gates is None and result.target is not None:

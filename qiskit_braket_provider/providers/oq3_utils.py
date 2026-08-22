@@ -49,17 +49,15 @@ def _post_process_oq3(
     if rename_gates:
         oq3_source = _rename_gates(oq3_source)
     oq3_source = _remap_qubits(oq3_source, qubit_labels)
-    oq3_source = _normalize_formatting(oq3_source, output_names)
-    return oq3_source
+    return _normalize_formatting(oq3_source, output_names)
 
 
 def _rename_gates(oq3_source: str) -> str:
     """Replace Qiskit gate names with Braket-compatible names."""
-    lines = oq3_source.split("\n")
     result = []
-    for line in lines:
+    for line in oq3_source.split("\n"):
         stripped = line.lstrip()
-        if stripped.startswith("OPENQASM") or stripped.startswith("//"):
+        if stripped.startswith(("OPENQASM", "//")):
             result.append(line)
             continue
         result.append(_GATE_RENAME_PATTERN.sub(_gate_replacer, line))
@@ -110,13 +108,11 @@ def _normalize_formatting(oq3_source: str, output_names: Iterable[str] = ()) -> 
     - Removes empty lines
     """
     output_set = set(output_names)
-    lines = []
-    for line in oq3_source.split("\n"):
-        line = line.lstrip()
-        line = line.replace("float[64]", "float")
+    lines: list[str] = []
+    for raw_line in oq3_source.split("\n"):
+        line = raw_line.lstrip().replace("float[64]", "float")
         if line == "box {":
-            lines.append("#pragma braket verbatim")
-            lines.append("box{")
+            lines.extend(("#pragma braket verbatim", "box{"))
             continue
         lines.append(_restore_output_declaration(line, output_set))
     return "\n".join(line for line in lines if line != "")
