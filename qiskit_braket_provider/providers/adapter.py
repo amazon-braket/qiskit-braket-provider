@@ -824,7 +824,7 @@ def compile_to_oq3(
 
 
 @overload
-def compile_to_oq3(  # type: ignore[misc]
+def compile_to_oq3(  # type: ignore[overload-cannot-match]
     circuits: Iterable[QuantumCircuit],
     **kwargs,
 ) -> list[str]: ...
