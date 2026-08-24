@@ -4,6 +4,7 @@ This module contains the gate mapping dictionaries and constants used across
 adapter.py, target.py, qasm_context.py, and compilation.py.
 """
 
+import re
 from collections.abc import Callable
 from math import inf, pi
 
@@ -74,6 +75,22 @@ _BRAKET_TO_QISKIT_NAMES = {
     "unitary": "unitary",
     "kraus": "kraus",
 }
+
+_QISKIT_TO_BRAKET_OQ3_NAMES: dict[str, str] = {
+    qiskit_name: braket_name
+    for braket_name, qiskit_name in _BRAKET_TO_QISKIT_NAMES.items()
+    if braket_name != qiskit_name
+}
+
+_GATE_RENAME_PATTERN = re.compile(
+    r"(?<![a-zA-Z_])"
+    r"("
+    + "|".join(
+        re.escape(name) for name in sorted(_QISKIT_TO_BRAKET_OQ3_NAMES, key=len, reverse=True)
+    )
+    + r")"
+    r"(?=\s|[(])"
+)
 
 _CONTROLLED_GATES_BY_QUBIT_COUNT = {
     1: {

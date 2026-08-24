@@ -1,4 +1,4 @@
-"""Tests for OQ3 preparation transpiler passes (ConsolidateClbits, WrapInVerbatimBox)."""
+"""Tests for the OQ3 output path (transpiler passes and post-processing helpers)."""
 
 from collections.abc import Callable
 
@@ -7,6 +7,12 @@ from qiskit import QuantumCircuit
 from qiskit.circuit import ClassicalRegister, Clbit, QuantumRegister
 from qiskit.transpiler import PassManager
 
+from qiskit_braket_provider.providers.oq3_utils import (
+    _normalize_formatting,
+    _post_process_oq3,
+    _remap_qubits,
+    _rename_gates,
+)
 from qiskit_braket_provider.providers.passes import ConsolidateClbits, WrapInVerbatimBox
 
 
@@ -160,3 +166,150 @@ def test_wrap_in_verbatim_box(
     inner_ops = [instr.operation.name for instr in box_op.blocks[0].data]
     assert inner_ops == expected_inner_ops
     assert result.metadata == expected_metadata
+
+
+def _assert_contents(source: str, expected_present: list[str], expected_absent: list[str]) -> None:
+    for s in expected_present:
+        assert s in source
+    for s in expected_absent:
+        assert s not in source
+
+
+@pytest.mark.parametrize(
+    "source,expected_present,expected_absent",
+    [
+        (
+            "OPENQASM 3.0;\nbit[2] c;\nqubit[2] q;\ncx q[0], q[1];\n",
+            ["cnot q[0], q[1];"],
+            ["cx "],
+        ),
+        (
+            "OPENQASM 3.0;\n// cx is a comment\ncx q[0], q[1];\n",
+            ["OPENQASM 3.0;", "// cx is a comment"],
+            [],
+        ),
+        (
+            "OPENQASM 3.0;\nrxx(0.5) q[0], q[1];\nrzz(1.0) q[0], q[1];\n",
+            ["xx(0.5)", "zz(1.0)"],
+            [],
+        ),
+    ],
+    ids=["gate_positions", "preserves_comments", "parametric_gates"],
+)
+def test_rename_gates(source: str, expected_present: list[str], expected_absent: list[str]) -> None:
+    _assert_contents(_rename_gates(source), expected_present, expected_absent)
+
+
+@pytest.mark.parametrize(
+    "source,qubit_labels,expected_present,expected_absent,expect_unchanged",
+    [
+        (
+            "OPENQASM 3.0;\nbit[2] c;\nqubit[2] q;\nh q[0];\ncnot q[0], q[1];\n",
+            [3, 7],
+            ["$3", "$7"],
+            ["qubit["],
+            False,
+        ),
+        (
+            "OPENQASM 3.0;\nbit[2] c;\nh $0;\ncnot $0, $1;\n",
+            [3, 7],
+            ["$3", "$7"],
+            ["$0;", "$1;"],
+            False,
+        ),
+        (
+            "OPENQASM 3.0;\nqubit[2] q;\nh q[0];\n",
+            None,
+            [],
+            [],
+            True,
+        ),
+    ],
+    ids=["virtual_form", "layout_aware_form", "noop_when_none"],
+)
+def test_remap_qubits(
+    source: str,
+    qubit_labels: list[int] | None,
+    expected_present: list[str],
+    expected_absent: list[str],
+    expect_unchanged: bool,
+) -> None:
+    result = _remap_qubits(source, qubit_labels)
+    if expect_unchanged:
+        assert result == source
+    _assert_contents(result, expected_present, expected_absent)
+
+
+@pytest.mark.parametrize(
+    "source,output_names,expected_present,expected_absent",
+    [
+        (
+            "OPENQASM 3.0;\nbit[2] c;\nbox {\n  h $0;\n}\n",
+            (),
+            ["#pragma braket verbatim\nbox{"],
+            [],
+        ),
+        (
+            "OPENQASM 3.0;\n  box {\n    h $0;\n  }\n",
+            (),
+            ["#pragma braket verbatim\nbox{"],
+            ["  "],
+        ),
+        (
+            "OPENQASM 3.0;\nh q[0];\n",
+            (),
+            ["OPENQASM 3.0;", "h q[0];"],
+            ["#pragma"],
+        ),
+        (
+            "OPENQASM 3.0;\ninput float[64] theta;\n",
+            (),
+            ["float theta;"],
+            ["float[64]"],
+        ),
+        (
+            "OPENQASM 3.0;\nbit[2] c;\nbit[1] scratch;\n",
+            ("c",),
+            ["output bit[2] c;", "bit[1] scratch;"],
+            ["output bit[1] scratch;"],
+        ),
+    ],
+    ids=[
+        "inserts_pragma",
+        "strips_indentation",
+        "noop_without_box",
+        "replaces_float64",
+        "restores_output_declaration",
+    ],
+)
+def test_normalize_formatting(
+    source: str,
+    output_names: tuple[str, ...],
+    expected_present: list[str],
+    expected_absent: list[str],
+) -> None:
+    _assert_contents(_normalize_formatting(source, output_names), expected_present, expected_absent)
+
+
+@pytest.mark.parametrize(
+    "rename_gates_flag,expected_present,expected_absent",
+    [
+        (True, ["cnot $0, $1;", "output bit[2] c;"], ["cx ", "float[64]"]),
+        (False, ["cx $0, $1;", "output bit[2] c;"], ["cnot", "float[64]"]),
+    ],
+    ids=["renames_gates", "skips_gate_rename"],
+)
+def test_post_process_oq3(
+    rename_gates_flag: bool,
+    expected_present: list[str],
+    expected_absent: list[str],
+) -> None:
+    """Orchestrator applies rename, remap, and formatting in a single pass."""
+    source = "OPENQASM 3.0;\ninput float[64] theta;\nbit[2] c;\nqubit[2] q;\ncx q[0], q[1];\n"
+    result = _post_process_oq3(
+        source,
+        qubit_labels=[0, 1],
+        rename_gates=rename_gates_flag,
+        output_names=("c",),
+    )
+    _assert_contents(result, expected_present, expected_absent)
