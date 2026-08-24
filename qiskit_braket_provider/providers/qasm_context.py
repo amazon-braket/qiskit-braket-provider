@@ -62,10 +62,9 @@ from braket.ir.jaqcd.program_v1 import Results
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_VERBATIM_BOX_NAME,
+    _OUTPUT_VARIABLES_KEY,
     _SYMPY_FUNCTION_TO_QISKIT_METHOD,
 )
-
-_OUTPUT_VARIABLES_KEY = "braket_output_variables"
 
 
 def _qiskit_numeric_power(exp: Expr) -> int | float:
