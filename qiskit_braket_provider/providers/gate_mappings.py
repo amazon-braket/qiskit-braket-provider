@@ -215,6 +215,8 @@ _BRAKET_GATE_NAME_TO_QISKIT_GATE: dict[str, QiskitInstruction | None] = {
 
 _BRAKET_VERBATIM_BOX_NAME = "verbatim"
 
+_OUTPUT_VARIABLES_KEY = "braket_output_variables"
+
 _EPS = 1e-10  # global variable used to chop very small numbers to zero
 
 _BRAKET_SUPPORTED_NOISES = [
