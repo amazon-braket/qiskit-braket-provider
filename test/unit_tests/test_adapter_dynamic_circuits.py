@@ -3,6 +3,7 @@
 import math
 
 import pytest
+from qiskit import transpile
 from qiskit.circuit import (
     CircuitInstruction,
     Clbit,
@@ -148,19 +149,27 @@ if (c[0] == 1) {
     assert false_body is None
 
 
-def test_mcm_branch_empty_bodies():
-    """A branching statement conditioned on MCM with no quantum ops raises ValueError."""
-    qasm = """
+@pytest.mark.parametrize(
+    "body",
+    ["int[8] x = 0;", ""],
+    ids=["classical_only", "empty"],
+)
+def test_mcm_branch_empty_bodies(body: str):
+    qasm = f"""
 OPENQASM 3.0;
 qubit[1] q;
 bit c;
 c = measure q[0];
-if (c == 1) {
-    int[8] x = 0;
-}
+if (c == 1) {{
+    {body}
+}}
 """
-    with pytest.raises(ValueError, match="empty bodies"):
-        to_qiskit(qasm)
+    qc = to_qiskit(qasm)
+    if_else_ops = _get_if_else_ops(qc)
+    assert len(if_else_ops) == 1
+    true_body, false_body = if_else_ops[0].operation.params
+    assert list(true_body.data) == []
+    assert false_body is None
 
 
 @pytest.mark.parametrize(
@@ -1510,3 +1519,190 @@ measure q;
     assert qc.cregs == []  # no classical register was declared
     assert qc.num_clbits == 3  # one loose clbit per measured qubit
     assert _measure_clbit_indices(qc) == [0, 1, 2]
+
+
+def test_output_bit_register_named_after_variable():
+    """An output bit register becomes a classical register of the same name and size."""
+    qasm = """
+OPENQASM 3.0;
+output bit[2] c;
+qubit[2] q;
+h q[0];
+cnot q[0], q[1];
+c[0] = measure q[0];
+c[1] = measure q[1];
+"""
+    qc = to_qiskit(qasm)
+    assert [(creg.name, creg.size) for creg in qc.cregs] == [("c", 2)]
+    assert qc.num_clbits == 2
+
+
+def test_scalar_output_bit_register():
+    """A scalar output bit becomes a single-bit classical register."""
+    qasm = """
+OPENQASM 3.0;
+output bit c;
+qubit[1] q;
+h q[0];
+c = measure q[0];
+"""
+    qc = to_qiskit(qasm)
+    assert [(creg.name, creg.size) for creg in qc.cregs] == [("c", 1)]
+    assert qc.num_clbits == 1
+
+
+def test_multiple_output_variables():
+    """Each output variable gets its own register, in declaration order."""
+    qasm = """
+OPENQASM 3.0;
+output bit[2] first;
+output bit second;
+qubit[3] q;
+first[0] = measure q[0];
+first[1] = measure q[1];
+second = measure q[2];
+"""
+    qc = to_qiskit(qasm)
+    assert [(creg.name, creg.size) for creg in qc.cregs] == [("first", 2), ("second", 1)]
+    assert qc.num_clbits == 3
+
+
+def test_output_register_starts_after_earlier_declarations():
+    """An output register covers only its own bits, offset past earlier declarations."""
+    qasm = """
+OPENQASM 3.0;
+bit[3] scratch;
+output bit[2] c;
+qubit[2] q;
+c[0] = measure q[0];
+c[1] = measure q[1];
+"""
+    qc = to_qiskit(qasm)
+    (creg,) = qc.cregs
+    assert (creg.name, creg.size) == ("c", 2)
+    assert qc.find_bit(creg[0]).index == 3  # c starts after scratch's 3 bits
+    assert qc.num_clbits == 5
+
+
+def test_measurement_lands_in_output_register_bit():
+    """A measurement into an indexed output element targets that element's bit."""
+    qasm = """
+OPENQASM 3.0;
+output bit[2] c;
+qubit[1] q;
+c[1] = measure q[0];
+"""
+    qc = to_qiskit(qasm)
+    (creg,) = qc.cregs
+    assert _measure_clbit_indices(qc) == [1]  # c[1]
+    assert qc.clbits[1] == creg[1]
+
+
+def test_const_sized_output_register():
+    """An output register sized by a constant expression resolves to that size."""
+    qasm = """
+OPENQASM 3.0;
+const int n = 3;
+output bit[n] c;
+qubit[3] q;
+c = measure q;
+"""
+    qc = to_qiskit(qasm)
+    assert [(creg.name, creg.size) for creg in qc.cregs] == [("c", 3)]
+
+
+def test_output_register_with_mid_circuit_measurement_branch():
+    """An output register coexists with branching on a mid-circuit measurement."""
+    qasm = """
+OPENQASM 3.0;
+output bit[1] c;
+qubit[2] q;
+h q[0];
+c[0] = measure q[0];
+if (c[0]) {
+    x q[1];
+}
+"""
+    qc = to_qiskit(qasm)
+    assert [(creg.name, creg.size) for creg in qc.cregs] == [("c", 1)]
+    assert len(_get_if_else_ops(qc)) == 1
+
+
+def test_output_variables_recorded_in_metadata():
+    """Output declarations are marked in metadata, since a register cannot carry that fact."""
+    qasm = """
+OPENQASM 3.0;
+output bit[2] first;
+output bit second;
+qubit[2] q;
+"""
+    qc = to_qiskit(qasm)
+    declared = qc.metadata["braket_output_variables"]
+    assert list(declared) == ["first", "second"]
+    assert declared["first"].size.value == 2
+    assert declared["second"].size is None  # scalar bit, not bit[1]
+
+
+def test_output_metadata_survives_transpilation():
+    """The output marker reaches a serializer, which runs after transpilation."""
+    qasm = """
+OPENQASM 3.0;
+output bit[2] c;
+qubit[2] q;
+h q[0];
+cnot q[0], q[1];
+c[0] = measure q[0];
+c[1] = measure q[1];
+"""
+    qc = transpile(to_qiskit(qasm), basis_gates=["rz", "sx", "cx"])
+    assert list(qc.metadata["braket_output_variables"]) == ["c"]
+
+
+def test_plain_bit_declaration_records_no_output_metadata():
+    """A non-output bit declaration leaves no output marker to misread."""
+    qasm = """
+OPENQASM 3.0;
+bit[2] c;
+qubit[2] q;
+c[0] = measure q[0];
+"""
+    qc = to_qiskit(qasm)
+    assert "braket_output_variables" not in qc.metadata
+
+
+def test_plain_bit_declaration_creates_no_register():
+    """A non-output bit declaration stays as loose classical bits."""
+    qasm = """
+OPENQASM 3.0;
+bit[2] c;
+qubit[2] q;
+c[0] = measure q[0];
+c[1] = measure q[1];
+"""
+    qc = to_qiskit(qasm)
+    assert qc.cregs == []
+    assert qc.num_clbits == 2
+
+
+@pytest.mark.parametrize(
+    "declaration, type_name",
+    [
+        ("output int x;", "IntType"),
+        ("output uint x;", "UintType"),
+        ("output float x;", "FloatType"),
+        ("output bool x;", "BoolType"),
+        ("output angle[4] x;", "AngleType"),
+    ],
+)
+def test_unsupported_output_type(declaration: str, type_name: str):
+    """Output variables that a Qiskit circuit cannot report are rejected."""
+    qasm = f"""
+OPENQASM 3.0;
+{declaration}
+qubit[1] q;
+h q[0];
+"""
+    with pytest.raises(
+        TypeError, match=rf"Output variable 'x' of type {type_name} is not supported"
+    ):
+        to_qiskit(qasm)

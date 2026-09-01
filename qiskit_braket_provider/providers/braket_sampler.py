@@ -19,7 +19,10 @@ from braket.program_sets import CircuitBinding, ParameterSets, ProgramSet
 from braket.tasks import ProgramSetQuantumTaskResult
 from qiskit_braket_provider.providers.adapter import rename_parameter, to_braket
 from qiskit_braket_provider.providers.braket_backend import BraketBackend
-from qiskit_braket_provider.providers.braket_primitive_task import BraketPrimitiveTask
+from qiskit_braket_provider.providers.braket_primitive_task import (
+    BraketPrimitiveTask,
+    run_split_program_set,
+)
 
 _DEFAULT_SHOTS = 1024  # Same value as BackendSamplerV2
 
@@ -71,7 +74,7 @@ class BraketSampler(BaseSamplerV2):
 
                 Default: 0.
         """
-        if not backend._supports_program_sets:
+        if backend._max_program_set_executables is None:
             raise ValueError("Braket device must support program sets")
         self._backend = backend
         self._verbatim = verbatim
@@ -101,9 +104,9 @@ class BraketSampler(BaseSamplerV2):
             parameter_indices.append(indices)
         shots_per_executable = pub_shots if pub_shots is not None else shots
         program_set = ProgramSet(circuit_bindings, shots_per_executable=shots_per_executable)
-        options = {"shots": None, **self._options}
+        tasks, index_map = run_split_program_set(self._backend, program_set, **self._options)
         return BraketPrimitiveTask(
-            self._backend._device.run(program_set, **options),
+            tasks,
             lambda result: BraketSampler._translate_result(
                 result,
                 _JobMetadata(
@@ -113,6 +116,7 @@ class BraketSampler(BaseSamplerV2):
                 ),
             ),
             program_set,
+            index_map,
         )
 
     @staticmethod

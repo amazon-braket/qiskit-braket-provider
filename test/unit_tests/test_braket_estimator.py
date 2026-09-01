@@ -1,6 +1,7 @@
 """Tests for BraketEstimator."""
 
 from collections.abc import Iterable
+from itertools import product
 from unittest import TestCase
 from unittest.mock import MagicMock, Mock, patch
 
@@ -39,10 +40,17 @@ class TestBraketEstimator(TestCase):
         ):
             self.assertTrue(np.allclose(actual.data.evs, expected.data.evs, rtol=0.3, atol=0.2))
 
+    @staticmethod
+    def _mock_run_task(mock_run: Mock) -> Mock:
+        mock_task = Mock()
+        mock_task.id = "test-task-id"
+        mock_run.return_value = mock_task
+        return mock_task
+
     def test_program_sets_unsupported(self):
         """Tests that initialization raises a ValueError if program sets aren't supported"""
         backend = BraketLocalBackend()
-        backend._supports_program_sets = False
+        backend._max_program_set_executables = None
         with self.assertRaises(ValueError):
             BraketEstimator(backend)
 
@@ -56,15 +64,12 @@ class TestBraketEstimator(TestCase):
         pub = (qc, observable)
 
         with patch.object(self.backend._device, "run") as mock_run:
-            mock_task = Mock()
-            mock_task.id = "test-task-id"
-            mock_run.return_value = mock_task
+            self._mock_run_task(mock_run)
 
             job = self.estimator.run([pub], precision=0.01)
 
             mock_run.assert_called_once()
-            call_args = mock_run.call_args
-            self.assertIsInstance(call_args[0][0], ProgramSet)
+            self.assertIsInstance(mock_run.call_args.args[0], ProgramSet)
             self.assertIsInstance(job, BasePrimitiveJob)
 
     def test_parameterized_circuit(self):
@@ -78,9 +83,7 @@ class TestBraketEstimator(TestCase):
         pub = (qc, observable, param_values)
 
         with patch.object(self.backend._device, "run") as mock_run:
-            mock_task = Mock()
-            mock_task.id = "test-task-id"
-            mock_run.return_value = mock_task
+            self._mock_run_task(mock_run)
 
             job = self.estimator.run([pub], precision=0.01)
 
@@ -97,15 +100,12 @@ class TestBraketEstimator(TestCase):
         pub = (qc, observables)
 
         with patch.object(self.backend._device, "run") as mock_run:
-            mock_task = Mock()
-            mock_task.id = "test-task-id"
-            mock_run.return_value = mock_task
+            self._mock_run_task(mock_run)
 
-            self.estimator.run([pub], precision=0.01)
+            job = self.estimator.run([pub], precision=0.01)
 
             mock_run.assert_called_once()
-            program_set = mock_run.call_args[0][0]
-            self.assertIsInstance(program_set, ProgramSet)
+            self.assertIsInstance(job.program_set, ProgramSet)
 
     def test_multiple_pubs(self):
         """Test running multiple pubs."""
@@ -123,9 +123,7 @@ class TestBraketEstimator(TestCase):
         pub2 = (qc2, obs2)
 
         with patch.object(self.backend._device, "run") as mock_run:
-            mock_task = Mock()
-            mock_task.id = "test-task-id"
-            mock_run.return_value = mock_task
+            self._mock_run_task(mock_run)
 
             job = self.estimator.run([pub1, pub2], precision=0.01)
 
@@ -140,12 +138,11 @@ class TestBraketEstimator(TestCase):
         pub = (qc, observable)
 
         with patch.object(self.backend._device, "run") as mock_run:
-            mock_task = Mock()
-            mock_task.id = "test-task-id"
-            mock_run.return_value = mock_task
+            self._mock_run_task(mock_run)
 
             job = self.estimator.run([pub])
 
+            mock_run.assert_called_once()
             self.assertIsInstance(job, BasePrimitiveJob)
 
     def test_custom_precision(self):
@@ -158,12 +155,11 @@ class TestBraketEstimator(TestCase):
         custom_precision = 0.05
 
         with patch.object(self.backend._device, "run") as mock_run:
-            mock_task = Mock()
-            mock_task.id = "test-task-id"
-            mock_run.return_value = mock_task
+            self._mock_run_task(mock_run)
 
             job = self.estimator.run([pub], precision=custom_precision)
 
+            mock_run.assert_called_once()
             self.assertIsInstance(job, BasePrimitiveJob)
 
     def test_complex_broadcasting(self):
@@ -192,16 +188,12 @@ class TestBraketEstimator(TestCase):
         pub = (qc, observables, parameter_values)
 
         with patch.object(self.backend._device, "run") as mock_run:
-            mock_task = Mock()
-            mock_task.id = "test-task-id"
-            mock_run.return_value = mock_task
+            self._mock_run_task(mock_run)
 
             job = self.estimator.run([pub], precision=0.01)
 
             mock_run.assert_called_once()
-            program_set = mock_run.call_args[0][0]
-            self.assertIsInstance(program_set, ProgramSet)
-
+            self.assertIsInstance(job.program_set, ProgramSet)
             self.assertIsInstance(job, BasePrimitiveJob)
 
     def test_broadcasting_with_scalar_observable(self):
@@ -215,9 +207,7 @@ class TestBraketEstimator(TestCase):
         pub = (qc, observable, param_values)
 
         with patch.object(self.backend._device, "run") as mock_run:
-            mock_task = Mock()
-            mock_task.id = "test-task-id"
-            mock_run.return_value = mock_task
+            self._mock_run_task(mock_run)
 
             job = self.estimator.run([pub], precision=0.01)
 
@@ -240,9 +230,7 @@ class TestBraketEstimator(TestCase):
         pub = (qc, observables)
 
         with patch.object(self.backend._device, "run") as mock_run:
-            mock_task = Mock()
-            mock_task.id = "test-task-id"
-            mock_run.return_value = mock_task
+            self._mock_run_task(mock_run)
 
             job = self.estimator.run([pub], precision=0.01)
 
@@ -264,6 +252,35 @@ class TestBraketEstimator(TestCase):
             self.estimator.run([pub1, pub2])
 
         self.assertIn("same precision", str(context.exception))
+
+    def test_run_splits_program_set_by_device_executable_limit(self):
+        """Test that program sets larger than the device executable limit are split."""
+        qc = QuantumCircuit(4)
+        qc.h(0)
+        labels = ["".join(label) for label in product("IXYZ", repeat=4)][1:102]
+        observables = [SparsePauliOp(label) for label in labels]
+        pub = (qc, observables)
+        mock_task_1 = Mock()
+        mock_task_1.id = "task-1"
+        mock_task_2 = Mock()
+        mock_task_2.id = "task-2"
+
+        batch = Mock()
+        batch.tasks = [mock_task_1, mock_task_2]
+        device = Mock()
+        device.run_batch.return_value = batch
+        self.estimator._backend._device = device
+
+        task = self.estimator.run([pub], precision=0.05)
+
+        self.assertEqual(task.program_set.total_executables, 101)
+        self.assertEqual(task.tasks, (mock_task_1, mock_task_2))
+        device.run_batch.assert_called_once()
+        self.assertEqual(
+            [program_set.total_executables for program_set in device.run_batch.call_args.args[0]],
+            [100, 1],
+        )
+        self.assertEqual(device.run_batch.call_args.kwargs, {"shots": -1})
 
     def test_non_broadcastable_shapes_raises_error(self):
         """Test that non-broadcastable shapes raise an error."""

@@ -285,9 +285,12 @@ def test_context_marker_errors(markers: list[VerbatimBoxDelimiter | str], error_
     context = _QiskitProgramContext()
     context.add_qubits("q", 2)
 
-    with pytest.raises(ValueError, match=error_match):
+    def add_all_markers() -> None:
         for m in markers:
             context.add_verbatim_marker(m)
+
+    with pytest.raises(ValueError, match=error_match):
+        add_all_markers()
 
 
 def test_unclosed_verbatim_box_circuit_property_error():
@@ -306,7 +309,7 @@ OPENQASM 3.0;
 box {
     h $0;
 """
-    with pytest.raises(Exception):  # noqa: B017
+    with pytest.raises(Exception):  # ruff:ignore[assert-raises-exception]
         to_qiskit(qasm)
 
 

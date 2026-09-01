@@ -26,8 +26,8 @@ from qiskit.quantum_info import Pauli, SparsePauliOp
 from qiskit.transpiler import PassManager, Target
 from qiskit_ionq import add_equivalences
 
-from braket import experimental_capabilities as braket_expcaps  # noqa: F401
-from braket.aws import AwsDevice, AwsDeviceType  # noqa: F401
+from braket import experimental_capabilities as braket_expcaps
+from braket.aws import AwsDevice, AwsDeviceType  # ruff:ignore[unused-import]
 from braket.circuits import Circuit, Instruction, compiler_directives, measure
 from braket.circuits import Observable as BraketObservable
 from braket.circuits import gates as braket_gates
@@ -38,34 +38,35 @@ from braket.devices import Device
 from braket.ir.openqasm import Program
 from braket.parametric import FreeParameter, FreeParameterExpression, Parameterizable
 from qiskit_braket_provider.providers.compilation import (
-    _CompilationContext,  # noqa: F401
+    _CompilationContext,  # ruff:ignore[unused-import]
     _compile,
-    _default_target,  # noqa: F401
+    _default_target,  # ruff:ignore[unused-import]
 )
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
-    _BRAKET_SUPPORTED_NOISES,  # noqa: F401
-    _BRAKET_TO_QISKIT_NAMES,  # noqa: F401
+    _BRAKET_SUPPORTED_NOISES,  # ruff:ignore[unused-import]
+    _BRAKET_TO_QISKIT_NAMES,  # ruff:ignore[unused-import]
     _BRAKET_VERBATIM_BOX_NAME,
-    _CONTROLLED_GATES_BY_QUBIT_COUNT,  # noqa: F401
+    _CONTROLLED_GATES_BY_QUBIT_COUNT,  # ruff:ignore[unused-import]
     _EPS,
     _PAULI_MAP,
     _QISKIT_CONTROLLED_GATE_NAMES_TO_BRAKET_GATES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
+    _reverse_endianness,
 )
 from qiskit_braket_provider.providers.qasm_context import (
     _QiskitProgramContext,
     _sympy_to_qiskit,
 )
 from qiskit_braket_provider.providers.target import (
-    _get_controlled_gateset,  # noqa: F401
-    _SubstitutedTarget,  # noqa: F401
-    aws_device_to_target,  # noqa: F401
-    gateset_from_properties,  # noqa: F401
-    local_simulator_to_target,  # noqa: F401
-    native_angle_restrictions,  # noqa: F401
-    native_gate_connectivity,  # noqa: F401
-    native_gate_set,  # noqa: F401
+    _get_controlled_gateset,  # ruff:ignore[unused-import]
+    _SubstitutedTarget,  # ruff:ignore[unused-import]
+    aws_device_to_target,  # ruff:ignore[unused-import]
+    gateset_from_properties,  # ruff:ignore[unused-import]
+    local_simulator_to_target,  # ruff:ignore[unused-import]
+    native_angle_restrictions,  # ruff:ignore[unused-import]
+    native_gate_connectivity,  # ruff:ignore[unused-import]
+    native_gate_set,  # ruff:ignore[unused-import]
 )
 
 add_equivalences()
@@ -116,6 +117,14 @@ def _check_positional(pos: _T, kw: _T, name: str) -> _T:
         stacklevel=3,
     )
     return pos
+
+
+def _has_nontrivial_layout(circuit: QuantumCircuit) -> bool:
+    """Return True if the transpiler assigned a non-identity qubit permutation."""
+    if circuit.layout is None:
+        return False
+    layout = circuit.layout.initial_index_layout(filter_ancillas=False)
+    return layout is not None and layout != list(range(len(layout)))
 
 
 @overload
@@ -269,6 +278,18 @@ def to_braket(
         )
         for circ in result.circuits
     ]
+    if not add_measurements and any(_has_nontrivial_layout(c) for c in result.circuits):
+        warnings.warn(
+            "Transpilation with optimization_level > 0 and a coupling_map or target "
+            "may remap qubits. When add_measurements=False the logical-to-physical "
+            "qubit mapping is not reflected by measurement assignments and can be "
+            "hard to recover from the output circuit. "
+            "Consider using add_measurements=True, optimization_level=0, or "
+            "removing the coupling_map (which implicitly assumes a virtual-to-physical "
+            "mapping) if qubit correspondence must be preserved.",
+            UserWarning,
+            stacklevel=2,
+        )
     return translated[0] if single_instance else translated
 
 
@@ -516,6 +537,7 @@ def to_qiskit(
     circuit: Circuit | Program | str,
     add_measurements: bool = True,
     verbatim_box_name: str = _BRAKET_VERBATIM_BOX_NAME,
+    physical_qubit_labels: Sequence[int] | None = None,
 ) -> QuantumCircuit:
     """Return a Qiskit quantum circuit from a Braket quantum circuit.
 
@@ -524,6 +546,12 @@ def to_qiskit(
         add_measurements (bool): Whether to append measurements in the conversion
         verbatim_box_name (str): Name to use for BoxOp labels when converting verbatim boxes.
             Default: "verbatim"
+        physical_qubit_labels (Sequence[int] | None): Device physical qubit labels in
+            Qiskit-index order (as ``sorted(topology.nodes)``). When provided, ``$N``
+            references in a ``Program`` or ``str`` source resolve to the matching
+            Qiskit index; unknown labels raise ``ValueError``. When ``None``, ``$N``
+            maps to Qiskit index ``N``. Ignored for ``Circuit`` inputs.
+            Default: ``None``.
 
     Returns:
         QuantumCircuit: Qiskit quantum circuit
@@ -553,12 +581,16 @@ def to_qiskit(
     """
     if isinstance(circuit, Program):
         return (
-            Interpreter(_QiskitProgramContext(verbatim_box_name))
+            Interpreter(_QiskitProgramContext(verbatim_box_name, physical_qubit_labels))
             .run(circuit.source, inputs=circuit.inputs)
             .circuit
         )
     if isinstance(circuit, str):
-        return Interpreter(_QiskitProgramContext(verbatim_box_name)).run(circuit).circuit
+        return (
+            Interpreter(_QiskitProgramContext(verbatim_box_name, physical_qubit_labels))
+            .run(circuit)
+            .circuit
+        )
     if not isinstance(circuit, Circuit):
         raise TypeError(f"Expected a Circuit, got {type(circuit)} instead.")
 
@@ -575,13 +607,18 @@ def to_qiskit(
         gate_name = operator.name.lower()
         match operator:
             case compiler_directives.Barrier():
-                barrier_qubits = [qiskit_circuit.qubits[qubit_map[i]] for i in instruction.target]
-                qiskit_circuit.barrier(barrier_qubits)
+                active = verbatim_buffer if verbatim_buffer is not None else qiskit_circuit
+                if instruction.target:
+                    active.barrier([active.qubits[qubit_map[i]] for i in instruction.target])
+                else:
+                    active.barrier()
                 continue
             case braket_noises.Noise() | braket_noises.Kraus():
                 gate = _create_qiskit_kraus(operator.to_matrix())
             case braket_gates.Unitary():
                 gate = _create_qiskit_unitary(operator.to_matrix())
+            case braket_expcaps.iqm.classical_control.ExperimentalQuantumOperator():
+                gate = _create_qiskit_gate(operator._qasm_name, operator.parameters, parameter_map)
             case compiler_directives.StartVerbatimBox():
                 if verbatim_buffer is not None:
                     raise ValueError("Nested verbatim boxes are not supported")
@@ -633,19 +670,6 @@ def _create_qiskit_kraus(gate_params: list[np.ndarray]) -> QiskitInstruction:
         assert param.shape[0] == param.shape[1], "Kraus operators must be square matrices."
         gate_params[i] = _reverse_endianness(param)
     return qiskit_qi.Kraus(gate_params)
-
-
-def _reverse_endianness(matrix: np.ndarray) -> np.ndarray:
-    n_q = int(np.log2(matrix.shape[0]))
-    # Convert multi-qubit Kraus from little to big endian notation
-    return (
-        np.transpose(
-            matrix.reshape([2] * n_q * 2),
-            list(range(n_q))[::-1] + list(range(n_q, 2 * n_q))[::-1],
-        ).reshape((2**n_q, 2**n_q))
-        if n_q > 1
-        else matrix
-    )
 
 
 def _create_qiskit_gate(

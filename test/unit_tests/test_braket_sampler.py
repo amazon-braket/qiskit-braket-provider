@@ -1,6 +1,7 @@
 """Tests for BraketSampler."""
 
 from unittest import TestCase
+from unittest.mock import Mock
 
 import numpy as np
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
@@ -41,7 +42,7 @@ class TestBraketSampler(TestCase):
     def test_program_sets_unsupported(self):
         """Tests that initialization raises a ValueError if program sets aren't supported"""
         backend = BraketLocalBackend()
-        backend._supports_program_sets = False
+        backend._max_program_set_executables = None
         with self.assertRaises(ValueError):
             BraketSampler(backend)
 
@@ -55,6 +56,35 @@ class TestBraketSampler(TestCase):
             self.sampler.run([(qc, [0, 1, 2, 3], 100), (qc, [0, 1, 2, 3], 200)])
 
         self.assertIn("same shots", str(context.exception))
+
+    def test_run_splits_program_set_by_device_executable_limit(self):
+        """Test that program sets larger than the device executable limit are split."""
+        theta = Parameter("theta")
+        qc = QuantumCircuit(1)
+        qc.rx(theta, 0)
+        qc.measure_all()
+        pub = (qc, np.linspace(0, 1, 101))
+        mock_task_1 = Mock()
+        mock_task_1.id = "task-1"
+        mock_task_2 = Mock()
+        mock_task_2.id = "task-2"
+
+        batch = Mock()
+        batch.tasks = [mock_task_1, mock_task_2]
+        device = Mock()
+        device.run_batch.return_value = batch
+        self.sampler._backend._device = device
+
+        task = self.sampler.run([pub])
+
+        self.assertEqual(task.program_set.total_executables, 101)
+        self.assertEqual(task.tasks, (mock_task_1, mock_task_2))
+        device.run_batch.assert_called_once()
+        self.assertEqual(
+            [program_set.total_executables for program_set in device.run_batch.call_args.args[0]],
+            [100, 1],
+        )
+        self.assertEqual(device.run_batch.call_args.kwargs, {"shots": -1})
 
     def test_run_local_multiple_registers(self):
         """Tests that correct results are returned for circuits with multiple registers"""

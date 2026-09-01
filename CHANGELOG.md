@@ -1,5 +1,84 @@
 # Changelog
 
+## v0.23.2 (2026-08-21)
+
+### Bug Fixes and Other Changes
+
+ * pragma physical qubit labels
+
+## v0.23.1 (2026-08-20)
+
+### Bug Fixes and Other Changes
+
+ * translate physical qubits through device label mapping
+
+## v0.23.0 (2026-08-18)
+
+### Features
+
+ * Support OpenQASM output variables
+
+## v0.22.1 (2026-08-13)
+
+### Bug Fixes and Other Changes
+
+ * typo in 5_tutorial_transpilation.ipynb
+
+## v0.22.0 (2026-08-10)
+
+### Features
+
+ * warn when qubit mapping may be lost with add_measurements=False
+
+## v0.21.1 (2026-08-06)
+
+### Bug Fixes and Other Changes
+
+ * handle empty if statement
+
+## v0.21.0 (2026-08-03)
+
+### Features
+
+ * Automatically split/merge large program sets
+
+## v0.20.2 (2026-07-31)
+
+### Bug Fixes and Other Changes
+
+ * scope 'all' to touched qubits for physical-qubit sources
+
+## v0.20.1 (2026-07-24)
+
+### Bug Fixes and Other Changes
+
+ * resolve panic due to missing clbits on verbatim placeholder
+ * remove NotImplemented error for basis-invariant result types
+
+## v0.20.0 (2026-07-22)
+
+### Features
+
+ * support parametric function conversion from OQ3 to qiskit
+
+## v0.19.0 (2026-07-21)
+
+### Features
+
+ * add basis rotation pass
+
+### Bug Fixes and Other Changes
+
+ * fix errors due to new ruff version
+
+## v0.18.1 (2026-07-16)
+
+### Bug Fixes and Other Changes
+
+ * preserve OpenQASM 3 barriers in to_qiskit
+ * barrier scope and bare-barrier handling in to_qiskit
+ * to_qiskit for IQM experimental operators (cc_prx, measure_ff)
+
 ## v0.18.0 (2026-07-10)
 
 ### Features
