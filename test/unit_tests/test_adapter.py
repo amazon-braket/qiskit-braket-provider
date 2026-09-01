@@ -558,13 +558,15 @@ class TestAdapter(TestCase):
             ),
         ):
             to_braket(circuit, {"h, cx"}, True, [[0, 1]], connectivity=[[0, 1]])
-        with pytest.raises(TypeError, match="Multiple values for angle_restrictions"):
-            res = {"rx": {0: {np.pi}}}
-            with pytest.warns(
+        res = {"rx": {0: {np.pi}}}
+        with (
+            pytest.raises(TypeError, match="Multiple values for angle_restrictions"),
+            pytest.warns(
                 DeprecationWarning,
                 match="Passing connectivity as a positional argument is deprecated.",
-            ):
-                to_braket(circuit, {"h, cx"}, True, [[0, 1]], res, angle_restrictions=res)
+            ),
+        ):
+            to_braket(circuit, {"h, cx"}, True, [[0, 1]], res, angle_restrictions=res)
 
     def test_type_error_on_bad_input(self):
         """Tests that to_braket raises a TypeError if its first argument isn't a QuantumCircuit."""
