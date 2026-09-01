@@ -15,9 +15,11 @@ Sphinx documentation builder
 
 # General options:
 import datetime
+import os
 from pathlib import Path
 
 from pygments.formatters import LatexFormatter
+from sphinx.application import Sphinx
 
 project = "Qiskit-Braket provider"
 copyright = f"{datetime.datetime.now(tz=datetime.UTC).year}, Amazon.com"  # ruff:ignore[builtin-variable-shadowing]
@@ -77,3 +79,67 @@ latex_elements = {
 {LatexFormatter().get_style_defs()}
 """,
 }
+
+LLMS_TXT_TITLE = "Qiskit-Braket Provider"
+LLMS_TXT_SUMMARY = (
+    "Provider that runs Qiskit programs on quantum computing devices and "
+    "simulators through Amazon Braket."
+)
+LLMS_TXT_BASE_URL = "https://qiskit-braket-provider.readthedocs.io/en/stable/"
+LLMS_TXT_SECTIONS: dict[str, tuple[str, ...]] = {
+    "Docs": (),
+    "Examples": ("tutorials/", "how_tos/"),
+    # autosummary_generate writes the per-object stub pages into stubs/.
+    "API Reference": ("apidocs/", "stubs/"),
+}
+
+
+def _llms_txt_section(docname: str) -> str:
+    """Return the llms.txt section heading a document belongs under.
+
+    Sections are tried in declaration order, so the first matching prefix wins.
+    A document that matches no prefix goes under the first section.
+    """
+    for heading, prefixes in LLMS_TXT_SECTIONS.items():
+        if any(docname.startswith(prefix) for prefix in prefixes):
+            return heading
+    default_heading, _ = next(iter(LLMS_TXT_SECTIONS.items()))
+    return default_heading
+
+
+def _write_llms_txt(app: Sphinx, exception: Exception | None) -> None:
+    """Write llms.txt, a manifest of every built page for LLM discoverability.
+
+    The format follows https://llmstxt.org: an H1 name, a blockquote summary, then
+    one file list per H2 section. Pages are grouped so that an agent can tell
+    narrative docs, runnable examples and generated API reference apart.
+    """
+    if exception or app.builder.name != "html":
+        return
+
+    # Read the Docs passes the canonical URL to every build automatically, so this
+    # is set in any RTD build and the default only applies elsewhere. See
+    # https://docs.readthedocs.com/platform/stable/canonical-urls.html#how-to-specify-the-canonical-url
+    base_url = os.environ.get("READTHEDOCS_CANONICAL_URL", LLMS_TXT_BASE_URL)
+    if base_url and not base_url.endswith("/"):
+        base_url += "/"
+
+    env = app.env
+    sections: dict[str, list[str]] = {heading: [] for heading in LLMS_TXT_SECTIONS}
+    for docname in sorted(env.all_docs):
+        url = f"{base_url}{app.builder.get_target_uri(docname)}"
+        sections[_llms_txt_section(docname)].append(f"- [{env.titles[docname].astext()}]({url})")
+
+    lines = [f"# {LLMS_TXT_TITLE}", "", f"> {LLMS_TXT_SUMMARY}"]
+    for heading in LLMS_TXT_SECTIONS:
+        if sections[heading]:
+            lines += ["", f"## {heading}", "", *sections[heading]]
+
+    out = Path(app.outdir) / "llms.txt"
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"--> Wrote {out.name}")
+
+
+def setup(app: Sphinx) -> None:
+    """Register build hooks."""
+    app.connect("build-finished", _write_llms_txt)
