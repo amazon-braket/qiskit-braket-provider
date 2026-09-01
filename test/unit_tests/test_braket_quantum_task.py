@@ -111,9 +111,7 @@ class TestBraketQuantumTask(TestCase):
             tasks=MOCK_ASYMMETRIC_PROGRAM_SET_QUANTUM_TASK,
             shots=4,
         )
-        self.assertEqual(
-            task.result().results[0].data.counts, {"01": 3, "10": 1}
-        )
+        self.assertEqual(task.result().results[0].data.counts, {"01": 3, "10": 1})
 
     @patch(
         "qiskit_braket_provider.providers.braket_quantum_task.AwsQuantumTaskBatch._retrieve_results"
