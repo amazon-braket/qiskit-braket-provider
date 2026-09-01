@@ -2,7 +2,7 @@
 
 [![Latest Version](https://img.shields.io/pypi/v/qiskit-braket-provider.svg)](https://pypi.python.org/pypi/qiskit-braket-provider)
 [![Supported Python Versions](https://img.shields.io/pypi/pyversions/qiskit-braket-provider.svg)](https://pypi.python.org/pypi/qiskit-braket-provider)
-[![Qiskit compatibility](https://img.shields.io/badge/Qiskit%20compatibility-%3E%3D2.0.0-blueviolet?logo=Qiskit)](https://github.com/Qiskit/qiskit/releases)
+[![Qiskit compatibility](https://img.shields.io/badge/Qiskit%20compatibility-%3E%3D2.2.0-blueviolet?logo=Qiskit)](https://github.com/Qiskit/qiskit/releases)
 [![Build status](https://github.com/amazon-braket/qiskit-braket-provider/actions/workflows/python-package.yml/badge.svg?branch=main)](https://github.com/amazon-braket/qiskit-braket-provider/actions/workflows/python-package.yml)
 [![Documentation Status](https://img.shields.io/readthedocs/qiskit-braket-provider?logo=read-the-docs)](https://qiskit-braket-provider.readthedocs.io)
 

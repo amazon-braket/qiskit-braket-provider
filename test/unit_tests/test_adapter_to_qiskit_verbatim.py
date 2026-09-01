@@ -11,10 +11,9 @@ from braket.default_simulator.openqasm.interpreter import VerbatimBoxDelimiter
 from braket.default_simulator.openqasm.parser.openqasm_ast import BitType, Identifier
 from braket.ir.openqasm import Program
 from qiskit_braket_provider import to_qiskit
-from qiskit_braket_provider.providers.adapter import (
-    _BRAKET_VERBATIM_BOX_NAME,
-    _QiskitProgramContext,
-)
+from qiskit_braket_provider.providers.adapter import _QiskitProgramContext
+from qiskit_braket_provider.providers.braket_annotations import BraketVerbatimBox
+from qiskit_braket_provider.providers.gate_mappings import _BRAKET_VERBATIM_BOX_NAME
 
 
 def _get_box_ops(qiskit_circuit: QuantumCircuit) -> list[CircuitInstruction]:
@@ -369,7 +368,7 @@ def test_braket_to_qiskit_verbatim_instruciton():
     boxed = QuantumCircuit(
         2,
     )
-    boxed = boxed.compose(BoxOp(circuit, label=_BRAKET_VERBATIM_BOX_NAME))
+    boxed = boxed.compose(BraketVerbatimBox(circuit))
     assert to_qiskit(test, add_measurements=False) == boxed
 
 

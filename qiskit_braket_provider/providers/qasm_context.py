@@ -59,6 +59,7 @@ from braket.default_simulator.openqasm.program_context import (
 )
 from braket.ir.jaqcd import AdjointGradient
 from braket.ir.jaqcd.program_v1 import Results
+from qiskit_braket_provider.providers.braket_annotations import BraketVerbatimBox
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_VERBATIM_BOX_NAME,
@@ -429,7 +430,11 @@ class _QiskitProgramContext(AbstractProgramContext):
             body = self._circuit_stack.pop()
             parent = self._active_circuit
             self._extend_bits(parent, body)
-            parent.append(BoxOp(body, label=self._verbatim_box_name), parent.qubits, parent.clbits)
+            parent.append(
+                BraketVerbatimBox(body, label=self._verbatim_box_name),
+                parent.qubits,
+                parent.clbits,
+            )
             self._in_verbatim_box = False
 
         else:

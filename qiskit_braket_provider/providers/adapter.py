@@ -15,7 +15,6 @@ import qiskit.circuit.library as qiskit_gates
 import qiskit.quantum_info as qiskit_qi
 from qiskit import QuantumCircuit
 from qiskit.circuit import (
-    BoxOp,
     ControlledGate,
     Parameter,
     ParameterExpression,
@@ -37,6 +36,7 @@ from braket.default_simulator.openqasm.interpreter import Interpreter
 from braket.devices import Device
 from braket.ir.openqasm import Program
 from braket.parametric import FreeParameter, FreeParameterExpression, Parameterizable
+from qiskit_braket_provider.providers.braket_annotations import BraketVerbatimBox
 from qiskit_braket_provider.providers.compilation import (
     _CompilationContext,  # ruff:ignore[unused-import]
     _compile,
@@ -647,9 +647,7 @@ def to_qiskit(
             case compiler_directives.StartVerbatimBox(), _:
                 continue
             case compiler_directives.EndVerbatimBox(), _:
-                qiskit_circuit = qiskit_circuit.compose(
-                    BoxOp(verbatim_buffer, label=_BRAKET_VERBATIM_BOX_NAME)
-                )
+                qiskit_circuit = qiskit_circuit.compose(BraketVerbatimBox(verbatim_buffer))
                 verbatim_buffer = None
             case _, False:
                 verbatim_buffer.append(gate, target)

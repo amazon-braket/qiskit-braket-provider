@@ -215,6 +215,10 @@ _BRAKET_GATE_NAME_TO_QISKIT_GATE: dict[str, QiskitInstruction | None] = {
 
 _BRAKET_VERBATIM_BOX_NAME = "verbatim"
 
+_BRAKET_VERBATIM_PRAGMA_PAYLOAD = "pragma braket verbatim"
+
+_BRAKET_VERBATIM_PRAGMA_LINE = f"#{_BRAKET_VERBATIM_PRAGMA_PAYLOAD}"
+
 _OUTPUT_VARIABLES_KEY = "braket_output_variables"
 
 _EPS = 1e-10  # global variable used to chop very small numbers to zero
@@ -291,3 +295,24 @@ def _reverse_endianness(matrix: np.ndarray) -> np.ndarray:
         matrix.reshape([2] * n_q * 2),
         list(range(n_q))[::-1] + list(range(n_q, 2 * n_q))[::-1],
     ).reshape((2**n_q, 2**n_q))
+
+
+def _make_shim(base: type, braket_name: str) -> type:
+    """Return a subclass of ``base`` that renders as ``braket_name`` in OpenQASM 3."""
+
+    def init(self: object, *args: object, **kwargs: object) -> None:
+        base.__init__(self, *args, **kwargs)  # type: ignore[misc]
+        self.name = braket_name  # type: ignore[attr-defined]
+
+    return type(f"Braket{base.__name__}", (base,), {"__init__": init})
+
+
+_QISKIT_TO_BRAKET_SHIM: dict[type, type] = {
+    (base := get_standard_gate_name_mapping()[qiskit_name].base_class): _make_shim(
+        base, braket_name
+    )
+    for braket_name, qiskit_name in _BRAKET_TO_QISKIT_NAMES.items()
+    if braket_name != qiskit_name and qiskit_name in get_standard_gate_name_mapping()
+}
+
+_SHIM_CLASSES: frozenset[type] = frozenset(_QISKIT_TO_BRAKET_SHIM.values())
