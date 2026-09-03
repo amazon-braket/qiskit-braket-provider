@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.24.0 (2026-09-02)
+
+### Features
+
+ * add Braket-formatting transpiler passes
+
+### Documentation Changes
+
+ * add document tutorial testing in amazon-braket-examples
+ * add llms.txt generation
+
 ## v0.23.2 (2026-08-21)
 
 ### Bug Fixes and Other Changes
