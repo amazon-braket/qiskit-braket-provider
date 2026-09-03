@@ -316,45 +316,63 @@ MOCK_PROGRAM_RESULT = {
         }
     },
 }
-MOCK_PROGRAM_SET_RESULT = ProgramSetQuantumTaskResult.from_object(
-    ProgramSetTaskResult(
-        braketSchemaHeader={
-            "name": "braket.task_result.program_set_task_result",
+_PROGRAM_SET_TASK_METADATA = {
+    "braketSchemaHeader": {
+        "name": "braket.task_result.program_set_task_metadata",
+        "version": "1",
+    },
+    "id": "TaskID",
+    "deviceId": "arn:aws:braket:::device/quantum-simulator/amazon/sv1",
+    "requestedShots": 120,
+    "successfulShots": 100,
+    "programMetadata": [{"executables": [{}]}],
+    "deviceParameters": {
+        "braketSchemaHeader": {
+            "name": "braket.device_schema.simulators.gate_model_simulator_device_parameters",
             "version": "1",
         },
-        programResults=[MOCK_PROGRAM_RESULT] * 2,
-        taskMetadata={
+        "paradigmParameters": {
             "braketSchemaHeader": {
-                "name": "braket.task_result.program_set_task_metadata",
+                "name": "braket.device_schema.gate_model_parameters",
                 "version": "1",
             },
-            "id": "TaskID",
-            "deviceId": "arn:aws:braket:::device/quantum-simulator/amazon/sv1",
-            "requestedShots": 120,
-            "successfulShots": 100,
-            "programMetadata": [{"executables": [{}]}],
-            "deviceParameters": {
-                "braketSchemaHeader": {
-                    "name": "braket.device_schema.simulators.gate_model_simulator_device_parameters",
-                    "version": "1",
-                },
-                "paradigmParameters": {
-                    "braketSchemaHeader": {
-                        "name": "braket.device_schema.gate_model_parameters",
-                        "version": "1",
-                    },
-                    "qubitCount": 5,
-                    "disableQubitRewiring": False,
-                },
-            },
-            "createdAt": "2024-10-15T19:06:58.986Z",
-            "endedAt": "2024-10-15T19:07:00.382Z",
-            "status": "COMPLETED",
-            "totalFailedExecutables": 1,
+            "qubitCount": 5,
+            "disableQubitRewiring": False,
         },
+    },
+    "createdAt": "2024-10-15T19:06:58.986Z",
+    "endedAt": "2024-10-15T19:07:00.382Z",
+    "status": "COMPLETED",
+    "totalFailedExecutables": 1,
+}
+
+
+def _program_set_result(program_results: list) -> ProgramSetQuantumTaskResult:
+    return ProgramSetQuantumTaskResult.from_object(
+        ProgramSetTaskResult(
+            braketSchemaHeader={
+                "name": "braket.task_result.program_set_task_result",
+                "version": "1",
+            },
+            programResults=program_results,
+            taskMetadata=_PROGRAM_SET_TASK_METADATA,
+        )
     )
-)
+
+
+MOCK_PROGRAM_SET_RESULT = _program_set_result([MOCK_PROGRAM_RESULT] * 2)
 MOCK_PROGRAM_SET_QUANTUM_TASK = LocalQuantumTask(MOCK_PROGRAM_SET_RESULT)
+
+_MOCK_ASYMMETRIC_PROGRAM_RESULT: dict = copy.deepcopy(MOCK_PROGRAM_RESULT)
+_MOCK_ASYMMETRIC_PROGRAM_RESULT["executableResults"][0]["measurements"] = [
+    [1, 0],
+    [1, 0],
+    [1, 0],
+    [0, 1],
+]
+MOCK_ASYMMETRIC_PROGRAM_SET_QUANTUM_TASK = LocalQuantumTask(
+    _program_set_result([_MOCK_ASYMMETRIC_PROGRAM_RESULT])
+)
 
 
 def _emulator_one_qubit_properties() -> dict:

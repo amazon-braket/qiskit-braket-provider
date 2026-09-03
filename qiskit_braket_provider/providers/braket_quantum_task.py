@@ -173,7 +173,7 @@ class BraketQuantumTask(JobV1):
                     shots=len((executable_result := program_result[0]).measurements),
                     success=True,
                     data=ExperimentResultData(
-                        counts=executable_result.counts,
+                        counts={k[::-1]: v for k, v in executable_result.counts.items()},
                         memory=[
                             hex(int("".join(shot_result[::-1].astype(str)), 2))
                             for shot_result in executable_result.measurements
