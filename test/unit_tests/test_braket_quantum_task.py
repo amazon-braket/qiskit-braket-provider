@@ -142,13 +142,40 @@ class TestBraketQuantumTask(TestCase):
             tasks=[mock_aws_quantum_task],
             shots=10,
         )
-        mock_aws_quantum_task.return_value.queue_position.return_value = QuantumTaskQueueInfo(
+        mock_aws_quantum_task.queue_position.return_value = QuantumTaskQueueInfo(
             queue_type=QueueType.NORMAL, queue_position=1, message=None
         )
         task_queue = task.queue_position()
 
-        mock_aws_quantum_task.return_value.queue_position.assert_called_once()
-        mock_aws_quantum_task.assert_called_once_with("arn:aws:braket:::quantum-task/AwesomeId")
+        mock_aws_quantum_task.queue_position.assert_called_once()
+        assert task_queue
+
+    @patch(
+        "qiskit_braket_provider.providers.braket_quantum_task.AwsQuantumTask",
+        spec=AwsQuantumTask,
+    )
+    def test_queue_position_uses_own_task_not_reconstructed_batch_id(
+        self, mock_aws_quantum_task_cls: MagicMock
+    ):
+        """Regression test for a multi-task (batch) job: queue_position() must call
+        each task's own queue_position(), not reconstruct an AwsQuantumTask from the
+        semicolon-joined batch task_id(), which is not a valid single ARN."""
+        task_a = Mock(spec=AwsQuantumTask)
+        task_a.queue_position.return_value = QuantumTaskQueueInfo(
+            queue_type=QueueType.NORMAL, queue_position=1, message=None
+        )
+        task_b = Mock(spec=AwsQuantumTask)
+
+        task = BraketQuantumTask(
+            backend=Mock(spec=BraketAwsBackend),
+            task_id="arn:aws:braket:::quantum-task/A;arn:aws:braket:::quantum-task/B",
+            tasks=[task_a, task_b],
+            shots=10,
+        )
+        task_queue = task.queue_position()
+
+        task_a.queue_position.assert_called_once()
+        mock_aws_quantum_task_cls.assert_not_called()
         assert task_queue
 
     @patch(
