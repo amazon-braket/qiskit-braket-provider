@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.25.0 (2026-09-10)
+
+### Features
+
+ * add Braket-formatting transpiler passes and OQ3 helpers
+
+### Bug Fixes and Other Changes
+
+ * reverse program-set counts keys to little-endian
+
 ## v0.24.0 (2026-09-02)
 
 ### Features
