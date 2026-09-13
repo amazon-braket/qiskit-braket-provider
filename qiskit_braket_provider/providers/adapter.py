@@ -92,11 +92,8 @@ _RESERVED_OQ3_KEYWORDS = frozenset({"measure", "barrier", "box", "gphase"})
 
 _BRAKET_OQ3_BASIS_GATES = frozenset(_BRAKET_GATE_NAME_TO_QISKIT_GATE) - _RESERVED_OQ3_KEYWORDS
 
-"""Braket-side OpenQASM operation names that indicate dynamic-circuit capability."""
-_DYNAMIC_CIRCUIT_OPERATIONS = frozenset({"measure_ff", "cc_prx", "if"})
-
-"""Qiskit-side instruction names that indicate dynamic-circuit capability."""
-_QISKIT_DYNAMIC_CIRCUIT_OPS = frozenset({"if_else"})
+_QISKIT_CONTROL_FLOW_OPS = frozenset({"if_else"})
+"""Qiskit instruction names for control flow, which is an OQ3 statement, not a gate."""
 
 
 def _get_circuits(
@@ -757,16 +754,11 @@ def convert_qiskit_to_braket_circuits(
 
 
 def _device_supports_dynamic_circuits(device: Device) -> bool:
-    """Return ``True`` if ``device`` advertises a known dynamic-circuit primitive.
-
-    Checks the device's OpenQASM ``supportedOperations`` against
-    :data:`_DYNAMIC_CIRCUIT_OPERATIONS`.
-    """
+    """Return True if the device's OpenQASM action advertises the if statement."""
     action = device.properties.action.get(DeviceActionType.OPENQASM)
     if action is None:
         return False
-    supported = {op.lower() for op in action.supportedOperations}
-    return bool(supported & _DYNAMIC_CIRCUIT_OPERATIONS)
+    return "if" in {op.lower() for op in action.supportedOperations}
 
 
 def _device_executes_control_flow_natively(device: Device) -> bool:
@@ -781,28 +773,9 @@ def _device_executes_control_flow_natively(device: Device) -> bool:
     return "if" in native
 
 
-def _resolve_dynamic_circuits_supported(
-    explicit: bool | None,
-    braket_device: Device | None,
-    target: Target | None,
-    basis_gates: Collection[str] | None,
-) -> bool:
-    """Resolve ``dynamic_circuits_supported`` from caller inputs.
-
-    Precedence: explicit user value > ``braket_device`` capability >
-    ``target``/``basis_gates`` operation names. Falls back to ``False``.
-    """
-    if explicit is not None:
-        return explicit
-    if braket_device is not None:
-        return _device_supports_dynamic_circuits(braket_device)
-    ops = set(target.operation_names) if target is not None else set(basis_gates or ())
-    return bool(_QISKIT_DYNAMIC_CIRCUIT_OPS & ops)
-
-
 def _has_control_flow(circuit: QuantumCircuit) -> bool:
     """Return True if the circuit contains a control-flow statement."""
-    return any(instr.operation.name in _QISKIT_DYNAMIC_CIRCUIT_OPS for instr in circuit.data)
+    return any(instr.operation.name in _QISKIT_CONTROL_FLOW_OPS for instr in circuit.data)
 
 
 def to_oq3(
@@ -811,7 +784,7 @@ def to_oq3(
     basis_gates: Collection[str] | None = None,
     qubit_labels: Sequence[int] | None = None,
     should_wrap_verbatim: bool = False,
-    dynamic_circuits_supported: bool = False,
+    preserve_measurement_order: bool = False,
 ) -> str:
     """Convert a compiled Qiskit QuantumCircuit to a Braket-compatible OpenQASM 3 string.
 
@@ -828,19 +801,19 @@ def to_oq3(
         qubit_labels: Physical qubit indices for the target device. If provided,
             virtual qubits are remapped to physical qubit notation (``$0``, ``$1``, etc.).
         should_wrap_verbatim: Whether to wrap the circuit in a verbatim box.
-        dynamic_circuits_supported: Whether the target device supports dynamic
-            (mid-circuit) measurements. If ``True``, measurement placement is
-            preserved (no reordering, kept inside any verbatim box). Default:
-            ``False``.
+        preserve_measurement_order: Whether to leave measurements where they are
+            instead of moving them to the end of the circuit. Set this when the device
+            can execute measurements anywhere in the program. Default: ``False``.
 
     Returns:
         An OpenQASM 3 string compatible with Amazon Braket.
     """
     pm = PassManager()
     pm.append(ConsolidateClbits())
-    pm.append(MoveMeasurementsToEnd(dynamic_circuits_supported=dynamic_circuits_supported))
+    if not preserve_measurement_order:
+        pm.append(MoveMeasurementsToEnd())
     if should_wrap_verbatim:
-        pm.append(WrapInVerbatimBox(dynamic_circuits_supported=dynamic_circuits_supported))
+        pm.append(WrapInVerbatimBox())
     pm.append(RenameGates())
     circuit = pm.run(circuit)
 
@@ -897,7 +870,6 @@ def compile_to_oq3(  # type: ignore[misc]
     layout_method: str | None = None,
     routing_method: str | None = None,
     seed_transpiler: int | None = None,
-    dynamic_circuits_supported: bool | None = None,
 ) -> str | list[str]:
     """Compile Qiskit circuits to Braket-compatible OpenQASM 3 strings.
 
@@ -926,13 +898,6 @@ def compile_to_oq3(  # type: ignore[misc]
         layout_method: Layout method for the transpiler.
         routing_method: Routing method for the transpiler.
         seed_transpiler: Seed for reproducible transpilation.
-        dynamic_circuits_supported: Whether the target device supports dynamic
-            (mid-circuit) measurements. If ``None`` (default), the value is
-            inferred: from ``braket_device.properties.action[OPENQASM].supportedOperations``
-            if a device is provided, otherwise from the presence of ``if_else``
-            in the ``target``'s operations or in ``basis_gates``. If neither
-            source signals dynamic support, defaults to ``False``. A circuit
-            containing control flow is always treated as dynamic.
 
     Returns:
         An OpenQASM 3 string (single circuit) or list of strings (multiple circuits).
@@ -968,10 +933,10 @@ def compile_to_oq3(  # type: ignore[misc]
     effective_basis_gates = result.basis_gates
     if effective_basis_gates is None and result.target is not None:
         effective_basis_gates = set(result.target.operation_names) - _RESERVED_OQ3_KEYWORDS
-    dynamic_flag = _resolve_dynamic_circuits_supported(
-        dynamic_circuits_supported, braket_device, target, basis_gates
-    )
     native_control_flow = braket_device is not None and _device_executes_control_flow_natively(
+        braket_device
+    )
+    device_is_dynamic = braket_device is not None and _device_supports_dynamic_circuits(
         braket_device
     )
 
@@ -981,15 +946,13 @@ def compile_to_oq3(  # type: ignore[misc]
         # The service lowers a branch into the device's feedback operations, which a
         # verbatim box forbids -- unless the device runs the branch as written.
         service_compiles_branch = has_control_flow and not native_control_flow
-        # A branch reads a measurement result, so measurements cannot move past it.
-        dynamic_circuits = dynamic_flag or has_control_flow
         oq3_strings.append(
             to_oq3(
                 circ,
                 basis_gates=effective_basis_gates,
                 qubit_labels=result.qubit_labels,
                 should_wrap_verbatim=should_wrap_verbatim and not service_compiles_branch,
-                dynamic_circuits_supported=dynamic_circuits,
+                preserve_measurement_order=device_is_dynamic,
             )
         )
 

@@ -2,8 +2,9 @@
 
 import re
 from collections.abc import Iterable, Sequence
+from itertools import dropwhile
 
-from qiskit.circuit import ClassicalRegister, Instruction, Measure, QuantumCircuit
+from qiskit.circuit import ClassicalRegister, ControlFlowOp, Instruction, Measure, QuantumCircuit
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.dagcircuit import DAGCircuit
 from qiskit.transpiler.basepasses import TransformationPass
@@ -73,22 +74,13 @@ def _plain_register_name(taken: set) -> str:
 class MoveMeasurementsToEnd(TransformationPass):
     """Reorder the DAG so all measurements appear at the end.
 
-    Skips when the target device supports dynamic (mid-circuit) measurements,
-    where measurement ordering carries semantic meaning and must not be
-    rewritten.
-
-    Args:
-        dynamic_circuits_supported: If ``True``, the pass returns the DAG
-            unchanged. Default: ``False``.
+    A circuit containing control flow is returned unchanged, since a branch reads a
+    measured bit and would then be evaluated before the measurement assigning it.
     """
-
-    def __init__(self, dynamic_circuits_supported: bool = False):
-        super().__init__()
-        self._dynamic_circuits_supported = dynamic_circuits_supported
 
     def run(self, dag: DAGCircuit) -> DAGCircuit:
         """Move every ``Measure`` op to the end of the DAG."""
-        if self._dynamic_circuits_supported:
+        if any(isinstance(node.op, ControlFlowOp) for node in dag.op_nodes()):
             return dag
 
         new_dag = dag.copy_empty_like()
@@ -106,32 +98,27 @@ class MoveMeasurementsToEnd(TransformationPass):
 class WrapInVerbatimBox(TransformationPass):
     """Wrap operations in a ``BoxOp`` labeled ``"verbatim"``.
 
-    The ``dynamic_circuits_supported`` flag mirrors the one on
-    :class:`MoveMeasurementsToEnd`: it describes whether the target device
-    can execute measurements that appear anywhere in the program.
-
-    Args:
-        dynamic_circuits_supported: If ``True``, every operation goes inside
-            the verbatim box; measurement ordering is preserved. If ``False``
-            (default), trailing measurements are placed outside the box.
-            When ``False``, callers are expected to have run
-            :class:`MoveMeasurementsToEnd` first (or otherwise guaranteed that
-            all measurements are at the end of the circuit).
+    Measurements are placed outside the box when they all trail the circuit. If any
+    operation follows a measurement, everything goes inside, keeping the program's
+    measurement placement intact.
     """
-
-    def __init__(self, dynamic_circuits_supported: bool = False):
-        super().__init__()
-        self._dynamic_circuits_supported = dynamic_circuits_supported
 
     def run(self, dag: DAGCircuit) -> DAGCircuit:
         """Wrap operations in a verbatim ``BoxOp``."""
         circuit = dag_to_circuit(dag)
+        from_first_measurement = dropwhile(
+            lambda instr: not isinstance(instr.operation, Measure), circuit.data
+        )
+        measurements_at_end = all(
+            isinstance(instr.operation, Measure) for instr in from_first_measurement
+        )
+
         inner = QuantumCircuit(*circuit.qregs, *circuit.cregs)
         trailing_measurements = []
 
         for instr in circuit.data:
             is_measure = isinstance(instr.operation, Measure)
-            if is_measure and not self._dynamic_circuits_supported:
+            if is_measure and measurements_at_end:
                 trailing_measurements.append(instr)
             else:
                 inner.append(instr.operation, instr.qubits, instr.clbits)

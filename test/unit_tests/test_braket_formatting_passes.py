@@ -339,63 +339,56 @@ def test_consolidate_clbits_preserves_if_else_condition(build_circuit: Callable)
 
 
 @pytest.mark.parametrize(
-    "build_circuit,dynamic_circuits_supported,expected_op_order",
+    "build_circuit,expected_op_order",
     [
-        (_mid_measure_circuit, False, ["h", "cx", "measure", "measure"]),
-        (_mid_measure_circuit, True, ["h", "measure", "cx", "measure"]),
-        (_bell_circuit, False, ["h", "cx", "measure", "measure"]),
+        (_mid_measure_circuit, ["h", "cx", "measure", "measure"]),
+        (_bell_circuit, ["h", "cx", "measure", "measure"]),
+        (_if_else_circuit_for_verbatim, ["h", "measure", "if_else"]),
     ],
-    ids=["reorders_mid_measure", "dynamic_circuits_noop", "already_at_end_noop"],
+    ids=["reorders_mid_measure", "already_at_end_noop", "control_flow_left_untouched"],
 )
 def test_move_measurements_to_end(
-    build_circuit: Callable, dynamic_circuits_supported: bool, expected_op_order: list[str]
+    build_circuit: Callable, expected_op_order: list[str]
 ) -> None:
-    result = PassManager([MoveMeasurementsToEnd(dynamic_circuits_supported)]).run(build_circuit())
+    result = PassManager([MoveMeasurementsToEnd()]).run(build_circuit())
     assert [instr.operation.name for instr in result.data] == expected_op_order
 
 
 @pytest.mark.parametrize(
-    "build_circuit,dynamic_circuits_supported,expected_inner_ops,expected_trailing_ops,"
-    "expected_metadata",
+    "build_circuit,expected_inner_ops,expected_trailing_ops,expected_metadata",
     [
         (
             _bell_circuit,
-            False,
             ["h", "cx"],
             ["measure", "measure"],
             {},
         ),
         (
-            _bell_circuit,
-            True,
-            ["h", "cx", "measure", "measure"],
+            _if_else_circuit_for_verbatim,
+            ["h", "measure", "if_else"],
             [],
             {},
         ),
         (
             _output_register_circuit,
-            False,
             ["h", "cx"],
             ["measure", "measure"],
             {"braket_output_variables": {"c": None}},
         ),
     ],
     ids=[
-        "measurements_outside_by_default",
-        "everything_inside_when_dynamic",
+        "trailing_measurements_outside",
+        "measurement_before_a_branch_stays_inside",
         "preserves_metadata",
     ],
 )
 def test_wrap_in_verbatim_box(
     build_circuit: Callable,
-    dynamic_circuits_supported: bool,
     expected_inner_ops: list[str],
     expected_trailing_ops: list[str],
     expected_metadata: dict,
 ) -> None:
-    result = PassManager([
-        WrapInVerbatimBox(dynamic_circuits_supported=dynamic_circuits_supported)
-    ]).run(build_circuit())
+    result = PassManager([WrapInVerbatimBox()]).run(build_circuit())
 
     top_level_boxes = [instr for instr in result.data if isinstance(instr.operation, BoxOp)]
     assert len(top_level_boxes) == 1
@@ -412,11 +405,9 @@ def test_wrap_in_verbatim_box(
     assert result.metadata == expected_metadata
 
 
-def test_wrap_in_verbatim_box_preserves_if_else_body_when_dynamic() -> None:
-    """When dynamic_circuits_supported=True, an IfElseOp is placed inside the verbatim box."""
-    result = PassManager([WrapInVerbatimBox(dynamic_circuits_supported=True)]).run(
-        _if_else_circuit_for_verbatim()
-    )
+def test_wrap_in_verbatim_box_preserves_if_else_body() -> None:
+    """An IfElseOp, and the measurement it reads, are placed inside the verbatim box."""
+    result = PassManager([WrapInVerbatimBox()]).run(_if_else_circuit_for_verbatim())
 
     top_level_boxes = [instr for instr in result.data if isinstance(instr.operation, BoxOp)]
     assert len(top_level_boxes) == 1

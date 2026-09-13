@@ -23,7 +23,6 @@ from braket.ir.openqasm import Program
 from qiskit_braket_provider.providers.adapter import (
     _device_executes_control_flow_natively,
     _device_supports_dynamic_circuits,
-    _resolve_dynamic_circuits_supported,
     compile_to_oq3,
     to_oq3,
 )
@@ -344,132 +343,50 @@ def test_compile_to_oq3_no_output_metadata(metadata: dict) -> None:
     assert "output bit[" not in compile_to_oq3(qc)
 
 
-def _mock_device_with_operations(supported_operations: list[str] | None) -> MagicMock:
-    """Build a mock Braket ``Device``.
-
-    If ``supported_operations`` is ``None``, the mock advertises no OpenQASM
-    action; otherwise it advertises the given ``supportedOperations``.
-    """
-    device = MagicMock()
-    if supported_operations is None:
-        device.properties.action = {}
-    else:
-        action = MagicMock()
-        action.supportedOperations = supported_operations
-        device.properties.action = {DeviceActionType.OPENQASM: action}
-    return device
-
-
-def _target_with(*operations: str) -> Target:
-    t = Target(num_qubits=2)
-    t.add_instruction(HGate(), name="h")
-    for op in operations:
-        if op == "if_else":
-            t.add_instruction(IfElseOp, name="if_else")
-    return t
-
-
 @pytest.mark.parametrize(
     "supported_operations,expected",
-    [
-        (["h", "cnot"], False),
-        (["h", "measure_ff"], True),
-        (["h", "cc_prx"], True),
-        (["h", "if"], True),
-        (["MEASURE_FF", "H"], True),
-        (None, False),
-    ],
-    ids=["no_dynamic", "measure_ff", "cc_prx", "if", "case_insensitive", "no_openqasm_action"],
+    [(["h", "if", "measure"], True), (["h", "measure"], False), (None, False)],
+    ids=["supports_if", "no_if", "no_openqasm_action"],
 )
 def test_device_supports_dynamic_circuits(
     supported_operations: list[str] | None, expected: bool
 ) -> None:
-    assert (
-        _device_supports_dynamic_circuits(_mock_device_with_operations(supported_operations))
-        is expected
+    device = MagicMock()
+    action = MagicMock()
+    action.supportedOperations = supported_operations
+    device.properties.action = {} if supported_operations is None else {
+        DeviceActionType.OPENQASM: action
+    }
+    assert _device_supports_dynamic_circuits(device) is expected
+
+
+def test_to_oq3_keeps_measurement_before_a_branch() -> None:
+    """A branch in the circuit is enough to stop the reordering, with no device given."""
+    assert to_oq3(_active_reset_circuit(), basis_gates=["h", "x"]) == _ACTIVE_RESET_OQ3.replace(
+        "$0", "q[0]"
     )
 
 
-@pytest.mark.parametrize(
-    "explicit,device,target,basis_gates,expected",
-    [
-        (None, None, None, None, False),
-        (True, None, None, None, True),
-        (False, None, None, None, False),
-        (None, _mock_device_with_operations(["h", "measure_ff"]), None, None, True),
-        (None, _mock_device_with_operations(["h", "cnot"]), None, None, False),
-        (None, None, _target_with("if_else"), None, True),
-        (None, None, _target_with(), None, False),
-        (None, None, None, ["h", "cx", "if_else"], True),
-        (None, None, None, ["h", "cx"], False),
-        (True, _mock_device_with_operations(["h"]), None, None, True),
-    ],
-    ids=[
-        "all_none",
-        "explicit_true",
-        "explicit_false",
-        "device_dynamic",
-        "device_static",
-        "target_if_else",
-        "target_static",
-        "basis_gates_if_else",
-        "basis_gates_static",
-        "explicit_overrides_device",
-    ],
-)
-def test_resolve_dynamic_circuits_supported(
-    explicit: bool | None,
-    device: MagicMock | None,
-    target: Target | None,
-    basis_gates: list[str] | None,
-    expected: bool,
-) -> None:
-    assert _resolve_dynamic_circuits_supported(explicit, device, target, basis_gates) is expected
-
-
-@pytest.mark.parametrize(
-    "dynamic_circuits_supported,expected_oq3",
-    [
-        (
-            True,
-            (
-                "OPENQASM 3.0;\n"
-                "bit[2] b;\n"
-                "qubit[2] q;\n"
-                "h q[0];\n"
-                "b[0] = measure q[0];\n"
-                "cnot q[0], q[1];\n"
-                "b[1] = measure q[1];"
-            ),
-        ),
-        (
-            False,
-            (
-                "OPENQASM 3.0;\n"
-                "bit[2] b;\n"
-                "qubit[2] q;\n"
-                "h q[0];\n"
-                "cnot q[0], q[1];\n"
-                "b[0] = measure q[0];\n"
-                "b[1] = measure q[1];"
-            ),
-        ),
-    ],
-    ids=["dynamic_preserves_placement", "static_moves_measurements_to_end"],
-)
-def test_compile_to_oq3_respects_dynamic_circuits_supported(
-    dynamic_circuits_supported: bool, expected_oq3: str
-) -> None:
+def test_compile_to_oq3_moves_mid_circuit_measurement_to_the_end() -> None:
+    """Nothing reads the measured bit, so the measurement is moved to the end."""
     qc = QuantumCircuit(2, 2)
     qc.h(0)
     qc.measure(0, 0)
     qc.cx(0, 1)
     qc.measure(1, 1)
-    assert compile_to_oq3(qc, dynamic_circuits_supported=dynamic_circuits_supported) == expected_oq3
+    assert compile_to_oq3(qc) == (
+        "OPENQASM 3.0;\n"
+        "bit[2] b;\n"
+        "qubit[2] q;\n"
+        "h q[0];\n"
+        "cnot q[0], q[1];\n"
+        "b[0] = measure q[0];\n"
+        "b[1] = measure q[1];"
+    )
 
 
 def test_compile_to_oq3_dynamic_circuit() -> None:
-    oq3 = compile_to_oq3(_active_reset_circuit(), dynamic_circuits_supported=True)
+    oq3 = compile_to_oq3(_active_reset_circuit())
     assert oq3 == _ACTIVE_RESET_OQ3
 
 
@@ -478,7 +395,6 @@ def test_compile_to_oq3_dynamic_circuit_on_device_target() -> None:
         _active_reset_circuit(),
         target=_dynamic_device_target(),
         qubit_labels=[7],
-        dynamic_circuits_supported=True,
     )
     _assert_contents(
         oq3,
@@ -488,13 +404,13 @@ def test_compile_to_oq3_dynamic_circuit_on_device_target() -> None:
 
 
 def test_compile_to_oq3_control_flow_keeps_measurement_before_branch() -> None:
-    """Holds without dynamic_circuits_supported, which the circuit itself implies."""
+    """Holds without preserve_measurement_order, which the circuit itself implies."""
     oq3 = compile_to_oq3(_active_reset_circuit(), basis_gates=["h", "x"])
     assert oq3 == _ACTIVE_RESET_OQ3
 
 
 def test_compile_to_oq3_dynamic_circuit_accepted_by_braket_simulator(sim: LocalSimulator) -> None:
-    oq3 = compile_to_oq3(_active_reset_circuit(), dynamic_circuits_supported=True)
+    oq3 = compile_to_oq3(_active_reset_circuit())
     counts = sim.run(Program(source=oq3), shots=100).result().measurement_counts
     assert sum(counts.values()) == 100
     # b[1] is measured after the conditional x, so the qubit is always back in |0>
@@ -552,7 +468,7 @@ def test_to_oq3_gate_only_inside_if_body_needs_no_definition() -> None:
     qc.measure(0, 0)
     with qc.if_test((qc.clbits[0], 1)):
         qc.sx(0)
-    _assert_contents(to_oq3(qc, dynamic_circuits_supported=True), ["v q[0];"], ["gate "])
+    _assert_contents(to_oq3(qc), ["v q[0];"], ["gate "])
 
 
 def test_to_oq3_gate_outside_braket_gate_set_raises() -> None:
