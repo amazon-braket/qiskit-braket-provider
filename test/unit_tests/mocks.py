@@ -27,8 +27,8 @@ DM1_ARN = "arn:aws:braket:::device/quantum-simulator/amazon/dm1"
 RIGETTI_REGION = "us-west-1"
 SIMULATOR_REGION = "us-west-1"
 
-# IQM Garnet as returned by GetDevice, minus the provider and standardized sections: those
-# are large and only carry calibration data.
+# IQM Garnet, limited to the fields the provider reads plus those the schema requires.
+# Values are as returned by GetDevice.
 MOCK_IQM_GATE_MODEL_QPU_CAPABILITIES_JSON = {
     "braketSchemaHeader": {
         "name": "braket.device_schema.iqm.iqm_device_capabilities",
@@ -38,19 +38,9 @@ MOCK_IQM_GATE_MODEL_QPU_CAPABILITIES_JSON = {
         "executionWindows": [
             {
                 "executionDay": "Weekdays",
-                "windowStartHour": "00:00:00",
-                "windowEndHour": "01:29:59",
-            },
-            {
-                "executionDay": "Weekdays",
                 "windowStartHour": "03:15:00",
                 "windowEndHour": "15:29:59",
-            },
-            {
-                "executionDay": "Weekdays",
-                "windowStartHour": "17:15:00",
-                "windowEndHour": "23:59:59",
-            },
+            }
         ],
         "shotsRange": [1, 20000],
     },
@@ -98,61 +88,6 @@ MOCK_IQM_GATE_MODEL_QPU_CAPABILITIES_JSON = {
                 "if",
             ],
             "supportedModifiers": [],
-            "forbiddenArrayOperations": [
-                "concatenation",
-                "negativeIndex",
-                "range",
-                "rangeWithStep",
-                "slicing",
-                "selection",
-            ],
-            "maximumClassicalArrays": 1,
-            "maximumQubitArrays": 1,
-            "supportedPragmas": [
-                "verbatim",
-                "braket_result_type_sample",
-                "braket_result_type_expectation",
-                "braket_result_type_variance",
-                "braket_result_type_probability",
-            ],
-            "forbiddenPragmas": [
-                "braket_unitary_matrix",
-                "braket_result_type_state_vector",
-                "braket_result_type_density_matrix",
-                "braket_result_type_amplitude",
-            ],
-            "supportedResultTypes": [
-                {
-                    "name": "Sample",
-                    "observables": ["x", "y", "z", "h", "i"],
-                    "minShots": 1,
-                    "maxShots": 20000,
-                },
-                {
-                    "name": "Expectation",
-                    "observables": ["x", "y", "z", "h", "i"],
-                    "minShots": 1,
-                    "maxShots": 20000,
-                },
-                {
-                    "name": "Variance",
-                    "observables": ["x", "y", "z", "h", "i"],
-                    "minShots": 1,
-                    "maxShots": 20000,
-                },
-                {
-                    "name": "Probability",
-                    "observables": None,
-                    "minShots": 1,
-                    "maxShots": 20000,
-                },
-            ],
-            "supportPhysicalQubits": True,
-            "supportsPartialVerbatimBox": True,
-            "requiresAllQubitsMeasurement": False,
-            "requiresContiguousQubitIndices": False,
-            "supportsUnassignedMeasurements": False,
-            "disabledQubitRewiringSupported": False,
         }
     },
     "paradigm": {
