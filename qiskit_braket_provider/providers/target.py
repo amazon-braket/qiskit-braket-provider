@@ -13,6 +13,7 @@ from typing import Self, TypeAlias
 from qiskit import QuantumCircuit
 from qiskit.circuit import (
     Barrier,
+    IfElseOp,
     Measure,
     Parameter,
 )
@@ -251,6 +252,12 @@ def aws_device_to_target(device: AwsDevice) -> Target:
     )
 
 
+def _add_control_flow(target: Target, action: OpenQASMDeviceActionProperties) -> None:
+    """Register IfElseOp if the device advertises OpenQASM ``if`` support."""
+    if "if" in {op.lower() for op in action.supportedOperations}:
+        target.add_instruction(IfElseOp, name="if_else")
+
+
 def _simulator_target(device: Device, description: str) -> Target:
     properties: GateModelSimulatorDeviceCapabilities = device.properties
     target = Target(description=description, num_qubits=properties.paradigm.qubitCount)
@@ -362,6 +369,9 @@ def _qpu_target(device: AwsDevice, description: str) -> Target:
     # Add measurement if not already added
     if "measure" not in target:
         target.add_instruction(Measure(), instruction_props_measurement)
+    action = properties.action.get(DeviceActionType.OPENQASM)
+    if isinstance(action, OpenQASMDeviceActionProperties):
+        _add_control_flow(target, action)
     return target
 
 
