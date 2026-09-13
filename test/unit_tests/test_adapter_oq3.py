@@ -21,10 +21,6 @@ from braket.aws import AwsDevice
 from braket.device_schema import DeviceActionType
 from braket.devices import LocalSimulator
 from braket.ir.openqasm import Program
-from test.unit_tests.mocks import (
-    MOCK_IQM_GATE_MODEL_QPU_CAPABILITIES,
-    MOCK_IQM_TOPOLOGY_GRAPH,
-)
 from qiskit_braket_provider.providers.adapter import (
     _device_executes_control_flow_natively,
     _device_supports_dynamic_circuits,
@@ -33,6 +29,10 @@ from qiskit_braket_provider.providers.adapter import (
 )
 from qiskit_braket_provider.providers.gate_mappings import _BRAKET_VERBATIM_BOX_NAME
 from qiskit_braket_provider.providers.target import _add_control_flow
+from test.unit_tests.mocks import (
+    MOCK_IQM_GATE_MODEL_QPU_CAPABILITIES,
+    MOCK_IQM_TOPOLOGY_GRAPH,
+)
 
 
 def _bell_circuit() -> QuantumCircuit:
