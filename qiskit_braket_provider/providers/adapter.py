@@ -49,13 +49,13 @@ from qiskit_braket_provider.providers.compilation import (
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_SUPPORTED_NOISES,  # ruff:ignore[unused-import]
-    _BRAKET_TO_QISKIT_NAMES,
     _BRAKET_VERBATIM_BOX_NAME,
     _CONTROLLED_GATES_BY_QUBIT_COUNT,  # ruff:ignore[unused-import]
     _EPS,
     _PAULI_MAP,
     _QISKIT_CONTROLLED_GATE_NAMES_TO_BRAKET_GATES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
+    _QISKIT_TO_BRAKET_NAMES,
     _reverse_endianness,
 )
 from qiskit_braket_provider.providers.passes import (
@@ -89,6 +89,8 @@ _Translatable: TypeAlias = QuantumCircuit | Circuit | Program | str
 _T = TypeVar("_T")
 
 _RESERVED_OQ3_KEYWORDS = frozenset({"measure", "barrier", "box", "gphase"})
+
+_BRAKET_OQ3_BASIS_GATES = frozenset(_BRAKET_GATE_NAME_TO_QISKIT_GATE) - _RESERVED_OQ3_KEYWORDS
 
 """Braket-side OpenQASM operation names that indicate dynamic-circuit capability."""
 _DYNAMIC_CIRCUIT_OPERATIONS = frozenset({"measure_ff", "cc_prx", "if"})
@@ -767,6 +769,18 @@ def _device_supports_dynamic_circuits(device: Device) -> bool:
     return bool(supported & _DYNAMIC_CIRCUIT_OPERATIONS)
 
 
+def _device_executes_control_flow_natively(device: Device) -> bool:
+    """Return ``True`` if ``device`` runs control flow without service compilation.
+
+    A verbatim box bypasses the service compiler, so control flow may stay inside
+    one only for a device listing it among its native operations. Devices that
+    advertise ``if`` as *supported* but not as native rely on the service to lower
+    the branch to their feedback primitives.
+    """
+    native = {op.lower() for op in getattr(device.properties.paradigm, "nativeGateSet", ())}
+    return "if" in native
+
+
 def _resolve_dynamic_circuits_supported(
     explicit: bool | None,
     braket_device: Device | None,
@@ -786,22 +800,9 @@ def _resolve_dynamic_circuits_supported(
     return bool(_QISKIT_DYNAMIC_CIRCUIT_OPS & ops)
 
 
-def _collect_basis_gates(instructions: Iterable[QiskitInstruction]) -> set[str]:
-    """Collect non-reserved gate names from instructions, descending into BoxOps.
-
-    Reserved OpenQASM 3 statement keywords (``measure``, ``barrier``, ``box``) are
-    excluded because ``qasm3.dumps`` rejects them as ``basis_gates``. Nested boxes
-    are traversed so their inner gates are also collected.
-    """
-    gates: set[str] = set()
-    for instr in instructions:
-        name = instr.operation.name
-        if name == "box":
-            for block in instr.operation.blocks:
-                gates |= _collect_basis_gates(block.data)
-        elif name not in _RESERVED_OQ3_KEYWORDS:
-            gates.add(name)
-    return gates
+def _has_control_flow(circuit: QuantumCircuit) -> bool:
+    """Return True if the circuit contains a control-flow statement."""
+    return any(instr.operation.name in _QISKIT_DYNAMIC_CIRCUIT_OPS for instr in circuit.data)
 
 
 def to_oq3(
@@ -822,8 +823,8 @@ def to_oq3(
         circuit: A compiled Qiskit QuantumCircuit ready for serialization.
         basis_gates: Gate names to treat as basis gates during serialization.
             These should be **Qiskit** gate names (the function handles renaming
-            to Braket names internally). If ``None``, all gates in the circuit are
-            treated as basis gates.
+            to Braket names internally). If ``None``, Braket's own gate set is
+            assumed, so a gate outside it is defined inline or raises.
         qubit_labels: Physical qubit indices for the target device. If provided,
             virtual qubits are remapped to physical qubit notation (``$0``, ``$1``, etc.).
         should_wrap_verbatim: Whether to wrap the circuit in a verbatim box.
@@ -844,17 +845,14 @@ def to_oq3(
     circuit = pm.run(circuit)
 
     if basis_gates is None:
-        basis_gates = list(_collect_basis_gates(circuit.data))
+        basis_gates = _BRAKET_OQ3_BASIS_GATES
     else:
         # basis_gates arrives as Qiskit names; RenameGates has already substituted
         # shims for renameable gates, so translate to Braket names for qasm3.dumps.
-        qiskit_to_braket = {
-            qiskit_name: braket_name for braket_name, qiskit_name in _BRAKET_TO_QISKIT_NAMES.items()
-        }
         basis_gates = [
             translated
             for g in basis_gates
-            if (translated := qiskit_to_braket.get(g, g)) not in _RESERVED_OQ3_KEYWORDS
+            if (translated := _QISKIT_TO_BRAKET_NAMES.get(g, g)) not in _RESERVED_OQ3_KEYWORDS
         ]
 
     oq3_source = qasm3.dumps(
@@ -915,7 +913,9 @@ def compile_to_oq3(  # type: ignore[misc]
         qubit_labels: Physical qubit indices on the target device.
         target: A Qiskit transpiler target describing device constraints.
         verbatim: If ``True``, wrap the circuit in a verbatim box (no compilation
-            by QBP or the service).
+            by QBP or the service). Not applied to a circuit containing control flow
+            unless the device runs control flow natively, since a verbatim box leaves
+            the service no chance to lower the branch.
         basis_gates: Gate names supported by the target device (Qiskit names).
         coupling_map: Qubit connectivity as ``[control, target]`` pairs.
         optimization_level: Transpiler optimization level (0-3). Default: 0.
@@ -931,7 +931,8 @@ def compile_to_oq3(  # type: ignore[misc]
             inferred: from ``braket_device.properties.action[OPENQASM].supportedOperations``
             if a device is provided, otherwise from the presence of ``if_else``
             in the ``target``'s operations or in ``basis_gates``. If neither
-            source signals dynamic support, defaults to ``False``.
+            source signals dynamic support, defaults to ``False``. A circuit
+            containing control flow is always treated as dynamic.
 
     Returns:
         An OpenQASM 3 string (single circuit) or list of strings (multiple circuits).
@@ -966,20 +967,30 @@ def compile_to_oq3(  # type: ignore[misc]
     )
     effective_basis_gates = result.basis_gates
     if effective_basis_gates is None and result.target is not None:
-        effective_basis_gates = set(result.target.operation_names) - {"measure", "barrier"}
+        effective_basis_gates = set(result.target.operation_names) - _RESERVED_OQ3_KEYWORDS
     dynamic_flag = _resolve_dynamic_circuits_supported(
         dynamic_circuits_supported, braket_device, target, basis_gates
     )
+    native_control_flow = braket_device is not None and _device_executes_control_flow_natively(
+        braket_device
+    )
 
-    oq3_strings = [
-        to_oq3(
-            circ,
-            basis_gates=effective_basis_gates,
-            qubit_labels=result.qubit_labels,
-            should_wrap_verbatim=should_wrap_verbatim,
-            dynamic_circuits_supported=dynamic_flag,
+    oq3_strings = []
+    for circ in result.circuits:
+        has_control_flow = _has_control_flow(circ)
+        # The service lowers a branch into the device's feedback operations, which a
+        # verbatim box forbids -- unless the device runs the branch as written.
+        service_compiles_branch = has_control_flow and not native_control_flow
+        # A branch reads a measurement result, so measurements cannot move past it.
+        dynamic_circuits = dynamic_flag or has_control_flow
+        oq3_strings.append(
+            to_oq3(
+                circ,
+                basis_gates=effective_basis_gates,
+                qubit_labels=result.qubit_labels,
+                should_wrap_verbatim=should_wrap_verbatim and not service_compiles_branch,
+                dynamic_circuits_supported=dynamic_circuits,
+            )
         )
-        for circ in result.circuits
-    ]
 
     return oq3_strings[0] if single_instance else oq3_strings

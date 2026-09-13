@@ -75,6 +75,10 @@ _BRAKET_TO_QISKIT_NAMES = {
     "kraus": "kraus",
 }
 
+_QISKIT_TO_BRAKET_NAMES = {
+    qiskit_name: braket_name for braket_name, qiskit_name in _BRAKET_TO_QISKIT_NAMES.items()
+}
+
 _CONTROLLED_GATES_BY_QUBIT_COUNT = {
     1: {
         "ch": "h",

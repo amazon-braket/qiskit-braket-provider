@@ -8,22 +8,27 @@ from qiskit import QuantumCircuit
 from qiskit.circuit import (
     BoxOp,
     ClassicalRegister,
+    Gate,
     IfElseOp,
     Measure,
+    Parameter,
 )
-from qiskit.circuit.library import CXGate, HGate
+from qiskit.circuit.library import CXGate, HGate, XGate
+from qiskit.qasm3 import QASM3ExporterError
 from qiskit.transpiler import Target
 
 from braket.device_schema import DeviceActionType
 from braket.devices import LocalSimulator
 from braket.ir.openqasm import Program
 from qiskit_braket_provider.providers.adapter import (
+    _device_executes_control_flow_natively,
     _device_supports_dynamic_circuits,
     _resolve_dynamic_circuits_supported,
     compile_to_oq3,
     to_oq3,
 )
 from qiskit_braket_provider.providers.gate_mappings import _BRAKET_VERBATIM_BOX_NAME
+from qiskit_braket_provider.providers.target import _add_control_flow
 
 
 def _bell_circuit() -> QuantumCircuit:
@@ -49,6 +54,38 @@ def _sx_sdg_cx_circuit() -> QuantumCircuit:
     qc.sdg(1)
     qc.cx(0, 1)
     qc.measure([0, 1], [0, 1])
+    return qc
+
+
+def _active_reset_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit(1, 2)
+    qc.h(0)
+    qc.measure(0, 0)
+    with qc.if_test((qc.clbits[0], 1)):
+        qc.x(0)
+    qc.measure(0, 1)
+    return qc
+
+
+def _cross_qubit_feedback_circuit() -> QuantumCircuit:
+    """The conditioned qubit differs from the measured one."""
+    qc = QuantumCircuit(2, 2)
+    qc.h(0)
+    qc.measure(0, 0)
+    with qc.if_test((qc.clbits[0], 1)):
+        qc.x(1)
+    qc.measure(1, 1)
+    return qc
+
+
+def _parametric_conditional_circuit() -> QuantumCircuit:
+    theta = Parameter("theta")
+    qc = QuantumCircuit(1, 2)
+    qc.rx(theta, 0)
+    qc.measure(0, 0)
+    with qc.if_test((qc.clbits[0], 1)):
+        qc.rx(theta, 0)
+    qc.measure(0, 1)
     return qc
 
 
@@ -87,6 +124,16 @@ def _bell_circuit_target() -> Target:
     return target
 
 
+def _dynamic_device_target() -> Target:
+    """Per-qubit instruction properties, as a QPU target has, plus ``if_else``."""
+    target = Target(num_qubits=1)
+    target.add_instruction(HGate(), {(0,): None})
+    target.add_instruction(XGate(), {(0,): None})
+    target.add_instruction(Measure(), {(0,): None})
+    target.add_instruction(IfElseOp, name="if_else")
+    return target
+
+
 def _bell_with_verbatim_boxop() -> QuantumCircuit:
     inner = QuantumCircuit(2)
     inner.h(0)
@@ -97,8 +144,21 @@ def _bell_with_verbatim_boxop() -> QuantumCircuit:
     return outer
 
 
+_ACTIVE_RESET_OQ3 = (
+    "OPENQASM 3.0;\n"
+    "bit[2] b;\n"
+    "qubit[1] q;\n"
+    "h q[0];\n"
+    "b[0] = measure q[0];\n"
+    "if (b[0]) {\n"
+    "x q[0];\n"
+    "}\n"
+    "b[1] = measure q[0];"
+)
+
+
 def test_to_oq3_auto_basis_gates() -> None:
-    """Omitting ``basis_gates`` triggers ``_collect_basis_gates`` on the circuit."""
+    """Omitting ``basis_gates`` assumes Braket's gate set, so no definitions appear."""
     oq3 = to_oq3(_bell_circuit())
     _assert_contents(oq3, ["h ", "cnot "], ["gate "])
 
@@ -406,3 +466,114 @@ def test_compile_to_oq3_respects_dynamic_circuits_supported(
     qc.cx(0, 1)
     qc.measure(1, 1)
     assert compile_to_oq3(qc, dynamic_circuits_supported=dynamic_circuits_supported) == expected_oq3
+
+
+def test_compile_to_oq3_dynamic_circuit() -> None:
+    oq3 = compile_to_oq3(_active_reset_circuit(), dynamic_circuits_supported=True)
+    assert oq3 == _ACTIVE_RESET_OQ3
+
+
+def test_compile_to_oq3_dynamic_circuit_on_device_target() -> None:
+    oq3 = compile_to_oq3(
+        _active_reset_circuit(),
+        target=_dynamic_device_target(),
+        qubit_labels=[7],
+        dynamic_circuits_supported=True,
+    )
+    _assert_contents(
+        oq3,
+        ["h $7;", "b[0] = measure $7;", "if (b[0]) {", "x $7;", "b[1] = measure $7;"],
+        ["#pragma braket verbatim", "box {", "qubit["],
+    )
+
+
+def test_compile_to_oq3_control_flow_keeps_measurement_before_branch() -> None:
+    """Holds without dynamic_circuits_supported, which the circuit itself implies."""
+    oq3 = compile_to_oq3(_active_reset_circuit(), basis_gates=["h", "x"])
+    assert oq3 == _ACTIVE_RESET_OQ3
+
+
+def test_compile_to_oq3_dynamic_circuit_accepted_by_braket_simulator(sim: LocalSimulator) -> None:
+    oq3 = compile_to_oq3(_active_reset_circuit(), dynamic_circuits_supported=True)
+    counts = sim.run(Program(source=oq3), shots=100).result().measurement_counts
+    assert sum(counts.values()) == 100
+    # b[1] is measured after the conditional x, so the qubit is always back in |0>
+    assert all(key[1] == "0" for key in counts)
+
+
+def test_compile_to_oq3_cross_qubit_feedback() -> None:
+    oq3 = compile_to_oq3(
+        _cross_qubit_feedback_circuit(), basis_gates=["h", "x"], qubit_labels=[1, 2]
+    )
+    _assert_contents(
+        oq3,
+        ["h $1;", "b[0] = measure $1;", "if (b[0]) {", "x $2;", "b[1] = measure $2;"],
+        ["qubit["],
+    )
+
+
+def test_compile_to_oq3_cross_qubit_feedback_accepted_by_braket_simulator(
+    sim: LocalSimulator,
+) -> None:
+    oq3 = compile_to_oq3(_cross_qubit_feedback_circuit(), basis_gates=["h", "x"])
+    counts = sim.run(Program(source=oq3), shots=100).result().measurement_counts
+    assert sum(counts.values()) == 100
+    # qubit 1 is flipped exactly when qubit 0 measured 1, so both bits always agree
+    assert all(key[0] == key[1] for key in counts)
+
+
+def test_compile_to_oq3_parametric_dynamic_circuit() -> None:
+    oq3 = compile_to_oq3(_parametric_conditional_circuit(), basis_gates=["rx"])
+    _assert_contents(
+        oq3,
+        ["input float theta;", "rx(theta) q[0];", "if (b[0]) {"],
+        ["float[64]", "input float theta_0;"],
+    )
+    # the body's gate is the same parameter, declared once
+    assert oq3.count("input float theta;") == 1
+    assert oq3.count("rx(theta) q[0];") == 2
+
+
+@pytest.mark.parametrize(
+    "supported_operations,expected_ops",
+    [(["h", "cnot"], set()), (["h", "IF"], {"if_else"})],
+    ids=["no_if", "if"],
+)
+def test_add_control_flow(supported_operations: list[str], expected_ops: set[str]) -> None:
+    target = Target(num_qubits=1)
+    action = MagicMock()
+    action.supportedOperations = supported_operations
+    _add_control_flow(target, action)
+    assert set(target.operation_names) == expected_ops
+
+
+def test_to_oq3_gate_only_inside_if_body_needs_no_definition() -> None:
+    qc = QuantumCircuit(1, 1)
+    qc.measure(0, 0)
+    with qc.if_test((qc.clbits[0], 1)):
+        qc.sx(0)
+    _assert_contents(to_oq3(qc, dynamic_circuits_supported=True), ["v q[0];"], ["gate "])
+
+
+def test_to_oq3_gate_outside_braket_gate_set_raises() -> None:
+    """Emitted bare for the service to reject before; now it fails here."""
+    qc = QuantumCircuit(1, 1)
+    qc.append(Gate("mygate", 1, []), [0])
+    with pytest.raises(QASM3ExporterError, match="mygate"):
+        to_oq3(qc)
+
+
+@pytest.mark.parametrize(
+    "native_gate_set,expected",
+    [
+        (["cz", "prx", "cc_prx", "measure_ff", "barrier"], False),
+        (["cz", "prx", "if"], True),
+        (["cz", "prx", "IF"], True),
+        ([], False),
+    ],
+    ids=["feedback_primitives_only", "native_if", "case_insensitive", "empty"],
+)
+def test_device_executes_control_flow_natively(native_gate_set: list[str], expected: bool) -> None:
+    device = MagicMock()
+    device.properties.paradigm.nativeGateSet = native_gate_set
+    assert _device_executes_control_flow_natively(device) is expected
