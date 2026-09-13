@@ -762,12 +762,11 @@ def _device_supports_dynamic_circuits(device: Device) -> bool:
 
 
 def _device_executes_control_flow_natively(device: Device) -> bool:
-    """Return ``True`` if ``device`` runs control flow without service compilation.
+    """Return ``True`` if ``device`` lists control flow among its native operations.
 
-    A verbatim box bypasses the service compiler, so control flow may stay inside
-    one only for a device listing it among its native operations. Devices that
-    advertise ``if`` as *supported* but not as native rely on the service to lower
-    the branch to their feedback primitives.
+    A verbatim box runs the program as written, so control flow may stay inside one
+    only for such a device. A device that accepts ``if`` without listing it as native
+    needs the branch translated first, which a verbatim box does not allow.
     """
     native = {op.lower() for op in getattr(device.properties.paradigm, "nativeGateSet", ())}
     return "if" in native
@@ -886,8 +885,8 @@ def compile_to_oq3(  # type: ignore[misc]
         target: A Qiskit transpiler target describing device constraints.
         verbatim: If ``True``, wrap the circuit in a verbatim box (no compilation
             by QBP or the service). Not applied to a circuit containing control flow
-            unless the device runs control flow natively, since a verbatim box leaves
-            the service no chance to lower the branch.
+            unless the device runs control flow natively, since such a branch has to
+            be translated first.
         basis_gates: Gate names supported by the target device (Qiskit names).
         coupling_map: Qubit connectivity as ``[control, target]`` pairs.
         optimization_level: Transpiler optimization level (0-3). Default: 0.
@@ -943,15 +942,15 @@ def compile_to_oq3(  # type: ignore[misc]
     oq3_strings = []
     for circ in result.circuits:
         has_control_flow = _has_control_flow(circ)
-        # The service lowers a branch into the device's feedback operations, which a
-        # verbatim box forbids -- unless the device runs the branch as written.
-        service_compiles_branch = has_control_flow and not native_control_flow
+        # A verbatim box runs the program as written, so it cannot hold a branch the
+        # device does not execute natively.
+        branch_needs_translation = has_control_flow and not native_control_flow
         oq3_strings.append(
             to_oq3(
                 circ,
                 basis_gates=effective_basis_gates,
                 qubit_labels=result.qubit_labels,
-                should_wrap_verbatim=should_wrap_verbatim and not service_compiles_branch,
+                should_wrap_verbatim=should_wrap_verbatim and not branch_needs_translation,
                 preserve_measurement_order=device_is_dynamic,
             )
         )
