@@ -347,9 +347,7 @@ def test_consolidate_clbits_preserves_if_else_condition(build_circuit: Callable)
     ],
     ids=["reorders_mid_measure", "already_at_end_noop", "control_flow_left_untouched"],
 )
-def test_move_measurements_to_end(
-    build_circuit: Callable, expected_op_order: list[str]
-) -> None:
+def test_move_measurements_to_end(build_circuit: Callable, expected_op_order: list[str]) -> None:
     result = PassManager([MoveMeasurementsToEnd()]).run(build_circuit())
     assert [instr.operation.name for instr in result.data] == expected_op_order
 

@@ -12,6 +12,7 @@ from qiskit.providers import Options
 from qiskit.transpiler import Target
 
 from braket.device_schema import StandardizedGateModelQpuDeviceProperties
+from braket.device_schema.iqm import IqmDeviceCapabilities
 from braket.device_schema.rigetti import RigettiDeviceCapabilities
 from braket.device_schema.simulators import GateModelSimulatorDeviceCapabilities
 from braket.task_result import ProgramSetTaskResult, TaskMetadata
@@ -26,6 +27,175 @@ DM1_ARN = "arn:aws:braket:::device/quantum-simulator/amazon/dm1"
 RIGETTI_REGION = "us-west-1"
 SIMULATOR_REGION = "us-west-1"
 
+# IQM Garnet as returned by GetDevice, minus the provider and standardized sections: those
+# are large and only carry calibration data.
+MOCK_IQM_GATE_MODEL_QPU_CAPABILITIES_JSON = {
+    "braketSchemaHeader": {
+        "name": "braket.device_schema.iqm.iqm_device_capabilities",
+        "version": "1",
+    },
+    "service": {
+        "executionWindows": [
+            {
+                "executionDay": "Weekdays",
+                "windowStartHour": "00:00:00",
+                "windowEndHour": "01:29:59",
+            },
+            {
+                "executionDay": "Weekdays",
+                "windowStartHour": "03:15:00",
+                "windowEndHour": "15:29:59",
+            },
+            {
+                "executionDay": "Weekdays",
+                "windowStartHour": "17:15:00",
+                "windowEndHour": "23:59:59",
+            },
+        ],
+        "shotsRange": [1, 20000],
+    },
+    "action": {
+        "braket.ir.openqasm.program": {
+            "actionType": "braket.ir.openqasm.program",
+            "version": ["1.0"],
+            "supportedOperations": [
+                "ccnot",
+                "cnot",
+                "cphaseshift",
+                "cphaseshift00",
+                "cphaseshift01",
+                "cphaseshift10",
+                "cswap",
+                "swap",
+                "iswap",
+                "pswap",
+                "ecr",
+                "cy",
+                "cz",
+                "xy",
+                "xx",
+                "yy",
+                "zz",
+                "h",
+                "i",
+                "phaseshift",
+                "rx",
+                "ry",
+                "rz",
+                "s",
+                "si",
+                "t",
+                "ti",
+                "v",
+                "vi",
+                "x",
+                "y",
+                "z",
+                "prx",
+                "cc_prx",
+                "measure_ff",
+                "barrier",
+                "if",
+            ],
+            "supportedModifiers": [],
+            "forbiddenArrayOperations": [
+                "concatenation",
+                "negativeIndex",
+                "range",
+                "rangeWithStep",
+                "slicing",
+                "selection",
+            ],
+            "maximumClassicalArrays": 1,
+            "maximumQubitArrays": 1,
+            "supportedPragmas": [
+                "verbatim",
+                "braket_result_type_sample",
+                "braket_result_type_expectation",
+                "braket_result_type_variance",
+                "braket_result_type_probability",
+            ],
+            "forbiddenPragmas": [
+                "braket_unitary_matrix",
+                "braket_result_type_state_vector",
+                "braket_result_type_density_matrix",
+                "braket_result_type_amplitude",
+            ],
+            "supportedResultTypes": [
+                {
+                    "name": "Sample",
+                    "observables": ["x", "y", "z", "h", "i"],
+                    "minShots": 1,
+                    "maxShots": 20000,
+                },
+                {
+                    "name": "Expectation",
+                    "observables": ["x", "y", "z", "h", "i"],
+                    "minShots": 1,
+                    "maxShots": 20000,
+                },
+                {
+                    "name": "Variance",
+                    "observables": ["x", "y", "z", "h", "i"],
+                    "minShots": 1,
+                    "maxShots": 20000,
+                },
+                {
+                    "name": "Probability",
+                    "observables": None,
+                    "minShots": 1,
+                    "maxShots": 20000,
+                },
+            ],
+            "supportPhysicalQubits": True,
+            "supportsPartialVerbatimBox": True,
+            "requiresAllQubitsMeasurement": False,
+            "requiresContiguousQubitIndices": False,
+            "supportsUnassignedMeasurements": False,
+            "disabledQubitRewiringSupported": False,
+        }
+    },
+    "paradigm": {
+        "qubitCount": 20,
+        "nativeGateSet": ["cz", "prx", "cc_prx", "measure_ff", "barrier"],
+        "connectivity": {
+            "fullyConnected": False,
+            "connectivityGraph": {
+                "1": ["2", "4"],
+                "2": ["1", "5"],
+                "4": ["1", "3", "5", "9"],
+                "5": ["2", "4", "6", "10"],
+                "3": ["4", "8"],
+                "8": ["3", "9", "13"],
+                "9": ["4", "8", "10", "14"],
+                "6": ["5", "7", "11"],
+                "10": ["5", "9", "11", "15"],
+                "7": ["6", "12"],
+                "11": ["6", "10", "12", "16"],
+                "12": ["7", "11", "17"],
+                "13": ["8", "14"],
+                "14": ["9", "13", "15", "18"],
+                "15": ["10", "14", "16", "19"],
+                "16": ["11", "15", "17", "20"],
+                "17": ["12", "16"],
+                "18": ["14", "19"],
+                "19": ["15", "18", "20"],
+                "20": ["16", "19"],
+            },
+        },
+    },
+    "deviceParameters": {},
+}
+MOCK_IQM_GATE_MODEL_QPU_CAPABILITIES = IqmDeviceCapabilities.parse_obj(
+    MOCK_IQM_GATE_MODEL_QPU_CAPABILITIES_JSON
+)
+MOCK_IQM_TOPOLOGY_GRAPH = relabel_nodes(
+    g := from_dict_of_lists(
+        MOCK_IQM_GATE_MODEL_QPU_CAPABILITIES.paradigm.connectivity.connectivityGraph,
+        create_using=DiGraph(),
+    ),
+    {n: int(n) for n in g.nodes},
+)
 MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES_JSON = {
     "braketSchemaHeader": {
         "name": "braket.device_schema.rigetti.rigetti_device_capabilities",
