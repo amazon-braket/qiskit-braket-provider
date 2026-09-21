@@ -47,6 +47,22 @@ class TestBraketQuantumTask(TestCase):
 
         self.assertEqual(task.status(), JobStatus.DONE)
 
+    def test_task_id(self):
+        """Tests task_id returns the id the task was constructed with."""
+        task = self._get_task()
+        self.assertEqual(task.task_id(), "AwesomeId")
+
+    def test_task_id_for_batch(self):
+        """Tests task_id returns the semicolon-joined id for a multi-task (batch) job."""
+        batch_task_id = "arn:aws:braket:::quantum-task/A;arn:aws:braket:::quantum-task/B"
+        task = BraketQuantumTask(
+            backend=Mock(spec=BraketAwsBackend),
+            task_id=batch_task_id,
+            tasks=[],
+            shots=10,
+        )
+        self.assertEqual(task.task_id(), batch_task_id)
+
     def test_result(self):
         """Tests result."""
         task = self._get_task()
