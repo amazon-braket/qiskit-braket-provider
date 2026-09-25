@@ -101,6 +101,23 @@ class TestBraketProvider(TestCase):
         backend = provider.get_backend("SV1")
 
         self.assertIsInstance(backend, BraketAwsBackend)
+        self.assertIs(backend._device.aws_session, self.mock_session)
+        mock_get_devices.assert_called_once_with(names=["SV1"], aws_session=self.mock_session)
+
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")
+    def test_backend_keeps_discovered_device_session(self, mock_get_devices: MagicMock):
+        """A device found in another region may carry a copied AWS session."""
+        regional_session = Mock()
+        regional_session.region = SIMULATOR_REGION
+        regional_session.boto_session.region_name = SIMULATOR_REGION
+        regional_session.get_device.return_value = MOCK_GATE_MODEL_SIMULATOR_SV
+        mock_get_devices.return_value = [
+            AwsDevice(MOCK_GATE_MODEL_SIMULATOR_SV["deviceArn"], regional_session)
+        ]
+
+        backend = BraketProvider(aws_session=self.mock_session).get_backend("SV1")
+
+        self.assertIs(backend._device.aws_session, regional_session)
         mock_get_devices.assert_called_once_with(names=["SV1"], aws_session=self.mock_session)
 
     @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")

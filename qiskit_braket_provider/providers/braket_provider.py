@@ -107,6 +107,7 @@ class BraketProvider:
                 description=f"AWS Device: {device.provider_name} {device.name}.",
                 online_date=device.properties.service.updatedAt,
                 backend_version="2",
+                aws_session=device.aws_session,
             )
             for device in supported_devices
         ]
