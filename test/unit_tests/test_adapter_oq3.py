@@ -144,12 +144,13 @@ def _if_else_target() -> Target:
     return target
 
 
-def test_has_control_flow_true_for_if_else() -> None:
-    assert _has_control_flow(_if_else_circuit()) is True
-
-
-def test_has_control_flow_false_for_plain_circuit() -> None:
-    assert _has_control_flow(_bell_circuit()) is False
+@pytest.mark.parametrize(
+    "circuit_factory,expected",
+    [(_if_else_circuit, True), (_bell_circuit, False)],
+    ids=["if_else_circuit", "plain_circuit"],
+)
+def test_has_control_flow(circuit_factory: Callable[[], QuantumCircuit], expected: bool) -> None:
+    assert _has_control_flow(circuit_factory()) is expected
 
 
 def test_compile_to_oq3_skips_verbatim_on_native_path_with_control_flow() -> None:
@@ -321,23 +322,11 @@ def test_compile_to_oq3_raises(
         compile_to_oq3(*args_factory(), **kwargs_factory())
 
 
-def test_compile_to_oq3_output_declaration_survives_verbatim() -> None:
-    """A verbatim-wrapped compile still emits ``output bit[N] c;`` outside the box.
-
-    The rest of the metadata → declaration flow is unit-covered by
-    ``test_consolidate_clbits`` and ``test_normalize_formatting``; this case
-    exercises the interaction with :class:`WrapInVerbatimBox` which lives only
-    in the ``compile_to_oq3`` pipeline.
-    """
+def test_compile_to_oq3_output_declaration_survives_and_precedes_verbatim_box() -> None:
+    """``output bit[N] c;`` sits outside and above a verbatim box."""
     qc = _output_circuit(("c",), (2,))
     oq3 = compile_to_oq3(qc, verbatim=True, qubit_labels=[0, 1])
     _assert_contents(oq3, ["output bit[2] c;", "#pragma braket verbatim", "box {"], [])
-
-
-def test_compile_to_oq3_output_declaration_precedes_verbatim_box() -> None:
-    """Output declarations stay outside the verbatim box."""
-    qc = _output_circuit(("c",), (2,))
-    oq3 = compile_to_oq3(qc, verbatim=True, qubit_labels=[0, 1])
     lines = oq3.split("\n")
     output_idx = next(i for i, ln in enumerate(lines) if ln.startswith("output bit["))
     box_idx = next(i for i, ln in enumerate(lines) if ln == "box {")
