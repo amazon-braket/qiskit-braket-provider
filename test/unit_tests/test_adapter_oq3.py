@@ -1,5 +1,6 @@
 """Tests for the adapter OQ3 output path: ``to_oq3`` and ``compile_to_oq3``."""
 
+import warnings
 from collections.abc import Callable
 from unittest.mock import MagicMock
 
@@ -11,15 +12,17 @@ from qiskit.circuit import (
     IfElseOp,
     Measure,
 )
-from qiskit.circuit.library import CXGate, HGate
+from qiskit.circuit.library import CXGate, HGate, XGate
 from qiskit.transpiler import Target
 
 from braket.device_schema import DeviceActionType
 from braket.devices import LocalSimulator
 from braket.ir.openqasm import Program
 from qiskit_braket_provider.providers.adapter import (
+    _collect_basis_gates,
     _device_supports_dynamic_circuits,
-    _resolve_dynamic_circuits_supported,
+    _has_control_flow,
+    _resolve_preserve_measurement_order,
     compile_to_oq3,
     to_oq3,
 )
@@ -101,6 +104,75 @@ def test_to_oq3_auto_basis_gates() -> None:
     """Omitting ``basis_gates`` triggers ``_collect_basis_gates`` on the circuit."""
     oq3 = to_oq3(_bell_circuit())
     _assert_contents(oq3, ["h ", "cnot "], ["gate "])
+
+
+def test_collect_basis_gates_recurses_into_control_flow_bodies() -> None:
+    """Regression: gates inside ``.blocks``-carrying ops (e.g. IfElseOp) are collected."""
+    true_body = QuantumCircuit(1, 1)
+    true_body.x(0)
+
+    outer = QuantumCircuit(1, 1)
+    outer.h(0)
+    outer.measure(0, 0)
+    outer.append(IfElseOp((outer.clbits[0], 1), true_body, None), [0], [0])
+
+    gates = _collect_basis_gates(outer.data)
+    assert "x" in gates
+    assert "h" in gates
+    assert "if_else" not in gates
+
+
+def _if_else_circuit() -> QuantumCircuit:
+    """Small circuit with a top-level ``IfElseOp``."""
+    true_body = QuantumCircuit(1, 1)
+    true_body.x(0)
+
+    qc = QuantumCircuit(1, 1)
+    qc.h(0)
+    qc.measure(0, 0)
+    qc.append(IfElseOp((qc.clbits[0], 1), true_body, None), [0], [0])
+    return qc
+
+
+def _if_else_target() -> Target:
+    """Target that supports h, x, measure, and if_else on a single qubit."""
+    target = Target(num_qubits=1)
+    target.add_instruction(HGate(), name="h")
+    target.add_instruction(XGate(), name="x")
+    target.add_instruction(Measure(), name="measure")
+    target.add_instruction(IfElseOp, name="if_else")
+    return target
+
+
+def test_has_control_flow_true_for_if_else() -> None:
+    assert _has_control_flow(_if_else_circuit()) is True
+
+
+def test_has_control_flow_false_for_plain_circuit() -> None:
+    assert _has_control_flow(_bell_circuit()) is False
+
+
+def test_compile_to_oq3_skips_verbatim_on_native_path_with_control_flow() -> None:
+    """Native path skips the verbatim wrap for control-flow circuits and warns."""
+    qc = _if_else_circuit()
+
+    with pytest.warns(UserWarning, match="control-flow"):
+        oq3 = compile_to_oq3(qc, target=_if_else_target())
+
+    assert "#pragma braket verbatim" not in oq3
+    assert "box {" not in oq3
+
+
+def test_compile_to_oq3_wraps_verbatim_when_explicit_even_with_control_flow() -> None:
+    """``verbatim=True`` is honored for control-flow circuits; no warning fires."""
+    qc = _if_else_circuit()
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        oq3 = compile_to_oq3(qc, verbatim=True, preserve_measurement_order=True)
+
+    assert "#pragma braket verbatim" in oq3
+    assert "box {" in oq3
 
 
 def test_compile_to_oq3_list_input() -> None:
@@ -357,18 +429,18 @@ def test_device_supports_dynamic_circuits(
         "explicit_overrides_device",
     ],
 )
-def test_resolve_dynamic_circuits_supported(
+def test_resolve_preserve_measurement_order(
     explicit: bool | None,
     device: MagicMock | None,
     target: Target | None,
     basis_gates: list[str] | None,
     expected: bool,
 ) -> None:
-    assert _resolve_dynamic_circuits_supported(explicit, device, target, basis_gates) is expected
+    assert _resolve_preserve_measurement_order(explicit, device, target, basis_gates) is expected
 
 
 @pytest.mark.parametrize(
-    "dynamic_circuits_supported,expected_oq3",
+    "preserve_measurement_order,expected_oq3",
     [
         (
             True,
@@ -395,14 +467,14 @@ def test_resolve_dynamic_circuits_supported(
             ),
         ),
     ],
-    ids=["dynamic_preserves_placement", "static_moves_measurements_to_end"],
+    ids=["preserve_keeps_placement", "reorder_moves_measurements_to_end"],
 )
-def test_compile_to_oq3_respects_dynamic_circuits_supported(
-    dynamic_circuits_supported: bool, expected_oq3: str
+def test_compile_to_oq3_respects_preserve_measurement_order(
+    preserve_measurement_order: bool, expected_oq3: str
 ) -> None:
     qc = QuantumCircuit(2, 2)
     qc.h(0)
     qc.measure(0, 0)
     qc.cx(0, 1)
     qc.measure(1, 1)
-    assert compile_to_oq3(qc, dynamic_circuits_supported=dynamic_circuits_supported) == expected_oq3
+    assert compile_to_oq3(qc, preserve_measurement_order=preserve_measurement_order) == expected_oq3
