@@ -183,6 +183,23 @@ def test_compile_to_oq3_list_input() -> None:
     assert all("OPENQASM 3.0;" in r for r in results)
 
 
+def test_compile_to_oq3_accepts_oq3_string_input() -> None:
+    """Non-QuantumCircuit inputs (OpenQASM 3 source, ``Program``) are accepted."""
+    source = (
+        "OPENQASM 3.0;\n"
+        "bit[2] b;\n"
+        "qubit[2] q;\n"
+        "h q[0];\n"
+        "cnot q[0], q[1];\n"
+        "b[0] = measure q[0];\n"
+        "b[1] = measure q[1];"
+    )
+    oq3_from_str = compile_to_oq3(source)
+    oq3_from_program = compile_to_oq3(Program(source=source))
+    _assert_contents(oq3_from_str, ["OPENQASM 3.0;", "h ", "cnot "], [])
+    assert oq3_from_str == oq3_from_program
+
+
 @pytest.mark.parametrize(
     "circuit_factory,compile_kwargs,expected_present,expected_absent",
     [
@@ -304,7 +321,7 @@ def test_compile_to_oq3_accepted_by_braket_simulator(
 @pytest.mark.parametrize(
     "args_factory,kwargs_factory,exception",
     [
-        (lambda: ("not a circuit",), dict, TypeError),
+        (lambda: (42,), dict, TypeError),
         (
             lambda: (_bell_circuit(),),
             lambda: {"target": _bell_circuit_target(), "basis_gates": ["h", "cx"]},

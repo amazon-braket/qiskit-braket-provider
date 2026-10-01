@@ -896,22 +896,8 @@ def to_oq3(
     return _normalize_formatting(_remap_qubits(oq3_source, qubit_labels), output_names)
 
 
-@overload
-def compile_to_oq3(
-    circuits: QuantumCircuit,
-    **kwargs,
-) -> str: ...
-
-
-@overload
-def compile_to_oq3(  # type: ignore[overload-cannot-match]
-    circuits: Iterable[QuantumCircuit],
-    **kwargs,
-) -> list[str]: ...
-
-
-def compile_to_oq3(  # type: ignore[misc]
-    circuits: QuantumCircuit | Iterable[QuantumCircuit],
+def _compile_to_oq3(
+    circuits: _Translatable | Iterable[_Translatable],
     *,
     qubit_labels: Sequence[int] | None = None,
     target: Target | None = None,
@@ -928,56 +914,11 @@ def compile_to_oq3(  # type: ignore[misc]
     seed_transpiler: int | None = None,
     preserve_measurement_order: bool | None = None,
 ) -> str | list[str]:
-    """Compile Qiskit circuits to Braket-compatible OpenQASM 3 strings.
-
-    This is the primary entry point for the OQ3 output path. It orchestrates:
-    1. Compilation via Qiskit's transpiler (with verbatim box preservation)
-    2. Serialization to OpenQASM 3 with Braket-compatible formatting
-
-    The compilation step reuses the existing ``_compile()`` pipeline, including
-    verbatim box extraction/restoration and device-aware transpilation.
-
-    Args:
-        circuits: One or more Qiskit QuantumCircuits to compile.
-        qubit_labels: Physical qubit indices on the target device.
-        target: A Qiskit transpiler target describing device constraints.
-        verbatim: If ``True``, wrap the circuit in a verbatim box so neither QBP
-            nor the service compiles it further. Honored unconditionally.
-
-            When ``False`` (default) and a compilation target is supplied
-            (``target``, ``braket_device``, or ``pass_manager``), the output is
-            wrapped in a verbatim box — except for circuits containing
-            control-flow ops, which are emitted unwrapped (with a warning) so
-            the service can post-process dynamic circuits.
-        basis_gates: Gate names supported by the target device (Qiskit names).
-        coupling_map: Qubit connectivity as ``[control, target]`` pairs.
-        optimization_level: Transpiler optimization level (0-3). Default: 0.
-        callback: Callback function passed to the transpiler.
-        num_processes: Number of parallel processes for transpilation.
-        pass_manager: A custom Qiskit PassManager.
-        braket_device: A Braket Device to derive target and qubit labels from.
-        layout_method: Layout method for the transpiler.
-        routing_method: Routing method for the transpiler.
-        seed_transpiler: Seed for reproducible transpilation.
-        preserve_measurement_order: Whether to keep measurement placement
-            unchanged. If ``None`` (default), inferred from the device
-            capability or from control-flow ops in the target/basis_gates;
-            otherwise falls back to ``False`` (measurements are moved to the
-            end).
-
-    Returns:
-        An OpenQASM 3 string (single circuit) or list of strings (multiple circuits).
-
-    Raises:
-        ValueError: If mutually exclusive compilation options are specified.
-        TypeError: If inputs are not QuantumCircuits.
-    """
-    single_instance = isinstance(circuits, QuantumCircuit)
-    if single_instance:
-        circuits = [circuits]
+    """Internal implementation of :func:`compile_to_oq3`. Signature may change."""
+    qiskit_circuits, single_instance = _get_circuits(circuits, None, add_measurements=True)
 
     result = _compile(
-        circuits,
+        qiskit_circuits,
         qubit_labels=qubit_labels,
         target=target,
         verbatim=verbatim if not pass_manager else None,
@@ -1029,3 +970,100 @@ def compile_to_oq3(  # type: ignore[misc]
         )
 
     return oq3_strings[0] if single_instance else oq3_strings
+
+
+@overload
+def compile_to_oq3(
+    circuits: _Translatable,
+    **kwargs,
+) -> str: ...
+
+
+@overload
+def compile_to_oq3(
+    circuits: Iterable[_Translatable],
+    **kwargs,
+) -> list[str]: ...
+
+
+def compile_to_oq3(  # type: ignore[misc]
+    circuits: _Translatable | Iterable[_Translatable],
+    *,
+    qubit_labels: Sequence[int] | None = None,
+    target: Target | None = None,
+    verbatim: bool = False,
+    basis_gates: Collection[str] | None = None,
+    coupling_map: list[list[int]] | None = None,
+    optimization_level: int = 0,
+    callback: Callable | None = None,
+    num_processes: int | None = None,
+    pass_manager: PassManager | None = None,
+    braket_device: Device | None = None,
+    layout_method: str | None = None,
+    routing_method: str | None = None,
+    seed_transpiler: int | None = None,
+    preserve_measurement_order: bool | None = None,
+) -> str | list[str]:
+    """Compile Qiskit circuits to Braket-compatible OpenQASM 3 strings.
+
+    This is the primary entry point for the OQ3 output path. It orchestrates:
+    1. Compilation via Qiskit's transpiler (with verbatim box preservation)
+    2. Serialization to OpenQASM 3 with Braket-compatible formatting
+
+    The compilation step reuses the existing ``_compile()`` pipeline, including
+    verbatim box extraction/restoration and device-aware transpilation.
+
+    Args:
+        circuits: One or more circuits to compile. Qiskit ``QuantumCircuit``,
+            Braket ``Circuit``, OpenQASM 3 ``Program``, or an OpenQASM 3 source
+            string. An iterable produces a list of results.
+        qubit_labels: Physical qubit indices on the target device.
+        target: A Qiskit transpiler target describing device constraints.
+        verbatim: If ``True``, wrap the circuit in a verbatim box so neither QBP
+            nor the service compiles it further. Honored unconditionally.
+
+            When ``False`` (default) and a compilation target is supplied
+            (``target``, ``braket_device``, or ``pass_manager``), the output is
+            wrapped in a verbatim box — except for circuits containing
+            control-flow ops, which are emitted unwrapped (with a warning) so
+            the service can post-process dynamic circuits.
+        basis_gates: Gate names supported by the target device (Qiskit names).
+        coupling_map: Qubit connectivity as ``[control, target]`` pairs.
+        optimization_level: Transpiler optimization level (0-3). Default: 0.
+        callback: Callback function passed to the transpiler.
+        num_processes: Number of parallel processes for transpilation.
+        pass_manager: A custom Qiskit PassManager.
+        braket_device: A Braket Device to derive target and qubit labels from.
+        layout_method: Layout method for the transpiler.
+        routing_method: Routing method for the transpiler.
+        seed_transpiler: Seed for reproducible transpilation.
+        preserve_measurement_order: Whether to keep measurement placement
+            unchanged. If ``None`` (default), inferred from the device
+            capability or from control-flow ops in the target/basis_gates;
+            otherwise falls back to ``False`` (measurements are moved to the
+            end).
+
+    Returns:
+        An OpenQASM 3 string (single circuit) or list of strings (multiple circuits).
+
+    Raises:
+        ValueError: If mutually exclusive compilation options are specified.
+        TypeError: If inputs are not QuantumCircuits.
+    """
+    return _compile_to_oq3(
+        circuits,
+        qubit_labels=qubit_labels,
+        target=target,
+        verbatim=verbatim,
+        basis_gates=basis_gates,
+        coupling_map=coupling_map,
+        optimization_level=optimization_level,
+        callback=callback,
+        num_processes=num_processes,
+        pass_manager=pass_manager,
+        braket_device=braket_device,
+        layout_method=layout_method,
+        routing_method=routing_method,
+        seed_transpiler=seed_transpiler,
+        preserve_measurement_order=preserve_measurement_order,
+    )
