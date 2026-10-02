@@ -33,7 +33,6 @@ from braket.circuits import gates as braket_gates
 from braket.circuits import noises as braket_noises
 from braket.circuits import observables as braket_observables
 from braket.default_simulator.openqasm.interpreter import Interpreter
-from braket.device_schema import DeviceActionType
 from braket.devices import Device
 from braket.ir.openqasm import Program
 from braket.parametric import FreeParameter, FreeParameterExpression, Parameterizable
@@ -60,7 +59,6 @@ from qiskit_braket_provider.providers.gate_mappings import (
 )
 from qiskit_braket_provider.providers.passes import (
     ConsolidateClbits,
-    MoveMeasurementsToEnd,
     RenameGates,
     WrapInVerbatimBox,
 )
@@ -90,8 +88,8 @@ _T = TypeVar("_T")
 
 """Qiskit op names that are not gate calls in the emitted OpenQASM 3.
 
-Excluded from ``basis_gates`` in both :func:`_collect_basis_gates` and when
-filtering a ``Target``'s ``operation_names`` in :func:`compile_to_oq3`.
+Excluded from ``basis_gates`` when filtering a ``Target``'s
+``operation_names`` or caller-supplied gate names in :func:`compile_to_oq3`.
 """
 _NON_GATE_TARGET_OPS = frozenset({
     "measure",
@@ -100,19 +98,17 @@ _NON_GATE_TARGET_OPS = frozenset({
     "gphase",
     "if_else",
     "for_loop",
-    "while_loop",
-    "switch_case",
 })
 
-"""Braket-side OpenQASM operation names that indicate dynamic-circuit capability."""
-_DYNAMIC_CIRCUIT_OPERATIONS = frozenset({"measure_ff", "cc_prx", "if"})
+"""Reverse of :data:`_BRAKET_TO_QISKIT_NAMES` — maps Qiskit gate names to Braket names."""
+_QISKIT_TO_BRAKET_NAMES = {
+    qiskit_name: braket_name for braket_name, qiskit_name in _BRAKET_TO_QISKIT_NAMES.items()
+}
 
 """Qiskit-side op names for control-flow constructs."""
 _QISKIT_CONTROL_FLOW_OPS = frozenset({
     "if_else",
-    "while_loop",
     "for_loop",
-    "switch_case",
 })
 
 
@@ -781,70 +777,18 @@ def convert_qiskit_to_braket_circuits(
         yield to_braket(circuit)
 
 
-def _device_supports_dynamic_circuits(device: Device) -> bool:
-    """Return ``True`` if ``device`` advertises a known dynamic-circuit primitive.
-
-    Checks the device's OpenQASM ``supportedOperations`` against
-    :data:`_DYNAMIC_CIRCUIT_OPERATIONS`.
-    """
-    action = device.properties.action.get(DeviceActionType.OPENQASM)
-    if action is None:
-        return False
-    supported = {op.lower() for op in action.supportedOperations}
-    return bool(supported & _DYNAMIC_CIRCUIT_OPERATIONS)
-
-
-def _resolve_preserve_measurement_order(
-    explicit: bool | None,
-    braket_device: Device | None,
-    target: Target | None,
-    basis_gates: Collection[str] | None,
-) -> bool:
-    """Resolve ``preserve_measurement_order`` from caller inputs.
-
-    Precedence: explicit user value > ``braket_device`` capability >
-    ``target``/``basis_gates`` operation names. Falls back to ``False``.
-    """
-    if explicit is not None:
-        return explicit
-    if braket_device is not None:
-        return _device_supports_dynamic_circuits(braket_device)
-    ops = set(target.operation_names) if target is not None else set(basis_gates or ())
-    return bool(_QISKIT_CONTROL_FLOW_OPS & ops)
-
-
-def _collect_basis_gates(instructions: Iterable[QiskitInstruction]) -> set[str]:
-    """Collect gate names suitable for ``basis_gates``.
-
-    Recurses into any ``.blocks``-carrying op (``BoxOp`` and control-flow ops).
-    Names in :data:`_NON_GATE_TARGET_OPS` are excluded.
-    """
-    gates: set[str] = set()
-    for instr in instructions:
-        op = instr.operation
-        blocks = getattr(op, "blocks", None)
-        if blocks:
-            for block in blocks:
-                gates |= _collect_basis_gates(block.data)
-            continue
-        if op.name not in _NON_GATE_TARGET_OPS:
-            gates.add(op.name)
-    return gates
-
-
 def to_oq3(
     circuit: QuantumCircuit,
     *,
     basis_gates: Collection[str] | None = None,
     qubit_labels: Sequence[int] | None = None,
     should_wrap_verbatim: bool = False,
-    preserve_measurement_order: bool = False,
 ) -> str:
     """Convert a compiled Qiskit QuantumCircuit to a Braket-compatible OpenQASM 3 string.
 
     This function applies OQ3-preparation passes (classical bit consolidation,
-    measurement reordering, optional verbatim wrapping) and serializes the
-    circuit to OpenQASM 3 with Braket-compatible gate names and qubit addressing.
+    optional verbatim wrapping) and serializes the circuit to OpenQASM 3 with
+    Braket-compatible gate names and qubit addressing.
 
     Args:
         circuit: A compiled Qiskit QuantumCircuit ready for serialization.
@@ -855,34 +799,27 @@ def to_oq3(
         qubit_labels: Physical qubit indices for the target device. If provided,
             virtual qubits are remapped to physical qubit notation (``$0``, ``$1``, etc.).
         should_wrap_verbatim: Whether to wrap the circuit in a verbatim box.
-        preserve_measurement_order: If ``True``, keep measurement placement
-            (and place them inside any verbatim box). Default: ``False``
-            (measurements are moved to the end).
 
     Returns:
         An OpenQASM 3 string compatible with Amazon Braket.
     """
     pm = PassManager()
     pm.append(ConsolidateClbits())
-    pm.append(MoveMeasurementsToEnd(preserve_measurement_order=preserve_measurement_order))
     if should_wrap_verbatim:
-        pm.append(WrapInVerbatimBox(preserve_measurement_order=preserve_measurement_order))
+        pm.append(WrapInVerbatimBox())
     pm.append(RenameGates())
     circuit = pm.run(circuit)
 
     if basis_gates is None:
-        basis_gates = list(_collect_basis_gates(circuit.data))
-    else:
-        # basis_gates arrives as Qiskit names; RenameGates has already substituted
-        # shims for renameable gates, so translate to Braket names for qasm3.dumps.
-        qiskit_to_braket = {
-            qiskit_name: braket_name for braket_name, qiskit_name in _BRAKET_TO_QISKIT_NAMES.items()
-        }
-        basis_gates = [
-            translated
-            for g in basis_gates
-            if (translated := qiskit_to_braket.get(g, g)) not in _NON_GATE_TARGET_OPS
-        ]
+        basis_gates = _QISKIT_TO_BRAKET_NAMES.values()
+
+    # basis_gates arrives as Qiskit names; RenameGates has already substituted
+    # shims for renameable gates, so translate to Braket names for qasm3.dumps.
+    basis_gates = [
+        translated
+        for g in basis_gates
+        if (translated := _QISKIT_TO_BRAKET_NAMES.get(g, g)) not in _NON_GATE_TARGET_OPS
+    ]
 
     oq3_source = qasm3.dumps(
         circuit,
@@ -912,7 +849,6 @@ def _compile_to_oq3(
     layout_method: str | None = None,
     routing_method: str | None = None,
     seed_transpiler: int | None = None,
-    preserve_measurement_order: bool | None = None,
 ) -> str | list[str]:
     """Internal implementation of :func:`compile_to_oq3`. Signature may change."""
     qiskit_circuits, single_instance = _get_circuits(circuits, None, add_measurements=True)
@@ -938,9 +874,6 @@ def _compile_to_oq3(
     effective_basis_gates = result.basis_gates
     if effective_basis_gates is None and result.target is not None:
         effective_basis_gates = set(result.target.operation_names) - _NON_GATE_TARGET_OPS
-    resolved_preserve_measurement_order = _resolve_preserve_measurement_order(
-        preserve_measurement_order, braket_device, target, basis_gates
-    )
 
     oq3_strings: list[str] = []
     for circ in result.circuits:
@@ -965,7 +898,6 @@ def _compile_to_oq3(
                 basis_gates=effective_basis_gates,
                 qubit_labels=result.qubit_labels,
                 should_wrap_verbatim=should_wrap,
-                preserve_measurement_order=resolved_preserve_measurement_order,
             )
         )
 
@@ -1002,7 +934,6 @@ def compile_to_oq3(  # type: ignore[misc]
     layout_method: str | None = None,
     routing_method: str | None = None,
     seed_transpiler: int | None = None,
-    preserve_measurement_order: bool | None = None,
 ) -> str | list[str]:
     """Compile Qiskit circuits to Braket-compatible OpenQASM 3 strings.
 
@@ -1037,11 +968,6 @@ def compile_to_oq3(  # type: ignore[misc]
         layout_method: Layout method for the transpiler.
         routing_method: Routing method for the transpiler.
         seed_transpiler: Seed for reproducible transpilation.
-        preserve_measurement_order: Whether to keep measurement placement
-            unchanged. If ``None`` (default), inferred from the device
-            capability or from control-flow ops in the target/basis_gates;
-            otherwise falls back to ``False`` (measurements are moved to the
-            end).
 
     Returns:
         An OpenQASM 3 string (single circuit) or list of strings (multiple circuits).
@@ -1065,5 +991,4 @@ def compile_to_oq3(  # type: ignore[misc]
         layout_method=layout_method,
         routing_method=routing_method,
         seed_transpiler=seed_transpiler,
-        preserve_measurement_order=preserve_measurement_order,
     )

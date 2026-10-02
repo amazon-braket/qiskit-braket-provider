@@ -2,7 +2,6 @@
 
 import warnings
 from collections.abc import Callable
-from unittest.mock import MagicMock
 
 import pytest
 from qiskit import QuantumCircuit
@@ -15,14 +14,10 @@ from qiskit.circuit import (
 from qiskit.circuit.library import CXGate, HGate, XGate
 from qiskit.transpiler import Target
 
-from braket.device_schema import DeviceActionType
 from braket.devices import LocalSimulator
 from braket.ir.openqasm import Program
 from qiskit_braket_provider.providers.adapter import (
-    _collect_basis_gates,
-    _device_supports_dynamic_circuits,
     _has_control_flow,
-    _resolve_preserve_measurement_order,
     compile_to_oq3,
     to_oq3,
 )
@@ -101,25 +96,9 @@ def _bell_with_verbatim_boxop() -> QuantumCircuit:
 
 
 def test_to_oq3_auto_basis_gates() -> None:
-    """Omitting ``basis_gates`` triggers ``_collect_basis_gates`` on the circuit."""
+    """Omitting ``basis_gates`` falls back to the default Braket gate set."""
     oq3 = to_oq3(_bell_circuit())
     _assert_contents(oq3, ["h ", "cnot "], ["gate "])
-
-
-def test_collect_basis_gates_recurses_into_control_flow_bodies() -> None:
-    """Regression: gates inside ``.blocks``-carrying ops (e.g. IfElseOp) are collected."""
-    true_body = QuantumCircuit(1, 1)
-    true_body.x(0)
-
-    outer = QuantumCircuit(1, 1)
-    outer.h(0)
-    outer.measure(0, 0)
-    outer.append(IfElseOp((outer.clbits[0], 1), true_body, None), [0], [0])
-
-    gates = _collect_basis_gates(outer.data)
-    assert "x" in gates
-    assert "h" in gates
-    assert "if_else" not in gates
 
 
 def _if_else_circuit() -> QuantumCircuit:
@@ -170,7 +149,7 @@ def test_compile_to_oq3_wraps_verbatim_when_explicit_even_with_control_flow() ->
 
     with warnings.catch_warnings():
         warnings.simplefilter("error", UserWarning)
-        oq3 = compile_to_oq3(qc, verbatim=True, preserve_measurement_order=True)
+        oq3 = compile_to_oq3(qc, verbatim=True)
 
     assert "#pragma braket verbatim" in oq3
     assert "box {" in oq3
@@ -269,9 +248,9 @@ def test_compile_to_oq3_output(
                 "box {\n"
                 "h $0;\n"
                 "cnot $0, $1;\n"
-                "}\n"
                 "b[0] = measure $0;\n"
-                "b[1] = measure $1;"
+                "b[1] = measure $1;\n"
+                "}"
             ),
         ),
         (
@@ -297,9 +276,9 @@ def test_compile_to_oq3_output(
                 "box {\n"
                 "h $0;\n"
                 "cnot $0, $1;\n"
-                "}\n"
                 "b[0] = measure $0;\n"
-                "b[1] = measure $1;"
+                "b[1] = measure $1;\n"
+                "}"
             ),
         ),
     ],
@@ -360,127 +339,3 @@ def test_compile_to_oq3_no_output_metadata(metadata: dict) -> None:
     qc = _bell_circuit()
     qc.metadata = metadata
     assert "output bit[" not in compile_to_oq3(qc)
-
-
-def _mock_device_with_operations(supported_operations: list[str] | None) -> MagicMock:
-    """Build a mock Braket ``Device``.
-
-    If ``supported_operations`` is ``None``, the mock advertises no OpenQASM
-    action; otherwise it advertises the given ``supportedOperations``.
-    """
-    device = MagicMock()
-    if supported_operations is None:
-        device.properties.action = {}
-    else:
-        action = MagicMock()
-        action.supportedOperations = supported_operations
-        device.properties.action = {DeviceActionType.OPENQASM: action}
-    return device
-
-
-def _target_with(*operations: str) -> Target:
-    t = Target(num_qubits=2)
-    t.add_instruction(HGate(), name="h")
-    for op in operations:
-        if op == "if_else":
-            t.add_instruction(IfElseOp, name="if_else")
-    return t
-
-
-@pytest.mark.parametrize(
-    "supported_operations,expected",
-    [
-        (["h", "cnot"], False),
-        (["h", "measure_ff"], True),
-        (["h", "cc_prx"], True),
-        (["h", "if"], True),
-        (["MEASURE_FF", "H"], True),
-        (None, False),
-    ],
-    ids=["no_dynamic", "measure_ff", "cc_prx", "if", "case_insensitive", "no_openqasm_action"],
-)
-def test_device_supports_dynamic_circuits(
-    supported_operations: list[str] | None, expected: bool
-) -> None:
-    assert (
-        _device_supports_dynamic_circuits(_mock_device_with_operations(supported_operations))
-        is expected
-    )
-
-
-@pytest.mark.parametrize(
-    "explicit,device,target,basis_gates,expected",
-    [
-        (None, None, None, None, False),
-        (True, None, None, None, True),
-        (False, None, None, None, False),
-        (None, _mock_device_with_operations(["h", "measure_ff"]), None, None, True),
-        (None, _mock_device_with_operations(["h", "cnot"]), None, None, False),
-        (None, None, _target_with("if_else"), None, True),
-        (None, None, _target_with(), None, False),
-        (None, None, None, ["h", "cx", "if_else"], True),
-        (None, None, None, ["h", "cx"], False),
-        (True, _mock_device_with_operations(["h"]), None, None, True),
-    ],
-    ids=[
-        "all_none",
-        "explicit_true",
-        "explicit_false",
-        "device_dynamic",
-        "device_static",
-        "target_if_else",
-        "target_static",
-        "basis_gates_if_else",
-        "basis_gates_static",
-        "explicit_overrides_device",
-    ],
-)
-def test_resolve_preserve_measurement_order(
-    explicit: bool | None,
-    device: MagicMock | None,
-    target: Target | None,
-    basis_gates: list[str] | None,
-    expected: bool,
-) -> None:
-    assert _resolve_preserve_measurement_order(explicit, device, target, basis_gates) is expected
-
-
-@pytest.mark.parametrize(
-    "preserve_measurement_order,expected_oq3",
-    [
-        (
-            True,
-            (
-                "OPENQASM 3.0;\n"
-                "bit[2] b;\n"
-                "qubit[2] q;\n"
-                "h q[0];\n"
-                "b[0] = measure q[0];\n"
-                "cnot q[0], q[1];\n"
-                "b[1] = measure q[1];"
-            ),
-        ),
-        (
-            False,
-            (
-                "OPENQASM 3.0;\n"
-                "bit[2] b;\n"
-                "qubit[2] q;\n"
-                "h q[0];\n"
-                "cnot q[0], q[1];\n"
-                "b[0] = measure q[0];\n"
-                "b[1] = measure q[1];"
-            ),
-        ),
-    ],
-    ids=["preserve_keeps_placement", "reorder_moves_measurements_to_end"],
-)
-def test_compile_to_oq3_respects_preserve_measurement_order(
-    preserve_measurement_order: bool, expected_oq3: str
-) -> None:
-    qc = QuantumCircuit(2, 2)
-    qc.h(0)
-    qc.measure(0, 0)
-    qc.cx(0, 1)
-    qc.measure(1, 1)
-    assert compile_to_oq3(qc, preserve_measurement_order=preserve_measurement_order) == expected_oq3

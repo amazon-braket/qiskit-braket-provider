@@ -20,7 +20,6 @@ from qiskit_braket_provider.providers.gate_mappings import (
 )
 from qiskit_braket_provider.providers.passes import (
     ConsolidateClbits,
-    MoveMeasurementsToEnd,
     RenameGates,
     WrapInVerbatimBox,
 )
@@ -277,7 +276,6 @@ def _dumps_with_passes(circuit: QuantumCircuit, *, basis_gates: list[str], verba
     """Run the passes and dump to OQ3"""
     pm = PassManager()
     pm.append(ConsolidateClbits())
-    pm.append(MoveMeasurementsToEnd())
     if verbatim:
         pm.append(WrapInVerbatimBox())
     pm.append(RenameGates())
@@ -336,22 +334,6 @@ def test_consolidate_clbits_preserves_if_else_condition(build_circuit: Callable)
     assert cond_value == 1
     # The Clbit is now a member of the "b" register.
     assert any(condition_bit in creg for creg in result.cregs if creg.name == "b")
-
-
-@pytest.mark.parametrize(
-    "build_circuit,preserve_measurement_order,expected_op_order",
-    [
-        (_mid_measure_circuit, False, ["h", "cx", "measure", "measure"]),
-        (_mid_measure_circuit, True, ["h", "measure", "cx", "measure"]),
-        (_bell_circuit, False, ["h", "cx", "measure", "measure"]),
-    ],
-    ids=["reorders_mid_measure", "preserve_noop", "already_at_end_noop"],
-)
-def test_move_measurements_to_end(
-    build_circuit: Callable, preserve_measurement_order: bool, expected_op_order: list[str]
-) -> None:
-    result = PassManager([MoveMeasurementsToEnd(preserve_measurement_order)]).run(build_circuit())
-    assert [instr.operation.name for instr in result.data] == expected_op_order
 
 
 @pytest.mark.parametrize(

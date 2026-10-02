@@ -70,47 +70,17 @@ def _plain_register_name(taken: set) -> str:
     return f"b{i}"
 
 
-class MoveMeasurementsToEnd(TransformationPass):
-    """Reorder the DAG so all measurements appear at the end.
-
-    Args:
-        preserve_measurement_order: If ``True``, return the DAG unchanged so
-            mid-circuit measurements keep their placement (e.g. when they feed
-            classical control flow). Default: ``False``.
-    """
-
-    def __init__(self, preserve_measurement_order: bool = False):
-        super().__init__()
-        self._preserve_measurement_order = preserve_measurement_order
-
-    def run(self, dag: DAGCircuit) -> DAGCircuit:
-        """Move every ``Measure`` op to the end of the DAG."""
-        if self._preserve_measurement_order:
-            return dag
-
-        new_dag = dag.copy_empty_like()
-        measurements = []
-        for node in dag.topological_op_nodes():
-            if isinstance(node.op, Measure):
-                measurements.append(node)
-            else:
-                new_dag.apply_operation_back(node.op, node.qargs, node.cargs)
-        for node in measurements:
-            new_dag.apply_operation_back(node.op, node.qargs, node.cargs)
-        return new_dag
-
-
 class WrapInVerbatimBox(TransformationPass):
     """Wrap operations in a ``BoxOp`` labeled ``"verbatim"``.
 
     Args:
-        preserve_measurement_order: If ``True``, all ops (measurements included)
-            go inside the box. If ``False`` (default), trailing measurements
-            are placed outside; callers must guarantee measurements are already
-            at the end (e.g. by running :class:`MoveMeasurementsToEnd` first).
+        preserve_measurement_order: If ``True`` (default), all ops
+            (measurements included) go inside the box. If ``False``, trailing
+            measurements are placed outside; callers must guarantee
+            measurements are already at the end.
     """
 
-    def __init__(self, preserve_measurement_order: bool = False):
+    def __init__(self, preserve_measurement_order: bool = True):
         super().__init__()
         self._preserve_measurement_order = preserve_measurement_order
 
