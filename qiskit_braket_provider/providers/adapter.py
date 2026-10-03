@@ -48,13 +48,15 @@ from qiskit_braket_provider.providers.compilation import (
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_SUPPORTED_NOISES,  # ruff:ignore[unused-import]
-    _BRAKET_TO_QISKIT_NAMES,
     _BRAKET_VERBATIM_BOX_NAME,
     _CONTROLLED_GATES_BY_QUBIT_COUNT,  # ruff:ignore[unused-import]
     _EPS,
+    _NON_GATE_TARGET_OPS,
     _PAULI_MAP,
+    _QISKIT_CONTROL_FLOW_OPS,
     _QISKIT_CONTROLLED_GATE_NAMES_TO_BRAKET_GATES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
+    _QISKIT_TO_BRAKET_NAMES,
     _reverse_endianness,
 )
 from qiskit_braket_provider.providers.passes import (
@@ -85,31 +87,6 @@ add_equivalences()
 
 _Translatable: TypeAlias = QuantumCircuit | Circuit | Program | str
 _T = TypeVar("_T")
-
-"""Qiskit op names that are not gate calls in the emitted OpenQASM 3.
-
-Excluded from ``basis_gates`` when filtering a ``Target``'s
-``operation_names`` or caller-supplied gate names in :func:`compile_to_oq3`.
-"""
-_NON_GATE_TARGET_OPS = frozenset({
-    "measure",
-    "barrier",
-    "box",
-    "gphase",
-    "if_else",
-    "for_loop",
-})
-
-"""Reverse of :data:`_BRAKET_TO_QISKIT_NAMES` — maps Qiskit gate names to Braket names."""
-_QISKIT_TO_BRAKET_NAMES = {
-    qiskit_name: braket_name for braket_name, qiskit_name in _BRAKET_TO_QISKIT_NAMES.items()
-}
-
-"""Qiskit-side op names for control-flow constructs."""
-_QISKIT_CONTROL_FLOW_OPS = frozenset({
-    "if_else",
-    "for_loop",
-})
 
 
 def _get_circuits(
