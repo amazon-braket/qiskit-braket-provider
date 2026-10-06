@@ -149,6 +149,7 @@ class TestBraketQuantumTask(TestCase):
 
         mock_aws_quantum_task.queue_position.assert_called_once()
         mock_aws_quantum_task.assert_not_called()
+        assert task.task_id() == "arn:aws:braket:::quantum-task/AwesomeId"
         assert task_queue
 
     @patch(
