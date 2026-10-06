@@ -265,6 +265,20 @@ class TestBraketLocalBackend(TestCase):
 class TestBraketAwsBackend(TestCase):
     """Tests class for BraketAwsBackend."""
 
+    @patch("qiskit_braket_provider.providers.braket_backend.AwsDevice")
+    def test_session_used_to_construct_device_from_arn(self, mock_aws_device: MagicMock):
+        """Direct backend construction uses the supplied AWS session."""
+        session = Mock()
+        device = mock_aws_device.return_value
+        device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
+        device.gate_calibrations = None
+        device.type = "QPU"
+        device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+
+        BraketAwsBackend(arn="device-arn", aws_session=session)
+
+        mock_aws_device.assert_called_once_with("device-arn", aws_session=session)
+
     def test_device_backend(self):
         """Tests device backend."""
         device = Mock()
@@ -441,13 +455,22 @@ class TestBraketAwsBackend(TestCase):
         backend.retrieve_job(task_id)
 
         # Assert
-        mock_aws_quantum_task.assert_any_call(arn=expected_task_ids[0])
-        mock_aws_quantum_task.assert_any_call(arn=expected_task_ids[1])
-        mock_aws_quantum_task.assert_any_call(arn=expected_task_ids[2])
+        mock_aws_quantum_task.assert_any_call(
+            arn=expected_task_ids[0], aws_session=device.aws_session
+        )
+        mock_aws_quantum_task.assert_any_call(
+            arn=expected_task_ids[1], aws_session=device.aws_session
+        )
+        mock_aws_quantum_task.assert_any_call(
+            arn=expected_task_ids[2], aws_session=device.aws_session
+        )
         mock_braket_quantum_task.assert_called_once_with(
             task_id=task_id,
             backend=backend,
-            tasks=[mock_aws_quantum_task(arn=task_id) for task_id in expected_task_ids],
+            tasks=[
+                mock_aws_quantum_task(arn=task_id, aws_session=device.aws_session)
+                for task_id in expected_task_ids
+            ],
         )
 
     @unittest.skip("Call to external resources.")

@@ -4,7 +4,7 @@ import warnings
 
 from qiskit.providers.exceptions import QiskitBackendNotFoundError
 
-from braket.aws import AwsDevice
+from braket.aws import AwsDevice, AwsSession
 from braket.device_schema.dwave import DwaveDeviceCapabilities
 from braket.device_schema.quera import QueraDeviceCapabilities
 from braket.device_schema.xanadu import XanaduDeviceCapabilities
@@ -14,6 +14,10 @@ from .braket_backend import BraketAwsBackend, BraketLocalBackend
 
 class BraketProvider:
     """Provides access to Amazon Braket backends.
+
+    Args:
+        aws_session (AwsSession | None): session to use for device discovery unless
+            one is provided to ``backends()`` or ``get_backend()``.
 
     Example:
         >>> provider = BraketProvider()
@@ -28,6 +32,9 @@ class BraketProvider:
          BraketBackend[SV1],
          BraketBackend[dm1]]
     """
+
+    def __init__(self, aws_session: AwsSession | None = None) -> None:
+        self._aws_session = aws_session
 
     def get_backend(
         self, name: str | None = None, emulator: bool = False, **kwargs
@@ -74,6 +81,8 @@ class BraketProvider:
                 BraketLocalBackend(name="braket_sv"),
                 BraketLocalBackend(name="braket_dm"),
             ]
+        if self._aws_session is not None:
+            kwargs.setdefault("aws_session", self._aws_session)
         names = [name] if name else None
         devices = AwsDevice.get_devices(names=names, **kwargs)
         # filter by supported devices
@@ -98,6 +107,7 @@ class BraketProvider:
                 description=f"AWS Device: {device.provider_name} {device.name}.",
                 online_date=device.properties.service.updatedAt,
                 backend_version="2",
+                aws_session=device.aws_session,
             )
             for device in supported_devices
         ]
