@@ -73,6 +73,59 @@ def _rccx_in_if_else_circuit() -> QuantumCircuit:
     return qc
 
 
+def _if_else_circuit() -> QuantumCircuit:
+    """Small circuit with a top-level ``IfElseOp``."""
+    true_body = QuantumCircuit(1, 1)
+    true_body.x(0)
+
+    qc = QuantumCircuit(1, 1)
+    qc.h(0)
+    qc.measure(0, 0)
+    qc.append(IfElseOp((qc.clbits[0], 1), true_body, None), [0], [0])
+    return qc
+
+
+def _if_else_target() -> Target:
+    """Target that supports h, x, measure, and if_else on a single qubit."""
+    target = Target(num_qubits=1)
+    target.add_instruction(HGate(), name="h")
+    target.add_instruction(XGate(), name="x")
+    target.add_instruction(Measure(), name="measure")
+    target.add_instruction(IfElseOp, name="if_else")
+    return target
+
+
+def _mock_non_iqm_device() -> Mock:
+    """The IQM mock with a non-IQM (Rigetti) device ARN."""
+    device = mock_iqm_device()
+    device.arn = "arn:aws:braket:us-west-1::device/qpu/rigetti/Ankaa-3"
+    return device
+
+
+def _iqm_device_kwargs() -> dict:
+    return {"braket_device": mock_iqm_device()}
+
+
+def _non_iqm_device_kwargs() -> dict:
+    return {"braket_device": _mock_non_iqm_device()}
+
+
+def _iqm_target_kwargs() -> dict:
+    device = mock_iqm_device()
+    return {
+        "target": aws_device_to_target(device),
+        "qubit_labels": sorted(device.topology_graph.nodes),
+    }
+
+
+def _non_iqm_target_kwargs() -> dict:
+    device = _mock_non_iqm_device()
+    return {
+        "target": aws_device_to_target(device),
+        "qubit_labels": sorted(device.topology_graph.nodes),
+    }
+
+
 @pytest.fixture
 def sim() -> LocalSimulator:
     return LocalSimulator("braket_sv")
@@ -146,28 +199,6 @@ def test_to_oq3_accepts_control_flow_with_basis_gates() -> None:
     _assert_contents(oq3, ["if (b[0]) {", "x "], ["gate "])
 
 
-def _if_else_circuit() -> QuantumCircuit:
-    """Small circuit with a top-level ``IfElseOp``."""
-    true_body = QuantumCircuit(1, 1)
-    true_body.x(0)
-
-    qc = QuantumCircuit(1, 1)
-    qc.h(0)
-    qc.measure(0, 0)
-    qc.append(IfElseOp((qc.clbits[0], 1), true_body, None), [0], [0])
-    return qc
-
-
-def _if_else_target() -> Target:
-    """Target that supports h, x, measure, and if_else on a single qubit."""
-    target = Target(num_qubits=1)
-    target.add_instruction(HGate(), name="h")
-    target.add_instruction(XGate(), name="x")
-    target.add_instruction(Measure(), name="measure")
-    target.add_instruction(IfElseOp, name="if_else")
-    return target
-
-
 @pytest.mark.parametrize(
     "circuit_factory,expected",
     [(_if_else_circuit, True), (_bell_circuit, False)],
@@ -199,13 +230,6 @@ def test_compile_to_oq3_verbatim_keeps_mid_circuit_measurement_in_box() -> None:
     oq3 = compile_to_oq3(qc, verbatim=True)
 
     assert "box {\nb[0] = measure q[0];\nx q[0];\n}\nb[1] = measure q[0];" in oq3
-
-
-def _mock_non_iqm_device() -> Mock:
-    """The IQM mock with a non-IQM (Rigetti) device ARN."""
-    device = mock_iqm_device()
-    device.arn = "arn:aws:braket:us-west-1::device/qpu/rigetti/Ankaa-3"
-    return device
 
 
 @pytest.mark.parametrize(
@@ -252,30 +276,6 @@ def test_to_oq3_include_measurement_in_verbatim(
     )
 
     assert oq3.endswith(expected_tail)
-
-
-def _iqm_device_kwargs() -> dict:
-    return {"braket_device": mock_iqm_device()}
-
-
-def _non_iqm_device_kwargs() -> dict:
-    return {"braket_device": _mock_non_iqm_device()}
-
-
-def _iqm_target_kwargs() -> dict:
-    device = mock_iqm_device()
-    return {
-        "target": aws_device_to_target(device),
-        "qubit_labels": sorted(device.topology_graph.nodes),
-    }
-
-
-def _non_iqm_target_kwargs() -> dict:
-    device = _mock_non_iqm_device()
-    return {
-        "target": aws_device_to_target(device),
-        "qubit_labels": sorted(device.topology_graph.nodes),
-    }
 
 
 @pytest.mark.parametrize(
