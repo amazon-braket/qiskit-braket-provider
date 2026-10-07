@@ -1,7 +1,7 @@
 """Tests for the adapter OQ3 output path: ``to_oq3`` and ``compile_to_oq3``."""
 
-import warnings
 from collections.abc import Callable
+from unittest.mock import Mock
 
 import pytest
 from qiskit import QuantumCircuit
@@ -14,14 +14,23 @@ from qiskit.circuit import (
 from qiskit.circuit.library import CXGate, HGate, XGate
 from qiskit.transpiler import Target
 
+from braket.circuits.serialization import (
+    IRType,
+    OpenQASMSerializationProperties,
+    QubitReferenceType,
+)
 from braket.devices import LocalSimulator
 from braket.ir.openqasm import Program
 from qiskit_braket_provider.providers.adapter import (
     _has_control_flow,
     compile_to_oq3,
+    to_braket,
     to_oq3,
 )
 from qiskit_braket_provider.providers.gate_mappings import _BRAKET_VERBATIM_BOX_NAME
+from qiskit_braket_provider.providers.target import aws_device_to_target
+
+from .mocks import mock_iqm_device
 
 
 def _bell_circuit() -> QuantumCircuit:
@@ -47,6 +56,20 @@ def _sx_sdg_cx_circuit() -> QuantumCircuit:
     qc.sdg(1)
     qc.cx(0, 1)
     qc.measure([0, 1], [0, 1])
+    return qc
+
+
+def _rccx_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit(3)
+    qc.rccx(0, 1, 2)
+    return qc
+
+
+def _rccx_in_if_else_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit(3, 1)
+    qc.measure(0, 0)
+    with qc.if_test((qc.clbits[0], 1)):
+        qc.rccx(0, 1, 2)
     return qc
 
 
@@ -101,6 +124,28 @@ def test_to_oq3_auto_basis_gates() -> None:
     _assert_contents(oq3, ["h ", "cnot "], ["gate "])
 
 
+@pytest.mark.parametrize(
+    ("circuit_factory", "basis_gates"),
+    [
+        (_rccx_circuit, None),
+        (_rccx_in_if_else_circuit, None),
+        (_bell_circuit, ["h"]),
+    ],
+    ids=["default_basis", "nested_in_if_else", "explicit_basis"],
+)
+def test_to_oq3_raises_on_gates_outside_basis(
+    circuit_factory: Callable[[], QuantumCircuit], basis_gates: list[str] | None
+) -> None:
+    with pytest.raises(ValueError, match="not in the basis gate set"):
+        to_oq3(circuit_factory(), basis_gates=basis_gates)
+
+
+def test_to_oq3_accepts_control_flow_with_basis_gates() -> None:
+    oq3 = to_oq3(_if_else_circuit(), basis_gates=["h", "x"])
+
+    _assert_contents(oq3, ["if (b[0]) {", "x "], ["gate "])
+
+
 def _if_else_circuit() -> QuantumCircuit:
     """Small circuit with a top-level ``IfElseOp``."""
     true_body = QuantumCircuit(1, 1)
@@ -132,27 +177,123 @@ def test_has_control_flow(circuit_factory: Callable[[], QuantumCircuit], expecte
     assert _has_control_flow(circuit_factory()) is expected
 
 
-def test_compile_to_oq3_skips_verbatim_on_native_path_with_control_flow() -> None:
-    """Native path skips the verbatim wrap for control-flow circuits and warns."""
-    qc = _if_else_circuit()
-
-    with pytest.warns(UserWarning, match="control-flow"):
-        oq3 = compile_to_oq3(qc, target=_if_else_target())
-
-    assert "#pragma braket verbatim" not in oq3
-    assert "box {" not in oq3
+def test_compile_to_oq3_raises_on_native_path_with_control_flow() -> None:
+    with pytest.raises(ValueError, match="'if' statements on IQM devices"):
+        compile_to_oq3(_if_else_circuit(), target=_if_else_target())
 
 
 def test_compile_to_oq3_wraps_verbatim_when_explicit_even_with_control_flow() -> None:
-    """``verbatim=True`` is honored for control-flow circuits; no warning fires."""
-    qc = _if_else_circuit()
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", UserWarning)
-        oq3 = compile_to_oq3(qc, verbatim=True)
+    """``verbatim=True`` is honored for control-flow circuits, even on the native path."""
+    oq3 = compile_to_oq3(_if_else_circuit(), target=_if_else_target(), verbatim=True)
 
     assert "#pragma braket verbatim" in oq3
     assert "box {" in oq3
+
+
+def test_compile_to_oq3_verbatim_keeps_mid_circuit_measurement_in_box() -> None:
+    qc = QuantumCircuit(1, 2)
+    qc.measure(0, 0)
+    qc.x(0)
+    qc.measure(0, 1)
+
+    oq3 = compile_to_oq3(qc, verbatim=True)
+
+    assert "box {\nb[0] = measure q[0];\nx q[0];\n}\nb[1] = measure q[0];" in oq3
+
+
+def _mock_non_iqm_device() -> Mock:
+    """The IQM mock with a non-IQM (Rigetti) device ARN."""
+    device = mock_iqm_device()
+    device.arn = "arn:aws:braket:us-west-1::device/qpu/rigetti/Ankaa-3"
+    return device
+
+
+@pytest.mark.parametrize(
+    ("device_factory", "expected_match"),
+    [(mock_iqm_device, False), (_mock_non_iqm_device, True)],
+    ids=["iqm", "non_iqm"],
+)
+def test_compile_to_oq3_matches_to_braket_serialization(
+    device_factory: Callable[[], Mock], expected_match: bool
+) -> None:
+    """``compile_to_oq3`` matches ``to_braket`` serialized to OpenQASM, except on IQM.
+
+    IQM keeps measurements inside the verbatim box, which a Braket ``Circuit`` cannot do.
+    """
+    device = device_factory()
+
+    braket_circuit = to_braket(_ghz_circuit(), braket_device=device, seed_transpiler=7)
+    braket_oq3 = braket_circuit.to_ir(
+        IRType.OPENQASM,
+        serialization_properties=OpenQASMSerializationProperties(
+            qubit_reference_type=QubitReferenceType.PHYSICAL
+        ),
+    ).source
+    oq3 = compile_to_oq3(_ghz_circuit(), braket_device=device, seed_transpiler=7)
+
+    assert (oq3 == braket_oq3.replace("box{", "box {")) is expected_match
+
+
+@pytest.mark.parametrize(
+    ("include_measurement_in_verbatim", "expected_tail"),
+    [
+        (True, "b[1] = measure q[1];\n}"),
+        (False, "}\nb[0] = measure q[0];\nb[1] = measure q[1];"),
+    ],
+    ids=["included", "excluded"],
+)
+def test_to_oq3_include_measurement_in_verbatim(
+    include_measurement_in_verbatim: bool, expected_tail: str
+) -> None:
+    oq3 = to_oq3(
+        _bell_circuit(),
+        should_wrap_verbatim=True,
+        include_measurement_in_verbatim=include_measurement_in_verbatim,
+    )
+
+    assert oq3.endswith(expected_tail)
+
+
+def _iqm_device_kwargs() -> dict:
+    return {"braket_device": mock_iqm_device()}
+
+
+def _non_iqm_device_kwargs() -> dict:
+    return {"braket_device": _mock_non_iqm_device()}
+
+
+def _iqm_target_kwargs() -> dict:
+    device = mock_iqm_device()
+    return {
+        "target": aws_device_to_target(device),
+        "qubit_labels": sorted(device.topology_graph.nodes),
+    }
+
+
+def _non_iqm_target_kwargs() -> dict:
+    device = _mock_non_iqm_device()
+    return {
+        "target": aws_device_to_target(device),
+        "qubit_labels": sorted(device.topology_graph.nodes),
+    }
+
+
+@pytest.mark.parametrize(
+    ("kwargs_factory", "expected_tail"),
+    [
+        (_iqm_device_kwargs, "b[1] = measure $2;\n}"),
+        (_non_iqm_device_kwargs, "}\nb[0] = measure $1;\nb[1] = measure $2;"),
+        (_iqm_target_kwargs, "b[1] = measure $2;\n}"),
+        (_non_iqm_target_kwargs, "}\nb[0] = measure $1;\nb[1] = measure $2;"),
+    ],
+    ids=["iqm_device", "non_iqm_device", "iqm_target", "non_iqm_target"],
+)
+def test_compile_to_oq3_measurements_in_verbatim_follow_device(
+    kwargs_factory: Callable[[], dict], expected_tail: str
+) -> None:
+    oq3 = compile_to_oq3(_bell_circuit(), **kwargs_factory())
+
+    assert oq3.endswith(expected_tail)
 
 
 def test_compile_to_oq3_list_input() -> None:
@@ -248,9 +389,9 @@ def test_compile_to_oq3_output(
                 "box {\n"
                 "h $0;\n"
                 "cnot $0, $1;\n"
+                "}\n"
                 "b[0] = measure $0;\n"
-                "b[1] = measure $1;\n"
-                "}"
+                "b[1] = measure $1;"
             ),
         ),
         (
@@ -276,9 +417,9 @@ def test_compile_to_oq3_output(
                 "box {\n"
                 "h $0;\n"
                 "cnot $0, $1;\n"
+                "}\n"
                 "b[0] = measure $0;\n"
-                "b[1] = measure $1;\n"
-                "}"
+                "b[1] = measure $1;"
             ),
         ),
     ],

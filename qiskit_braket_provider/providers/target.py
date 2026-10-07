@@ -66,6 +66,9 @@ class _SubstitutedTarget(Target):
     certain gates must be replaced with hardware-specific equivalents on particular qubits
     (e.g. IonQ's GPi/GPi2/MS gate decompositions). The substitutions are applied as a
     post-transpilation pass.
+
+    ``device_arn`` records the ARN of the Braket device the target was built from, or
+    ``None`` if it was not built from a device.
     """
 
     def __new__(cls, *args, **kwargs) -> Self:
@@ -73,6 +76,7 @@ class _SubstitutedTarget(Target):
         gate_substitutes: dict[str, dict[tuple[int, ...], QiskitInstruction]] = {}
         out._gate_substitutes = gate_substitutes
         out._pass_manager = PassManager([_SubstituteGates(gate_substitutes)])
+        out.device_arn = None
         return out
 
     def _substitute(
@@ -339,6 +343,7 @@ def _qpu_target(device: AwsDevice, description: str) -> Target:
         num_qubits=len(qubit_properties or indices),
         qubit_properties=qubit_properties or None,
     )
+    target.device_arn = device.arn
     if parameter_restrictions:
         _add_instructions_parameter_restrictions(
             target,

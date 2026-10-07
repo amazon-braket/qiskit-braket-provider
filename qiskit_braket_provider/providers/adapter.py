@@ -16,6 +16,7 @@ import qiskit.quantum_info as qiskit_qi
 from qiskit import QuantumCircuit, qasm3
 from qiskit.circuit import (
     ControlledGate,
+    Gate,
     Parameter,
     ParameterExpression,
     ParameterVectorElement,
@@ -147,6 +148,30 @@ def _has_control_flow(circuit: QuantumCircuit) -> bool:
     Does not descend into ``BoxOp`` bodies — verbatim regions are the caller's.
     """
     return any(instr.operation.name in _QISKIT_CONTROL_FLOW_OPS for instr in circuit.data)
+
+
+def _is_iqm_target(target: Target | None) -> bool:
+    """Return True if ``target`` was built from an IQM device.
+
+    Braket device ARNs have the form ``arn:aws:braket:<region>::device/qpu/<provider>/<name>``.
+    """
+    arn = getattr(target, "device_arn", None)
+    if not isinstance(arn, str):
+        return False
+    parts = arn.split("/")
+    return len(parts) == 4 and parts[1] == "qpu" and parts[2].lower() == "iqm"
+
+
+def _gate_names(circuit: QuantumCircuit) -> set[str]:
+    """Return the names of all gates in ``circuit``, including those in nested blocks."""
+    names: set[str] = set()
+    for instr in circuit.data:
+        op = instr.operation
+        if isinstance(op, Gate):
+            names.add(op.name)
+        for block in getattr(op, "blocks", ()):
+            names |= _gate_names(block)
+    return names
 
 
 @overload
@@ -760,6 +785,7 @@ def to_oq3(
     basis_gates: Collection[str] | None = None,
     qubit_labels: Sequence[int] | None = None,
     should_wrap_verbatim: bool = False,
+    include_measurement_in_verbatim: bool = False,
 ) -> str:
     """Convert a compiled Qiskit QuantumCircuit to a Braket-compatible OpenQASM 3 string.
 
@@ -771,19 +797,28 @@ def to_oq3(
         circuit: A compiled Qiskit QuantumCircuit ready for serialization.
         basis_gates: Gate names to treat as basis gates during serialization.
             These should be **Qiskit** gate names (the function handles renaming
-            to Braket names internally). If ``None``, all gates in the circuit are
-            treated as basis gates.
+            to Braket names internally). If ``None``, defaults to the full set of
+            Braket-supported gates.
         qubit_labels: Physical qubit indices for the target device. If provided,
             virtual qubits are remapped to physical qubit notation (``$0``, ``$1``, etc.).
         should_wrap_verbatim: Whether to wrap the circuit in a verbatim box.
+        include_measurement_in_verbatim: Whether trailing measurements go inside the
+            verbatim box rather than after it. Only used when ``should_wrap_verbatim``
+            is ``True``. Default: ``False``.
 
     Returns:
         An OpenQASM 3 string compatible with Amazon Braket.
+
+    Raises:
+        ValueError: If the circuit contains gates outside ``basis_gates``. Such
+            gates would otherwise be serialized as ``gate`` definitions that
+            Braket cannot run; compile the circuit first, e.g. with
+            :func:`compile_to_oq3`.
     """
     pm = PassManager()
     pm.append(ConsolidateClbits())
     if should_wrap_verbatim:
-        pm.append(WrapInVerbatimBox())
+        pm.append(WrapInVerbatimBox(include_measurement=include_measurement_in_verbatim))
     pm.append(RenameGates())
     circuit = pm.run(circuit)
 
@@ -797,6 +832,13 @@ def to_oq3(
         for g in basis_gates
         if (translated := _QISKIT_TO_BRAKET_NAMES.get(g, g)) not in _NON_GATE_TARGET_OPS
     ]
+
+    if unsupported := _gate_names(circuit) - set(basis_gates) - _NON_GATE_TARGET_OPS:
+        raise ValueError(
+            f"Gates {sorted(unsupported)} are not in the basis gate set and cannot be "
+            "serialized for Braket. Use compile_to_oq3, or transpile the circuit to "
+            "supported gates first."
+        )
 
     oq3_source = qasm3.dumps(
         circuit,
@@ -848,6 +890,7 @@ def _compile_to_oq3(
     )
 
     native_path = pass_manager is not None or target is not None or braket_device is not None
+    include_measurement_in_verbatim = _is_iqm_target(result.target)
     effective_basis_gates = result.basis_gates
     if effective_basis_gates is None and result.target is not None:
         effective_basis_gates = set(result.target.operation_names) - _NON_GATE_TARGET_OPS
@@ -859,13 +902,13 @@ def _compile_to_oq3(
         elif not native_path:
             should_wrap = False
         elif _has_control_flow(circ):
-            warnings.warn(
-                "Skipping verbatim wrap for a circuit with control-flow ops "
-                "so the Braket service can post-process dynamic circuits. "
-                "Pass verbatim=True to force wrapping.",
-                stacklevel=2,
+            raise ValueError(
+                "Circuits with 'if' statements on IQM devices need a further compilation "
+                "pass that runs in the Braket service, so the service will alter the "
+                "circuit after qiskit-braket-provider compiles it. That conflicts with "
+                "compiling against a specific target, braket_device, or pass_manager. "
+                "Either omit those arguments so the service compiles the circuit."
             )
-            should_wrap = False
         else:
             should_wrap = True
 
@@ -875,6 +918,7 @@ def _compile_to_oq3(
                 basis_gates=effective_basis_gates,
                 qubit_labels=result.qubit_labels,
                 should_wrap_verbatim=should_wrap,
+                include_measurement_in_verbatim=include_measurement_in_verbatim,
             )
         )
 
@@ -932,9 +976,8 @@ def compile_to_oq3(  # type: ignore[misc]
 
             When ``False`` (default) and a compilation target is supplied
             (``target``, ``braket_device``, or ``pass_manager``), the output is
-            wrapped in a verbatim box — except for circuits containing
-            control-flow ops, which are emitted unwrapped (with a warning) so
-            the service can post-process dynamic circuits.
+            wrapped in a verbatim box. Circuits containing control-flow ops
+            raise instead, because the service must post-process them.
         basis_gates: Gate names supported by the target device (Qiskit names).
         coupling_map: Qubit connectivity as ``[control, target]`` pairs.
         optimization_level: Transpiler optimization level (0-3). Default: 0.
@@ -950,7 +993,9 @@ def compile_to_oq3(  # type: ignore[misc]
         An OpenQASM 3 string (single circuit) or list of strings (multiple circuits).
 
     Raises:
-        ValueError: If mutually exclusive compilation options are specified.
+        ValueError: If mutually exclusive compilation options are specified, or if
+            a circuit with control-flow ops is compiled against a ``target``,
+            ``braket_device``, or ``pass_manager`` without ``verbatim=True``.
         TypeError: If inputs are not QuantumCircuits.
     """
     return _compile_to_oq3(

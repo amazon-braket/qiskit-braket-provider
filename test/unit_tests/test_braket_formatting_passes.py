@@ -141,6 +141,15 @@ def _mid_measure_circuit() -> QuantumCircuit:
     return qc
 
 
+def _measure_then_condition_other_qubit_circuit() -> QuantumCircuit:
+    """A measurement whose clbit, but not qubit, is used by a later op."""
+    qc = QuantumCircuit(2, 1)
+    qc.measure(0, 0)
+    with qc.if_test((qc.clbits[0], 1)):
+        qc.x(1)
+    return qc
+
+
 def _if_else_circuit_loose_clbit() -> tuple[QuantumCircuit, Clbit]:
     """Circuit with a loose Clbit used as an IfElseOp condition."""
     qc = QuantumCircuit(1)
@@ -337,8 +346,7 @@ def test_consolidate_clbits_preserves_if_else_condition(build_circuit: Callable)
 
 
 @pytest.mark.parametrize(
-    "build_circuit,preserve_measurement_order,expected_inner_ops,expected_trailing_ops,"
-    "expected_metadata",
+    "build_circuit,include_measurement,expected_inner_ops,expected_trailing_ops,expected_metadata",
     [
         (
             _bell_circuit,
@@ -361,23 +369,39 @@ def test_consolidate_clbits_preserves_if_else_condition(build_circuit: Callable)
             ["measure", "measure"],
             {"braket_output_variables": {"c": None}},
         ),
+        (
+            _mid_measure_circuit,
+            False,
+            ["h", "measure", "cx"],
+            ["measure"],
+            {},
+        ),
+        (
+            _measure_then_condition_other_qubit_circuit,
+            False,
+            ["measure", "if_else"],
+            [],
+            {},
+        ),
     ],
     ids=[
         "measurements_outside_by_default",
-        "everything_inside_when_preserved",
+        "everything_inside_when_included",
         "preserves_metadata",
+        "mid_circuit_measure_stays_inside",
+        "measure_with_later_clbit_use_stays_inside",
     ],
 )
 def test_wrap_in_verbatim_box(
     build_circuit: Callable,
-    preserve_measurement_order: bool,
+    include_measurement: bool,
     expected_inner_ops: list[str],
     expected_trailing_ops: list[str],
     expected_metadata: dict,
 ) -> None:
-    result = PassManager([
-        WrapInVerbatimBox(preserve_measurement_order=preserve_measurement_order)
-    ]).run(build_circuit())
+    result = PassManager([WrapInVerbatimBox(include_measurement=include_measurement)]).run(
+        build_circuit()
+    )
 
     top_level_boxes = [instr for instr in result.data if isinstance(instr.operation, BoxOp)]
     assert len(top_level_boxes) == 1
@@ -394,9 +418,9 @@ def test_wrap_in_verbatim_box(
     assert result.metadata == expected_metadata
 
 
-def test_wrap_in_verbatim_box_preserves_if_else_body_when_preserving_order() -> None:
-    """When preserve_measurement_order=True, an IfElseOp is placed inside the verbatim box."""
-    result = PassManager([WrapInVerbatimBox(preserve_measurement_order=True)]).run(
+def test_wrap_in_verbatim_box_preserves_if_else_body_when_including_measurement() -> None:
+    """When include_measurement=True, an IfElseOp is placed inside the verbatim box."""
+    result = PassManager([WrapInVerbatimBox(include_measurement=True)]).run(
         _if_else_circuit_for_verbatim()
     )
 

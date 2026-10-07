@@ -74,32 +74,31 @@ class WrapInVerbatimBox(TransformationPass):
     """Wrap operations in a ``BoxOp`` labeled ``"verbatim"``.
 
     Args:
-        preserve_measurement_order: If ``True`` (default), all ops
-            (measurements included) go inside the box. If ``False``, trailing
-            measurements are placed outside; callers must guarantee
-            measurements are already at the end.
+        include_measurement: If ``True``, trailing measurements go inside the box
+            with everything else. If ``False`` (default), the run of measurements at
+            the end of the circuit is placed outside; earlier measurements always
+            stay inside so circuit order is preserved.
     """
 
-    def __init__(self, preserve_measurement_order: bool = True):
+    def __init__(self, include_measurement: bool = False):
         super().__init__()
-        self._preserve_measurement_order = preserve_measurement_order
+        self._include_measurement = include_measurement
 
     def run(self, dag: DAGCircuit) -> DAGCircuit:
         """Wrap operations in a verbatim ``BoxOp``."""
         circuit = dag_to_circuit(dag)
-        inner = QuantumCircuit(*circuit.qregs, *circuit.cregs)
-        trailing_measurements = []
+        split = len(circuit.data)
+        if not self._include_measurement:
+            while split > 0 and isinstance(circuit.data[split - 1].operation, Measure):
+                split -= 1
 
-        for instr in circuit.data:
-            is_measure = isinstance(instr.operation, Measure)
-            if is_measure and not self._preserve_measurement_order:
-                trailing_measurements.append(instr)
-            else:
-                inner.append(instr.operation, instr.qubits, instr.clbits)
+        inner = QuantumCircuit(*circuit.qregs, *circuit.cregs)
+        for instr in circuit.data[:split]:
+            inner.append(instr.operation, instr.qubits, instr.clbits)
 
         result = QuantumCircuit(*circuit.qregs, *circuit.cregs)
         result.append(BraketVerbatimBox(inner), result.qubits, result.clbits)
-        for instr in trailing_measurements:
+        for instr in circuit.data[split:]:
             result.append(instr.operation, instr.qubits, instr.clbits)
 
         result.metadata = dag.metadata
