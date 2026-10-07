@@ -13,6 +13,7 @@ from typing import Self, TypeAlias
 from qiskit import QuantumCircuit
 from qiskit.circuit import (
     Barrier,
+    IfElseOp,
     Measure,
     Parameter,
 )
@@ -274,9 +275,16 @@ def _simulator_target(device: Device, description: str) -> Target:
         for gate in _get_controlled_gateset(target.keys(), max_control):
             if gate in _STANDARD_GATE_NAME_MAPPING:
                 target.add_instruction(_STANDARD_GATE_NAME_MAPPING[gate])
+        _add_control_flow(target, action)
     target.add_instruction(Measure())
     target.add_instruction(Barrier(1))
     return target
+
+
+def _add_control_flow(target: Target, action: OpenQASMDeviceActionProperties) -> None:
+    """Register IfElseOp if the device advertises OpenQASM ``if`` support."""
+    if "if" in {op.lower() for op in action.supportedOperations}:
+        target.add_instruction(IfElseOp, name="if_else")
 
 
 def _qpu_target(device: AwsDevice, description: str) -> Target:
@@ -363,6 +371,12 @@ def _qpu_target(device: AwsDevice, description: str) -> Target:
 
     if "barrier" in properties.paradigm.nativeGateSet:
         target.add_instruction(Barrier(1))
+
+    if isinstance(
+        action := properties.action.get(DeviceActionType.OPENQASM),
+        OpenQASMDeviceActionProperties,
+    ):
+        _add_control_flow(target, action)
 
     # Add measurement if not already added
     if "measure" not in target:
