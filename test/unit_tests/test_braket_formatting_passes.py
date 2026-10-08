@@ -20,7 +20,6 @@ from qiskit_braket_provider.providers.gate_mappings import (
 )
 from qiskit_braket_provider.providers.passes import (
     ConsolidateClbits,
-    MoveMeasurementsToEnd,
     RenameGates,
     WrapInVerbatimBox,
 )
@@ -139,6 +138,15 @@ def _mid_measure_circuit() -> QuantumCircuit:
     qc.measure(0, 0)
     qc.cx(0, 1)
     qc.measure(1, 1)
+    return qc
+
+
+def _measure_then_condition_other_qubit_circuit() -> QuantumCircuit:
+    """A measurement whose clbit, but not qubit, is used by a later op."""
+    qc = QuantumCircuit(2, 1)
+    qc.measure(0, 0)
+    with qc.if_test((qc.clbits[0], 1)):
+        qc.x(1)
     return qc
 
 
@@ -277,7 +285,6 @@ def _dumps_with_passes(circuit: QuantumCircuit, *, basis_gates: list[str], verba
     """Run the passes and dump to OQ3"""
     pm = PassManager()
     pm.append(ConsolidateClbits())
-    pm.append(MoveMeasurementsToEnd())
     if verbatim:
         pm.append(WrapInVerbatimBox())
     pm.append(RenameGates())
@@ -339,24 +346,7 @@ def test_consolidate_clbits_preserves_if_else_condition(build_circuit: Callable)
 
 
 @pytest.mark.parametrize(
-    "build_circuit,dynamic_circuits_supported,expected_op_order",
-    [
-        (_mid_measure_circuit, False, ["h", "cx", "measure", "measure"]),
-        (_mid_measure_circuit, True, ["h", "measure", "cx", "measure"]),
-        (_bell_circuit, False, ["h", "cx", "measure", "measure"]),
-    ],
-    ids=["reorders_mid_measure", "dynamic_circuits_noop", "already_at_end_noop"],
-)
-def test_move_measurements_to_end(
-    build_circuit: Callable, dynamic_circuits_supported: bool, expected_op_order: list[str]
-) -> None:
-    result = PassManager([MoveMeasurementsToEnd(dynamic_circuits_supported)]).run(build_circuit())
-    assert [instr.operation.name for instr in result.data] == expected_op_order
-
-
-@pytest.mark.parametrize(
-    "build_circuit,dynamic_circuits_supported,expected_inner_ops,expected_trailing_ops,"
-    "expected_metadata",
+    "build_circuit,include_measurement,expected_inner_ops,expected_trailing_ops,expected_metadata",
     [
         (
             _bell_circuit,
@@ -379,23 +369,39 @@ def test_move_measurements_to_end(
             ["measure", "measure"],
             {"braket_output_variables": {"c": None}},
         ),
+        (
+            _mid_measure_circuit,
+            False,
+            ["h", "measure", "cx"],
+            ["measure"],
+            {},
+        ),
+        (
+            _measure_then_condition_other_qubit_circuit,
+            False,
+            ["measure", "if_else"],
+            [],
+            {},
+        ),
     ],
     ids=[
         "measurements_outside_by_default",
-        "everything_inside_when_dynamic",
+        "everything_inside_when_included",
         "preserves_metadata",
+        "mid_circuit_measure_stays_inside",
+        "measure_with_later_clbit_use_stays_inside",
     ],
 )
 def test_wrap_in_verbatim_box(
     build_circuit: Callable,
-    dynamic_circuits_supported: bool,
+    include_measurement: bool,
     expected_inner_ops: list[str],
     expected_trailing_ops: list[str],
     expected_metadata: dict,
 ) -> None:
-    result = PassManager([
-        WrapInVerbatimBox(dynamic_circuits_supported=dynamic_circuits_supported)
-    ]).run(build_circuit())
+    result = PassManager([WrapInVerbatimBox(include_measurement=include_measurement)]).run(
+        build_circuit()
+    )
 
     top_level_boxes = [instr for instr in result.data if isinstance(instr.operation, BoxOp)]
     assert len(top_level_boxes) == 1
@@ -412,9 +418,9 @@ def test_wrap_in_verbatim_box(
     assert result.metadata == expected_metadata
 
 
-def test_wrap_in_verbatim_box_preserves_if_else_body_when_dynamic() -> None:
-    """When dynamic_circuits_supported=True, an IfElseOp is placed inside the verbatim box."""
-    result = PassManager([WrapInVerbatimBox(dynamic_circuits_supported=True)]).run(
+def test_wrap_in_verbatim_box_preserves_if_else_body_when_including_measurement() -> None:
+    """When include_measurement=True, an IfElseOp is placed inside the verbatim box."""
+    result = PassManager([WrapInVerbatimBox(include_measurement=True)]).run(
         _if_else_circuit_for_verbatim()
     )
 

@@ -70,75 +70,35 @@ def _plain_register_name(taken: set) -> str:
     return f"b{i}"
 
 
-class MoveMeasurementsToEnd(TransformationPass):
-    """Reorder the DAG so all measurements appear at the end.
-
-    Skips when the target device supports dynamic (mid-circuit) measurements,
-    where measurement ordering carries semantic meaning and must not be
-    rewritten.
-
-    Args:
-        dynamic_circuits_supported: If ``True``, the pass returns the DAG
-            unchanged. Default: ``False``.
-    """
-
-    def __init__(self, dynamic_circuits_supported: bool = False):
-        super().__init__()
-        self._dynamic_circuits_supported = dynamic_circuits_supported
-
-    def run(self, dag: DAGCircuit) -> DAGCircuit:
-        """Move every ``Measure`` op to the end of the DAG."""
-        if self._dynamic_circuits_supported:
-            return dag
-
-        new_dag = dag.copy_empty_like()
-        measurements = []
-        for node in dag.topological_op_nodes():
-            if isinstance(node.op, Measure):
-                measurements.append(node)
-            else:
-                new_dag.apply_operation_back(node.op, node.qargs, node.cargs)
-        for node in measurements:
-            new_dag.apply_operation_back(node.op, node.qargs, node.cargs)
-        return new_dag
-
-
 class WrapInVerbatimBox(TransformationPass):
     """Wrap operations in a ``BoxOp`` labeled ``"verbatim"``.
 
-    The ``dynamic_circuits_supported`` flag mirrors the one on
-    :class:`MoveMeasurementsToEnd`: it describes whether the target device
-    can execute measurements that appear anywhere in the program.
-
     Args:
-        dynamic_circuits_supported: If ``True``, every operation goes inside
-            the verbatim box; measurement ordering is preserved. If ``False``
-            (default), trailing measurements are placed outside the box.
-            When ``False``, callers are expected to have run
-            :class:`MoveMeasurementsToEnd` first (or otherwise guaranteed that
-            all measurements are at the end of the circuit).
+        include_measurement: If ``True``, trailing measurements go inside the box
+            with everything else. If ``False`` (default), the run of measurements at
+            the end of the circuit is placed outside; earlier measurements always
+            stay inside so circuit order is preserved.
     """
 
-    def __init__(self, dynamic_circuits_supported: bool = False):
+    def __init__(self, include_measurement: bool = False):
         super().__init__()
-        self._dynamic_circuits_supported = dynamic_circuits_supported
+        self._include_measurement = include_measurement
 
     def run(self, dag: DAGCircuit) -> DAGCircuit:
         """Wrap operations in a verbatim ``BoxOp``."""
         circuit = dag_to_circuit(dag)
-        inner = QuantumCircuit(*circuit.qregs, *circuit.cregs)
-        trailing_measurements = []
+        split = len(circuit.data)
+        if not self._include_measurement:
+            while split > 0 and isinstance(circuit.data[split - 1].operation, Measure):
+                split -= 1
 
-        for instr in circuit.data:
-            is_measure = isinstance(instr.operation, Measure)
-            if is_measure and not self._dynamic_circuits_supported:
-                trailing_measurements.append(instr)
-            else:
-                inner.append(instr.operation, instr.qubits, instr.clbits)
+        inner = QuantumCircuit(*circuit.qregs, *circuit.cregs)
+        for instr in circuit.data[:split]:
+            inner.append(instr.operation, instr.qubits, instr.clbits)
 
         result = QuantumCircuit(*circuit.qregs, *circuit.cregs)
         result.append(BraketVerbatimBox(inner), result.qubits, result.clbits)
-        for instr in trailing_measurements:
+        for instr in circuit.data[split:]:
             result.append(instr.operation, instr.qubits, instr.clbits)
 
         result.metadata = dag.metadata

@@ -75,6 +75,29 @@ _BRAKET_TO_QISKIT_NAMES = {
     "kraus": "kraus",
 }
 
+"""Reverse of :data:`_BRAKET_TO_QISKIT_NAMES` — maps Qiskit gate names to Braket names."""
+_QISKIT_TO_BRAKET_NAMES = {
+    qiskit_name: braket_name for braket_name, qiskit_name in _BRAKET_TO_QISKIT_NAMES.items()
+}
+
+"""Qiskit op names that are not gate calls in the emitted OpenQASM 3.
+
+Excluded from ``basis_gates`` when filtering a ``Target``'s
+``operation_names`` or caller-supplied gate names in :func:`compile_to_oq3`.
+"""
+_NON_GATE_TARGET_OPS = frozenset({
+    "measure",
+    "barrier",
+    "box",
+    "gphase",
+    "if_else",
+})
+
+"""Qiskit-side op names for control-flow constructs."""
+_QISKIT_CONTROL_FLOW_OPS = frozenset({
+    "if_else",
+})
+
 _CONTROLLED_GATES_BY_QUBIT_COUNT = {
     1: {
         "ch": "h",

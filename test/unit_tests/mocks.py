@@ -4,6 +4,7 @@ import copy
 import enum
 import uuid
 from collections import Counter
+from unittest.mock import Mock
 
 import numpy as np
 from networkx import DiGraph, from_dict_of_lists, relabel_nodes
@@ -11,7 +12,9 @@ from qiskit import QuantumCircuit
 from qiskit.providers import Options
 from qiskit.transpiler import Target
 
+from braket.aws import AwsDevice, AwsDeviceType
 from braket.device_schema import StandardizedGateModelQpuDeviceProperties
+from braket.device_schema.iqm import IqmDeviceCapabilities
 from braket.device_schema.rigetti import RigettiDeviceCapabilities
 from braket.device_schema.simulators import GateModelSimulatorDeviceCapabilities
 from braket.task_result import ProgramSetTaskResult, TaskMetadata
@@ -478,6 +481,65 @@ def mock_emulator_capabilities(*, program_sets: bool = False) -> RigettiDeviceCa
     capabilities = RigettiDeviceCapabilities.parse_obj(capabilities_json)
     capabilities.standardized = MOCK_EMULATOR_STANDARDIZED_PROPERTIES
     return capabilities
+
+
+IQM_ARN = "arn:aws:braket:eu-north-1::device/qpu/iqm/Emerald"
+
+_MOCK_IQM_NUM_QUBITS = 5
+
+MOCK_IQM_CAPABILITIES_JSON = {
+    "braketSchemaHeader": {
+        "name": "braket.device_schema.iqm.iqm_device_capabilities",
+        "version": "1",
+    },
+    "service": {
+        "executionWindows": [
+            {
+                "executionDay": "Everyday",
+                "windowStartHour": "00:00",
+                "windowEndHour": "23:59:59",
+            }
+        ],
+        "shotsRange": [1, 20000],
+    },
+    "action": {
+        "braket.ir.openqasm.program": {
+            "actionType": "braket.ir.openqasm.program",
+            "version": ["1"],
+            "supportedOperations": ["prx", "cz", "measure", "if"],
+            "supportedResultTypes": [],
+        }
+    },
+    "paradigm": {
+        "qubitCount": _MOCK_IQM_NUM_QUBITS,
+        "nativeGateSet": ["prx", "cz"],
+        "connectivity": {
+            "fullyConnected": False,
+            "connectivityGraph": {str(q): [str(q + 1)] for q in range(1, _MOCK_IQM_NUM_QUBITS)},
+        },
+    },
+    "deviceParameters": {},
+}
+
+
+def mock_iqm_device(*, supports_if: bool = True) -> Mock:
+    """Return a mock IQM ``AwsDevice`` with a linear topology and ``prx``/``cz`` native gates.
+
+    When ``supports_if`` is false, ``if`` is dropped from the advertised OpenQASM operations.
+    """
+    capabilities_json: dict = copy.deepcopy(MOCK_IQM_CAPABILITIES_JSON)
+    if not supports_if:
+        action = capabilities_json["action"]["braket.ir.openqasm.program"]
+        action["supportedOperations"].remove("if")
+    edges = [(q, q + 1) for q in range(1, _MOCK_IQM_NUM_QUBITS)]
+    device = Mock(spec=AwsDevice)
+    device.type = AwsDeviceType.QPU
+    device.name = "Emerald"
+    device.arn = IQM_ARN
+    device.properties = IqmDeviceCapabilities.parse_obj(capabilities_json)
+    device.topology_graph = DiGraph(edges + [(v, u) for u, v in edges])
+    device.gate_calibrations = None
+    return device
 
 
 class MockBraketBackend(BraketBackend):
