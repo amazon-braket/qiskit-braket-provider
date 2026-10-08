@@ -890,7 +890,7 @@ def _compile_to_oq3(
     )
 
     native_path = pass_manager is not None or target is not None or braket_device is not None
-    include_measurement_in_verbatim = _is_iqm_target(result.target)
+    is_iqm = _is_iqm_target(result.target)
     effective_basis_gates = result.basis_gates
     if effective_basis_gates is None and result.target is not None:
         effective_basis_gates = set(result.target.operation_names) - _NON_GATE_TARGET_OPS
@@ -901,24 +901,28 @@ def _compile_to_oq3(
             should_wrap = True
         elif not native_path:
             should_wrap = False
-        elif _has_control_flow(circ):
+        elif _has_control_flow(circ) and is_iqm:
             raise ValueError(
                 "Circuits with 'if' statements on IQM devices need a further compilation "
                 "pass that runs in the Braket service, so the service will alter the "
                 "circuit after qiskit-braket-provider compiles it. That conflicts with "
                 "compiling against a specific target, braket_device, or pass_manager. "
-                "Either omit those arguments so the service compiles the circuit."
+                "Omit those arguments so the service compiles the circuit."
             )
         else:
             should_wrap = True
+
+        qubit_labels = result.qubit_labels
+        if qubit_labels is not None and len(qubit_labels) > circ.num_qubits:
+            qubit_labels = qubit_labels[: circ.num_qubits]
 
         oq3_strings.append(
             to_oq3(
                 circ,
                 basis_gates=effective_basis_gates,
-                qubit_labels=result.qubit_labels,
+                qubit_labels=qubit_labels,
                 should_wrap_verbatim=should_wrap,
-                include_measurement_in_verbatim=include_measurement_in_verbatim,
+                include_measurement_in_verbatim=is_iqm,
             )
         )
 
@@ -976,8 +980,8 @@ def compile_to_oq3(  # type: ignore[misc]
 
             When ``False`` (default) and a compilation target is supplied
             (``target``, ``braket_device``, or ``pass_manager``), the output is
-            wrapped in a verbatim box. Circuits containing control-flow ops
-            raise instead, because the service must post-process them.
+            wrapped in a verbatim box. Circuits containing control-flow ops on an
+            IQM target raise instead, because the service must post-process them.
         basis_gates: Gate names supported by the target device (Qiskit names).
         coupling_map: Qubit connectivity as ``[control, target]`` pairs.
         optimization_level: Transpiler optimization level (0-3). Default: 0.
@@ -994,8 +998,8 @@ def compile_to_oq3(  # type: ignore[misc]
 
     Raises:
         ValueError: If mutually exclusive compilation options are specified, or if
-            a circuit with control-flow ops is compiled against a ``target``,
-            ``braket_device``, or ``pass_manager`` without ``verbatim=True``.
+            a circuit with control-flow ops is compiled against an IQM ``target`` or
+            ``braket_device`` without ``verbatim=True``.
         TypeError: If inputs are not QuantumCircuits.
     """
     return _compile_to_oq3(

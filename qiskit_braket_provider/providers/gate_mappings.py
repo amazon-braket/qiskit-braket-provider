@@ -91,13 +91,11 @@ _NON_GATE_TARGET_OPS = frozenset({
     "box",
     "gphase",
     "if_else",
-    "for_loop",
 })
 
 """Qiskit-side op names for control-flow constructs."""
 _QISKIT_CONTROL_FLOW_OPS = frozenset({
     "if_else",
-    "for_loop",
 })
 
 _CONTROLLED_GATES_BY_QUBIT_COUNT = {

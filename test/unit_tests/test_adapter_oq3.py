@@ -73,6 +73,15 @@ def _rccx_in_if_else_circuit() -> QuantumCircuit:
     return qc
 
 
+def _prx_circuit() -> QuantumCircuit:
+    """Two-qubit circuit already in IQM's native gates (``RGate`` is ``prx``)."""
+    qc = QuantumCircuit(2, 2)
+    qc.r(0.5, 0, 0)
+    qc.r(0.25, 0, 1)
+    qc.measure([0, 1], [0, 1])
+    return qc
+
+
 def _if_else_circuit() -> QuantumCircuit:
     """Small circuit with a top-level ``IfElseOp``."""
     true_body = QuantumCircuit(1, 1)
@@ -100,6 +109,12 @@ def _mock_non_iqm_device() -> Mock:
     device = mock_iqm_device()
     device.arn = "arn:aws:braket:us-west-1::device/qpu/rigetti/Ankaa-3"
     return device
+
+
+def _if_else_device_target(device_factory: Callable[[], Mock]) -> Target:
+    target = aws_device_to_target(device_factory())
+    target.add_instruction(IfElseOp, name="if_else")
+    return target
 
 
 def _iqm_device_kwargs() -> dict:
@@ -208,9 +223,22 @@ def test_has_control_flow(circuit_factory: Callable[[], QuantumCircuit], expecte
     assert _has_control_flow(circuit_factory()) is expected
 
 
-def test_compile_to_oq3_raises_on_native_path_with_control_flow() -> None:
-    with pytest.raises(ValueError, match="'if' statements on IQM devices"):
-        compile_to_oq3(_if_else_circuit(), target=_if_else_target())
+@pytest.mark.parametrize(
+    ("device_factory", "should_raise"),
+    [(mock_iqm_device, True), (_mock_non_iqm_device, False)],
+    ids=["iqm", "non_iqm"],
+)
+def test_compile_to_oq3_control_flow_on_native_path_raises_only_for_iqm(
+    device_factory: Callable[[], Mock], should_raise: bool
+) -> None:
+    target = _if_else_device_target(device_factory)
+
+    if should_raise:
+        with pytest.raises(ValueError, match="'if' statements on IQM devices"):
+            compile_to_oq3(_if_else_circuit(), target=target)
+    else:
+        oq3 = compile_to_oq3(_if_else_circuit(), target=target)
+        assert "if (b[0]) {" in oq3
 
 
 def test_compile_to_oq3_wraps_verbatim_when_explicit_even_with_control_flow() -> None:
@@ -230,6 +258,13 @@ def test_compile_to_oq3_verbatim_keeps_mid_circuit_measurement_in_box() -> None:
     oq3 = compile_to_oq3(qc, verbatim=True)
 
     assert "box {\nb[0] = measure q[0];\nx q[0];\n}\nb[1] = measure q[0];" in oq3
+
+
+def test_compile_to_oq3_verbatim_with_device_wider_than_circuit() -> None:
+    """Verbatim skips widening, so only the first circuit-width device labels are used."""
+    oq3 = compile_to_oq3(_prx_circuit(), braket_device=mock_iqm_device(), verbatim=True)
+
+    _assert_contents(oq3, ["prx(0.5, 0.0) $1;", "prx(0.25, 0.0) $2;"], ["$3", "$4", "$5"])
 
 
 @pytest.mark.parametrize(
