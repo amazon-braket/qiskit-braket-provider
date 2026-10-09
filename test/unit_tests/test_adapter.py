@@ -1357,7 +1357,7 @@ class TestAdapter(TestCase):
 
         with pytest.raises(
             NotImplementedError,
-            match=r"Conditional operations are not supported.*Only MeasureFF and CCPRx",
+            match=r"Control-flow operation 'if_else' cannot be represented.*compile_to_oq3",
         ):
             to_braket(qc, verbatim=True)
 
@@ -1375,7 +1375,7 @@ class TestAdapter(TestCase):
 
         with pytest.raises(
             NotImplementedError,
-            match=r"Conditional operations are not supported.*Only MeasureFF and CCPRx",
+            match=r"Control-flow operation 'while_loop' cannot be represented.*compile_to_oq3",
         ):
             to_braket(qc, verbatim=True)
 

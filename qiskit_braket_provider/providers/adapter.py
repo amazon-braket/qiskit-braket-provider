@@ -15,6 +15,7 @@ import qiskit.circuit.library as qiskit_gates
 import qiskit.quantum_info as qiskit_qi
 from qiskit import QuantumCircuit, qasm3
 from qiskit.circuit import (
+    ControlFlowOp,
     ControlledGate,
     Gate,
     Parameter,
@@ -358,6 +359,13 @@ def _translate_to_braket(
     for circuit_instruction in circuit.data:
         operation = circuit_instruction.operation
         qubits = circuit_instruction.qubits
+
+        if isinstance(operation, ControlFlowOp):
+            raise NotImplementedError(
+                f"Control-flow operation '{operation.name}' cannot be represented in a "
+                "Braket Circuit. Use compile_to_oq3 to compile circuits with control flow "
+                "to OpenQASM 3."
+            )
 
         if getattr(operation, "condition", None):
             raise NotImplementedError(
