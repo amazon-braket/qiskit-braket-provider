@@ -13,7 +13,11 @@ from braket.devices import LocalSimulator
 from braket.ir.openqasm import Program
 from qiskit_braket_provider.providers import adapter
 from qiskit_braket_provider.providers.compilation import _default_target
-from qiskit_braket_provider.providers.target import aws_device_to_target, local_simulator_to_target
+from qiskit_braket_provider.providers.target import (
+    aws_device_to_target,
+    local_simulator_to_target,
+    native_gate_set,
+)
 
 from .mocks import mock_iqm_device
 
@@ -69,17 +73,32 @@ def test_compile_to_oq3_default_target_emits_if_block() -> None:
     assert all(outcome[1] == "0" for outcome in counts)
 
 
-def test_compile_to_oq3_iqm_device_emits_unwrapped_if_block() -> None:
-    with pytest.warns(UserWarning, match="control-flow"):
-        oq3 = adapter.compile_to_oq3(
-            _reset_circuit(), braket_device=mock_iqm_device(), optimization_level=1
-        )
+def test_compile_to_oq3_default_path_with_iqm_native_gates() -> None:
+    """IQM circuits with ``if`` compile on the default path, leaving the service pass to run."""
+    basis_gates = native_gate_set(mock_iqm_device().properties)
+
+    oq3 = adapter.compile_to_oq3(_reset_circuit(), basis_gates=basis_gates, optimization_level=1)
 
     assert "if (b[0]) {\nprx(" in oq3
     assert "#pragma braket verbatim" not in oq3
-    assert "b[1] = measure $" in oq3
     assert "h " not in oq3
     assert "x " not in oq3
+    counts = LocalSimulator().run(Program(source=oq3), shots=100).result().measurement_counts
+    assert all(outcome[1] == "0" for outcome in counts)
+
+
+def test_to_braket_default_path_rejects_if_else() -> None:
+    """The default target accepts if_else, but a Braket Circuit cannot represent it."""
+    with pytest.raises(
+        NotImplementedError, match="Control-flow operation 'if_else' cannot be represented"
+    ):
+        adapter.to_braket(_reset_circuit())
+
+
+def test_compile_to_oq3_iqm_device_with_if_raises() -> None:
+    """IQM devices advertise ``if``, but the service must post-process such circuits."""
+    with pytest.raises(ValueError, match="'if' statements on IQM devices"):
+        adapter.compile_to_oq3(_reset_circuit(), braket_device=mock_iqm_device())
 
 
 def test_compile_to_oq3_iqm_device_without_if_support_raises() -> None:
