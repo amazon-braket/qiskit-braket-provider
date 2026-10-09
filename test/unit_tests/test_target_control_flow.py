@@ -1,14 +1,10 @@
 """Tests for registering control-flow ops on Braket-derived transpiler targets."""
 
-from unittest.mock import Mock
-
 import pytest
 from qiskit import QuantumCircuit
 from qiskit.transpiler.exceptions import TranspilerError
 
 import qiskit_braket_provider
-from braket.aws import AwsDeviceType
-from braket.device_schema import DeviceActionType
 from braket.devices import LocalSimulator
 from braket.ir.openqasm import Program
 from qiskit_braket_provider.providers import adapter
@@ -19,7 +15,7 @@ from qiskit_braket_provider.providers.target import (
     native_gate_set,
 )
 
-from .mocks import mock_iqm_device
+from .mocks import mock_iqm_device, mock_simulator_device
 
 
 def _reset_circuit() -> QuantumCircuit:
@@ -34,18 +30,6 @@ def _reset_circuit() -> QuantumCircuit:
     return qc
 
 
-def _simulator_device(*, supports_if: bool) -> Mock:
-    properties = LocalSimulator("braket_sv").properties.copy(deep=True)
-    action = properties.action[DeviceActionType.OPENQASM]
-    if supports_if:
-        action.supportedOperations = [*action.supportedOperations, "if"]
-    device = Mock()
-    device.type = AwsDeviceType.SIMULATOR
-    device.name = "sv1"
-    device.properties = properties
-    return device
-
-
 @pytest.mark.parametrize("supports_if", [True, False])
 def test_qpu_target_if_else_follows_supported_operations(supports_if: bool) -> None:
     target = aws_device_to_target(mock_iqm_device(supports_if=supports_if))
@@ -55,7 +39,7 @@ def test_qpu_target_if_else_follows_supported_operations(supports_if: bool) -> N
 
 @pytest.mark.parametrize("supports_if", [True, False])
 def test_simulator_target_if_else_follows_supported_operations(supports_if: bool) -> None:
-    device = _simulator_device(supports_if=supports_if)
+    device = mock_simulator_device(supports_if=supports_if)
 
     assert ("if_else" in aws_device_to_target(device).operation_names) is supports_if
     assert ("if_else" in local_simulator_to_target(device).operation_names) is supports_if
