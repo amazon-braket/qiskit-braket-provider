@@ -21,6 +21,7 @@ from qiskit_algorithms.optimizers import SLSQP
 from braket.aws import AwsDevice, AwsQuantumTaskBatch
 from braket.aws.queue_information import QueueDepthInfo, QueueType
 from braket.circuits import Circuit
+from braket.circuits.serialization import IRType
 from braket.device_schema import DeviceActionType
 from braket.device_schema.openqasm_program_set_device_action_properties import (
     OpenQASMProgramSetDeviceActionProperties,
@@ -39,12 +40,14 @@ from qiskit_braket_provider import (
 )
 from qiskit_braket_provider.providers.adapter import native_gate_connectivity
 from qiskit_braket_provider.providers.braket_sampler import BraketSampler
+from qiskit_braket_provider.providers.target import aws_device_to_target
 from test.unit_tests.mocks import (
     MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES,
     MOCK_RIGETTI_M_3_QPU_CAPABILITIES,
     MOCK_RIGETTI_STANARDIZED_PROPERTIES,
     MOCK_RIGETTI_TOPOLOGY_GRAPH,
     MockMeasLevelEnum,
+    mock_calibrated_rigetti_device,
     mock_emulator_capabilities,
     mock_emulator_topology,
 )
@@ -711,3 +714,56 @@ class TestEmulatorBackend(TestCase):
         """Tests BraketSampler accepts emulator backends that support program sets."""
         backend = self._emulator_backend(program_sets=True)
         self.assertIsInstance(BraketSampler(backend), BraketSampler)
+
+
+def test_verbatim_native_rigetti_circuit_preserves_rx_and_barrier():
+    """Verbatim submission of a native Rigetti circuit keeps rx/barrier and emits no v/vi.
+
+    Regression test for issue #399: an already-native circuit transpiled against a
+    calibrated Rigetti target contains sx/sxdg; the verbatim path must rename them back
+    to rx (via the backend target's substitution pass) and keep the barrier.
+    """
+    device = mock_calibrated_rigetti_device()
+    backend = BraketAwsBackend(device=device)
+
+    captured: dict[str, list[Circuit]] = {}
+
+    def capture_run_batch(circuits: list[Circuit], **_) -> Mock:
+        captured["circuits"] = circuits
+        task = Mock(spec=LocalQuantumTask)
+        task.id = "0"
+        batch = Mock(spec=AwsQuantumTaskBatch)
+        batch.tasks = [task]
+        return batch
+
+    device.run_batch = capture_run_batch
+
+    circuit = QuantumCircuit(2)
+    circuit.rz(1.5707963267948966, 0)
+    circuit.sx(0)
+    circuit.sxdg(1)
+    circuit.barrier()
+    circuit.cz(0, 1)
+
+    backend.run(circuit, shots=10, verbatim=True)
+
+    source = captured["circuits"][0].to_ir(ir_type=IRType.OPENQASM).source
+    assert "rx(1.5707963267948966)" in source
+    assert "rx(-1.5707963267948966)" in source
+    assert "barrier" in source
+    assert "v $" not in source
+    assert "vi $" not in source
+
+
+def test_substitute_leaves_gate_unchanged_without_substitute():
+    """_SubstituteGates leaves a node unchanged (no KeyError) when its qubits have no substitute."""
+    target = aws_device_to_target(mock_calibrated_rigetti_device())
+    assert "sx" in target._gate_substitutes
+    target._gate_substitutes["sx"].pop((0,), None)
+
+    circuit = QuantumCircuit(2)
+    circuit.sx(0)
+
+    result = target._substitute(circuit)
+
+    assert [instr.operation.name for instr in result.data] == ["sx"]

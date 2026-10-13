@@ -103,10 +103,9 @@ class _SubstituteGates(TransformationPass):
             return dag
         qubits = {q: i for i, q in enumerate(dag.qubits)}
         for node in dag.op_nodes():
-            if (op_name := node.op.name) in self._gate_substitutes:
-                dag.substitute_node(
-                    node, self._gate_substitutes[op_name][tuple(qubits[q] for q in node.qargs)]
-                )
+            substitutes = self._gate_substitutes.get(node.op.name, {})
+            if substitute := substitutes.get(tuple(qubits[q] for q in node.qargs)):
+                dag.substitute_node(node, substitute)
         return dag
 
 
