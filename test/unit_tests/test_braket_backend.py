@@ -717,12 +717,7 @@ class TestEmulatorBackend(TestCase):
 
 
 def test_verbatim_native_rigetti_circuit_preserves_rx_and_barrier():
-    """Verbatim submission of a native Rigetti circuit keeps rx/barrier and emits no v/vi.
-
-    Regression test for issue #399: an already-native circuit transpiled against a
-    calibrated Rigetti target contains sx/sxdg; the verbatim path must rename them back
-    to rx (via the backend target's substitution pass) and keep the barrier.
-    """
+    """Verbatim submission of a native Rigetti circuit keeps rx/barrier and emits no v/vi."""
     device = mock_calibrated_rigetti_device()
     backend = BraketAwsBackend(device=device)
 
