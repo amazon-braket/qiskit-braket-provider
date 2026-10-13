@@ -10,7 +10,8 @@ from dataclasses import dataclass
 
 from qiskit import QuantumCircuit, generate_preset_pass_manager
 from qiskit.circuit import Barrier, BoxOp, Measure
-from qiskit.transpiler import PassManager, StagedPassManager, Target
+from qiskit.circuit import Instruction as QiskitInstruction
+from qiskit.transpiler import CouplingMap, PassManager, StagedPassManager, Target
 
 from braket.aws import AwsDevice
 from braket.devices import Device
@@ -18,6 +19,8 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_TO_QISKIT_NAMES,
     _BRAKET_VERBATIM_BOX_NAME,
+    _QISKIT_TO_BRAKET_NAMES,
+    _STANDARD_GATE_NAME_MAPPING,
 )
 from qiskit_braket_provider.providers.passes import (
     ExtractVerbatimBoxes,
@@ -62,6 +65,70 @@ def _default_target(circuits: Iterable[QuantumCircuit]) -> Target:
     target.add_instruction(Measure())
     target.add_instruction(Barrier(1))
     return target
+
+
+def _has_nonstandard_basis_gate(basis_gates: Collection[str]) -> bool:
+    """Return whether any name in ``basis_gates`` is not a standard Qiskit gate name."""
+    return any(name not in _STANDARD_GATE_NAME_MAPPING for name in basis_gates)
+
+
+def _nonstandard_basis_target(
+    basis_gates: Collection[str],
+    circuits: Sequence[QuantumCircuit],
+    coupling_map: list[list[int]] | None,
+) -> Target:
+    """Build a transpiler ``Target`` for a basis set containing non-standard gate names.
+
+    Qiskit 2.x rejects non-standard gate names (such as ``cphaseshift01``) passed through
+    the ``basis_gates`` argument of :func:`generate_preset_pass_manager`; they must be
+    supplied via a ``Target`` with a ``custom_name_mapping`` instead. This helper constructs
+    such a target from the Braket-derived gate instances in
+    :data:`_BRAKET_GATE_NAME_TO_QISKIT_GATE`.
+
+    Entries that map to Qiskit classes rather than instruction instances (``unitary`` and
+    ``kraus``) cannot be placed in a ``Target`` and are dropped from the basis set.
+    ``measure`` is always included.
+
+    The returned target is intended solely for transpilation via
+    :func:`generate_preset_pass_manager`. It must not be reused as the translation target,
+    because a target built with a coupling map carries per-qubit/per-edge entries that would
+    incorrectly trigger verbatim-box wrapping during translation.
+
+    Args:
+        basis_gates: Qiskit gate names supported by the target device.
+        circuits: Circuits being compiled, used to size the target.
+        coupling_map: Qubit connectivity as 0-indexed ``[control, target]`` pairs, if any.
+
+    Returns:
+        A :class:`~qiskit.transpiler.Target` describing the basis gates and connectivity.
+
+    Raises:
+        ValueError: If a name is neither a standard Qiskit gate nor a known Braket gate.
+    """
+    target_basis_gates: list[str] = []
+    custom_name_mapping: dict[str, QiskitInstruction] = {}
+    for name in dict.fromkeys([*basis_gates, "measure"]):
+        if name not in _STANDARD_GATE_NAME_MAPPING:
+            instruction = _BRAKET_GATE_NAME_TO_QISKIT_GATE.get(
+                _QISKIT_TO_BRAKET_NAMES.get(name, name)
+            )
+            if instruction is None:
+                raise ValueError(f"Unknown gate '{name}' in basis_gates.")
+            if isinstance(instruction, type):
+                continue
+            custom_name_mapping[name] = instruction
+        target_basis_gates.append(name)
+
+    num_qubits = max(circuit.num_qubits for circuit in circuits)
+    if coupling_map:
+        num_qubits = max(num_qubits, max(max(pair) for pair in coupling_map) + 1)
+
+    return Target.from_configuration(
+        basis_gates=target_basis_gates,
+        num_qubits=num_qubits,
+        coupling_map=CouplingMap(coupling_map) if coupling_map else None,
+        custom_name_mapping=custom_name_mapping,
+    )
 
 
 def _inline_verbatim_boxes(circuit: QuantumCircuit, verbatim_box_name: str) -> QuantumCircuit:
@@ -206,11 +273,18 @@ def _compile(
                 )
             )
         ):
+            pm_basis_gates = list(basis_gates) if basis_gates else None
+            pm_coupling_map = coupling_map
+            pm_target = target
+            if basis_gates and _has_nonstandard_basis_gate(basis_gates):
+                pm_target = _nonstandard_basis_target(basis_gates, circuits, coupling_map)
+                pm_basis_gates = None
+                pm_coupling_map = None
             pm = generate_preset_pass_manager(
                 optimization_level=optimization_level,
-                basis_gates=list(basis_gates) if basis_gates else None,
-                coupling_map=coupling_map,
-                target=target,
+                basis_gates=pm_basis_gates,
+                coupling_map=pm_coupling_map,
+                target=pm_target,
                 layout_method=effective_layout_method,
                 routing_method=effective_routing_method,
                 seed_transpiler=seed_transpiler,

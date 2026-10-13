@@ -21,6 +21,7 @@ from qiskit_algorithms.optimizers import SLSQP
 from braket.aws import AwsDevice, AwsQuantumTaskBatch
 from braket.aws.queue_information import QueueDepthInfo, QueueType
 from braket.circuits import Circuit
+from braket.circuits import compiler_directives as braket_compiler_directives
 from braket.circuits.serialization import IRType
 from braket.device_schema import DeviceActionType
 from braket.device_schema.openqasm_program_set_device_action_properties import (
@@ -762,3 +763,52 @@ def test_substitute_leaves_gate_unchanged_without_substitute():
     result = target._substitute(circuit)
 
     assert [instr.operation.name for instr in result.data] == ["sx"]
+
+
+def test_backend_run_default_options_nonstandard_supported_operation_does_not_raise():
+    """A default run on a QPU advertising a non-standard gate no longer raises (issue #400)."""
+    capabilities = copy.deepcopy(MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES)
+    capabilities.action[DeviceActionType.OPENQASM].supportedOperations = [
+        "RX",
+        "RZ",
+        "CZ",
+        "CPhaseShift01",
+    ]
+    device = Mock()
+    device.properties = capabilities
+    device.gate_calibrations = None
+    device.type = "QPU"
+    device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+    backend = BraketAwsBackend(device=device)
+
+    assert "cphaseshift01" in backend._gateset
+
+    captured: dict[str, list[Circuit]] = {}
+
+    def fake_run_batch(circuits: list[Circuit], **_kwargs: object) -> Mock:
+        captured["circuits"] = circuits
+        task = Mock(spec=LocalQuantumTask)
+        task.id = "task-0"
+        batch = Mock(spec=AwsQuantumTaskBatch)
+        batch.tasks = [task]
+        return batch
+
+    device.run_batch = Mock(side_effect=fake_run_batch)
+
+    circuit = QuantumCircuit(2)
+    circuit.h(0)
+    circuit.cx(0, 1)
+
+    backend.run(circuit)
+
+    device.run_batch.assert_called_once()
+    (submitted,) = captured["circuits"]
+    assert {instruction.operator.name for instruction in submitted.instructions} <= {
+        "Rx",
+        "Rz",
+        "CZ",
+    }
+    assert not any(
+        isinstance(instruction.operator, braket_compiler_directives.StartVerbatimBox)
+        for instruction in submitted.instructions
+    )

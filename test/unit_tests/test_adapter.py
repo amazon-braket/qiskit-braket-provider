@@ -50,6 +50,7 @@ from qiskit_braket_provider.providers.adapter import (
     _SubstitutedTarget,
     _validate_angle_restrictions,
     aws_device_to_target,
+    compile_to_oq3,
     convert_qiskit_to_braket_circuit,
     convert_qiskit_to_braket_circuits,
     native_angle_restrictions,
@@ -2224,3 +2225,106 @@ class TestThereAndBackAgain(TestCase):
         result = target._substitute(transpiled)
         assert result.layout is not None
         assert result.layout == transpiled.layout
+
+
+def _bell_circuit() -> QuantumCircuit:
+    circuit = QuantumCircuit(2)
+    circuit.h(0)
+    circuit.cx(0, 1)
+    return circuit
+
+
+def _is_verbatim(circuit: Circuit) -> bool:
+    return any(
+        isinstance(instruction.operator, braket_compiler_directives.StartVerbatimBox)
+        for instruction in circuit.instructions
+    )
+
+
+def test_to_braket_nonstandard_basis_gate_name():
+    """A basis set with a non-standard name (cphaseshift01) transpiles without error."""
+    braket_circuit = to_braket(_bell_circuit(), basis_gates={"cz", "rx", "rz", "cphaseshift01"})
+
+    assert {instruction.operator.name for instruction in braket_circuit.instructions} == {
+        "Rx",
+        "Rz",
+        "CZ",
+    }
+    assert not _is_verbatim(braket_circuit)
+
+
+def test_to_braket_nonstandard_basis_gate_name_with_coupling_map_not_verbatim():
+    """A coupling map must not turn the default (non-verbatim) path into a verbatim circuit."""
+    braket_circuit = to_braket(
+        _bell_circuit(),
+        basis_gates={"cz", "rx", "rz", "cphaseshift01"},
+        coupling_map=[[0, 1], [1, 0]],
+    )
+
+    assert {instruction.operator.name for instruction in braket_circuit.instructions} == {
+        "Rx",
+        "Rz",
+        "CZ",
+    }
+    assert not _is_verbatim(braket_circuit)
+
+
+def test_to_braket_nonstandard_basis_gate_name_with_measure_and_barrier():
+    """Measurements and barriers compile on the non-standard basis gate path."""
+    circuit = QuantumCircuit(2, 2)
+    circuit.h(0)
+    circuit.cx(0, 1)
+    circuit.barrier()
+    circuit.measure(0, 0)
+    circuit.measure(1, 1)
+
+    braket_circuit = to_braket(circuit, basis_gates={"cz", "rx", "rz", "cphaseshift01"})
+
+    gate_names = {instruction.operator.name for instruction in braket_circuit.instructions}
+    assert gate_names == {"Rx", "Rz", "CZ", "Measure"}
+    assert not _is_verbatim(braket_circuit)
+
+
+def test_compile_to_oq3_nonstandard_basis_gate_name():
+    """compile_to_oq3 succeeds for a basis set containing a non-standard gate name."""
+    oq3 = compile_to_oq3(_bell_circuit(), basis_gates={"cz", "rx", "rz", "cphaseshift01"})
+
+    assert "cz" in oq3
+    assert "cphaseshift01" not in oq3
+
+
+def test_to_braket_nonstandard_basis_gate_name_matches_standard_only_path():
+    """Dropping the non-standard name produces identical output to keeping it."""
+    with_nonstandard = to_braket(_bell_circuit(), basis_gates={"cz", "rx", "rz", "cphaseshift01"})
+    standard_only = to_braket(_bell_circuit(), basis_gates={"cz", "rx", "rz"})
+
+    assert str(with_nonstandard) == str(standard_only)
+
+
+def test_to_braket_ionq_basis_gate_names_emitted():
+    """IonQ-style non-standard names let the transpiler emit those gates."""
+    braket_circuit = to_braket(_bell_circuit(), basis_gates={"gpi", "gpi2", "ms"})
+
+    assert {instruction.operator.name for instruction in braket_circuit.instructions} == {
+        "GPi",
+        "GPi2",
+        "MS",
+    }
+
+
+def test_to_braket_nonstandard_basis_gate_name_with_measure_in_basis():
+    """``measure`` listed in a non-standard basis set is not registered twice."""
+    braket_circuit = to_braket(
+        _bell_circuit(), basis_gates={"cz", "rx", "rz", "cphaseshift01", "measure"}
+    )
+
+    assert {instruction.operator.name for instruction in braket_circuit.instructions} == {
+        "Rx",
+        "Rz",
+        "CZ",
+    }
+
+
+def test_to_braket_unknown_basis_gate_name_raises():
+    with pytest.raises(ValueError, match="Unknown gate 'not_a_gate' in basis_gates"):
+        to_braket(_bell_circuit(), basis_gates={"cz", "rx", "rz", "cphaseshift01", "not_a_gate"})
