@@ -115,6 +115,29 @@ def check_to_braket_openqasm_unitary_correct(qasm_program: Program | str) -> boo
     )
 
 
+def _bell_circuit() -> QuantumCircuit:
+    circuit = QuantumCircuit(2)
+    circuit.h(0)
+    circuit.cx(0, 1)
+    return circuit
+
+
+def _measured_bell_circuit() -> QuantumCircuit:
+    circuit = QuantumCircuit(2, 2)
+    circuit.h(0)
+    circuit.cx(0, 1)
+    circuit.barrier()
+    circuit.measure([0, 1], [0, 1])
+    return circuit
+
+
+def _is_verbatim(circuit: Circuit) -> bool:
+    return any(
+        isinstance(instruction.operator, braket_compiler_directives.StartVerbatimBox)
+        for instruction in circuit.instructions
+    )
+
+
 class TestAdapter(TestCase):
     """Tests adapter."""
 
@@ -2225,29 +2248,6 @@ class TestThereAndBackAgain(TestCase):
         result = target._substitute(transpiled)
         assert result.layout is not None
         assert result.layout == transpiled.layout
-
-
-def _bell_circuit() -> QuantumCircuit:
-    circuit = QuantumCircuit(2)
-    circuit.h(0)
-    circuit.cx(0, 1)
-    return circuit
-
-
-def _measured_bell_circuit() -> QuantumCircuit:
-    circuit = QuantumCircuit(2, 2)
-    circuit.h(0)
-    circuit.cx(0, 1)
-    circuit.barrier()
-    circuit.measure([0, 1], [0, 1])
-    return circuit
-
-
-def _is_verbatim(circuit: Circuit) -> bool:
-    return any(
-        isinstance(instruction.operator, braket_compiler_directives.StartVerbatimBox)
-        for instruction in circuit.instructions
-    )
 
 
 @pytest.mark.parametrize(

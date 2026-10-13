@@ -77,11 +77,15 @@ def _nonstandard_basis_target(
     circuits: Sequence[QuantumCircuit],
     coupling_map: list[list[int]] | None,
 ) -> Target:
-    """Build a transpilation-only ``Target`` for basis gates that include non-standard names.
+    """Build a ``Target`` for transpiling to basis gates that include non-standard names.
 
-    Qiskit 2.x only accepts such names through a ``Target`` with ``custom_name_mapping``.
-    ``unitary`` and ``kraus`` are dropped and ``measure`` is always added. Don't pass the
-    result to translation: with a coupling map it would trigger verbatim wrapping.
+    Qiskit 2.x rejects non-standard gate names such as ``cphaseshift01`` in
+    ``basis_gates``; they must be supplied through a ``Target`` instead. This target maps
+    each such name to the provider's gate definition. ``measure`` is always included, and
+    ``unitary`` and ``kraus`` are left out because a ``Target`` can't hold them.
+
+    Use the returned target only for transpilation. With a coupling map it lists gates per
+    qubit, which would make translation wrap the output in a verbatim box.
 
     Raises:
         ValueError: If a name is neither a standard Qiskit gate nor a known Braket gate.
