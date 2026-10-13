@@ -77,30 +77,11 @@ def _nonstandard_basis_target(
     circuits: Sequence[QuantumCircuit],
     coupling_map: list[list[int]] | None,
 ) -> Target:
-    """Build a transpiler ``Target`` for a basis set containing non-standard gate names.
+    """Build a transpilation-only ``Target`` for basis gates that include non-standard names.
 
-    Qiskit 2.x rejects non-standard gate names (such as ``cphaseshift01``) passed through
-    the ``basis_gates`` argument of :func:`generate_preset_pass_manager`; they must be
-    supplied via a ``Target`` with a ``custom_name_mapping`` instead. This helper constructs
-    such a target from the Braket-derived gate instances in
-    :data:`_BRAKET_GATE_NAME_TO_QISKIT_GATE`.
-
-    Entries that map to Qiskit classes rather than instruction instances (``unitary`` and
-    ``kraus``) cannot be placed in a ``Target`` and are dropped from the basis set.
-    ``measure`` is always included.
-
-    The returned target is intended solely for transpilation via
-    :func:`generate_preset_pass_manager`. It must not be reused as the translation target,
-    because a target built with a coupling map carries per-qubit/per-edge entries that would
-    incorrectly trigger verbatim-box wrapping during translation.
-
-    Args:
-        basis_gates: Qiskit gate names supported by the target device.
-        circuits: Circuits being compiled, used to size the target.
-        coupling_map: Qubit connectivity as 0-indexed ``[control, target]`` pairs, if any.
-
-    Returns:
-        A :class:`~qiskit.transpiler.Target` describing the basis gates and connectivity.
+    Qiskit 2.x only accepts such names through a ``Target`` with ``custom_name_mapping``.
+    ``unitary`` and ``kraus`` are dropped and ``measure`` is always added. Don't pass the
+    result to translation: with a coupling map it would trigger verbatim wrapping.
 
     Raises:
         ValueError: If a name is neither a standard Qiskit gate nor a known Braket gate.
