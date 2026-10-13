@@ -14,7 +14,7 @@ Sphinx documentation builder
 """
 
 # General options:
-import datetime
+import datetime as dt
 import os
 from pathlib import Path
 
@@ -22,7 +22,7 @@ from pygments.formatters import LatexFormatter
 from sphinx.application import Sphinx
 
 project = "Qiskit-Braket provider"
-copyright = f"{datetime.datetime.now(tz=datetime.UTC).year}, Amazon.com"  # ruff:ignore[builtin-variable-shadowing]
+copyright = f"{dt.datetime.now(tz=dt.UTC).year}, Amazon.com"  # ruff:ignore[builtin-variable-shadowing]
 author = "Amazon Web Services"
 
 # The full version, including alpha/beta/rc tags
