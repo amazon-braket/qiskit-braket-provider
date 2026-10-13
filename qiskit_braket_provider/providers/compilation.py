@@ -9,7 +9,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from qiskit import QuantumCircuit, generate_preset_pass_manager
-from qiskit.circuit import Barrier, BoxOp, Measure
+from qiskit.circuit import Barrier, BoxOp, IfElseOp, Measure
 from qiskit.transpiler import PassManager, StagedPassManager, Target
 
 from braket.aws import AwsDevice
@@ -61,6 +61,7 @@ def _default_target(circuits: Iterable[QuantumCircuit]) -> Target:
             target.add_instruction(instruction, name=name)
     target.add_instruction(Measure())
     target.add_instruction(Barrier(1))
+    target.add_instruction(IfElseOp, name="if_else")
     return target
 
 

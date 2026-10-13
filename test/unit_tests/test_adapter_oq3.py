@@ -111,12 +111,6 @@ def _mock_non_iqm_device() -> Mock:
     return device
 
 
-def _if_else_device_target(device_factory: Callable[[], Mock]) -> Target:
-    target = aws_device_to_target(device_factory())
-    target.add_instruction(IfElseOp, name="if_else")
-    return target
-
-
 def _iqm_device_kwargs() -> dict:
     return {"braket_device": mock_iqm_device()}
 
@@ -231,7 +225,7 @@ def test_has_control_flow(circuit_factory: Callable[[], QuantumCircuit], expecte
 def test_compile_to_oq3_control_flow_on_native_path_raises_only_for_iqm(
     device_factory: Callable[[], Mock], should_raise: bool
 ) -> None:
-    target = _if_else_device_target(device_factory)
+    target = aws_device_to_target(device_factory())
 
     if should_raise:
         with pytest.raises(ValueError, match="'if' statements on IQM devices"):

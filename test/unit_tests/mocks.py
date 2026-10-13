@@ -13,10 +13,11 @@ from qiskit.providers import Options
 from qiskit.transpiler import Target
 
 from braket.aws import AwsDevice, AwsDeviceType
-from braket.device_schema import StandardizedGateModelQpuDeviceProperties
+from braket.device_schema import DeviceActionType, StandardizedGateModelQpuDeviceProperties
 from braket.device_schema.iqm import IqmDeviceCapabilities
 from braket.device_schema.rigetti import RigettiDeviceCapabilities
 from braket.device_schema.simulators import GateModelSimulatorDeviceCapabilities
+from braket.devices import LocalSimulator
 from braket.task_result import ProgramSetTaskResult, TaskMetadata
 from braket.tasks import GateModelQuantumTaskResult, ProgramSetQuantumTaskResult
 from braket.tasks.local_quantum_task import LocalQuantumTask
@@ -539,6 +540,22 @@ def mock_iqm_device(*, supports_if: bool = True) -> Mock:
     device.properties = IqmDeviceCapabilities.parse_obj(capabilities_json)
     device.topology_graph = DiGraph(edges + [(v, u) for u, v in edges])
     device.gate_calibrations = None
+    return device
+
+
+def mock_simulator_device(*, supports_if: bool = True) -> Mock:
+    """Return a mock simulator device with the local state-vector simulator's capabilities.
+
+    When ``supports_if`` is true, ``if`` is added to the advertised OpenQASM operations.
+    """
+    properties = LocalSimulator("braket_sv").properties.copy(deep=True)
+    action = properties.action[DeviceActionType.OPENQASM]
+    if supports_if:
+        action.supportedOperations = [*action.supportedOperations, "if"]
+    device = Mock()
+    device.type = AwsDeviceType.SIMULATOR
+    device.name = "sv1"
+    device.properties = properties
     return device
 
 
