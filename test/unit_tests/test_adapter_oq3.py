@@ -211,13 +211,7 @@ def test_to_oq3_raises_on_gates_outside_basis(
 
 @pytest.mark.parametrize("use_target", [False, True], ids=["braket_device", "target"])
 def test_compile_to_oq3_substitutes_rx_for_calibrated_rigetti(use_target: bool) -> None:
-    """compile_to_oq3 against a calibrated Rigetti device keeps the substituted rx gates.
-
-    The device's rx is calibrated only at ±π/2 and ±π, so its Qiskit target lists those
-    rotations as sx/sxdg/x; _compile renames them back to rx. The resulting OQ3 must be
-    accepted (not rejected as outside the basis set), verbatim-wrapped, and use only
-    rx/rz/cz gates with no gate definitions emitted.
-    """
+    """compile_to_oq3 against a calibrated Rigetti device keeps the substituted rx gates."""
     device = mock_calibrated_rigetti_device()
     if use_target:
         kwargs = {

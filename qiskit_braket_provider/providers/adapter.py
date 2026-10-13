@@ -835,8 +835,7 @@ def to_oq3(
     if unsupported := _gate_names(circuit) - set(basis_gates) - _NON_GATE_TARGET_OPS:
         raise ValueError(
             f"Gates {sorted(unsupported)} are not in the basis gate set and cannot be "
-            "serialized for Braket. Transpile the circuit to the basis gates before "
-            "calling to_oq3."
+            "serialized for Braket. Transpile the circuit to the basis gates first."
         )
 
     oq3_source = qasm3.dumps(
