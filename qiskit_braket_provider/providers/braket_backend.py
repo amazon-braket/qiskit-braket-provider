@@ -214,7 +214,7 @@ class BraketLocalBackend(BraketBackend[Device]):
         circuits: list[Circuit] = [
             to_braket(
                 circ,
-                target=self._target if not verbatim else None,
+                target=self._target,
                 qubit_labels=self._qubit_labels,
                 verbatim=verbatim,
             )
@@ -464,7 +464,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         # Always use target for simulator
         target, basis_gates, qubit_labels = self._resolve_compilation_args(native, pass_manager)
         braket_circuits = (
-            to_braket(circuits, qubit_labels=self._qubit_labels, verbatim=True)
+            to_braket(circuits, qubit_labels=self._qubit_labels, target=self._target, verbatim=True)
             if verbatim
             else to_braket(
                 circuits,
