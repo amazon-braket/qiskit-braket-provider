@@ -35,7 +35,7 @@ from .adapter import (
 from .braket_quantum_task import BraketQuantumTask
 
 if TYPE_CHECKING:
-    import datetime
+    import datetime as dt
     from collections.abc import Callable, Iterable
 
     from .braket_provider import BraketProvider
@@ -260,7 +260,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         provider: BraketProvider | None = None,
         name: str | None = None,
         description: str | None = None,
-        online_date: datetime.datetime | None = None,
+        online_date: dt.datetime | None = None,
         backend_version: str | None = None,
         *,
         device: AwsDevice | None = None,
@@ -538,7 +538,7 @@ class AWSBraketBackend(BraketAwsBackend):
         provider: BraketProvider | None = None,
         name: str | None = None,
         description: str | None = None,
-        online_date: datetime.datetime | None = None,
+        online_date: dt.datetime | None = None,
         backend_version: str | None = None,
         **fields,
     ) -> None:

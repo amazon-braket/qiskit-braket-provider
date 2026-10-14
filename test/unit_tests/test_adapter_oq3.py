@@ -14,6 +14,7 @@ from qiskit.circuit import (
 from qiskit.circuit.library import CXGate, HGate, XGate
 from qiskit.transpiler import Target
 
+from braket.circuits import Circuit, Gate
 from braket.circuits.serialization import (
     IRType,
     OpenQASMSerializationProperties,
@@ -30,7 +31,7 @@ from qiskit_braket_provider.providers.adapter import (
 from qiskit_braket_provider.providers.gate_mappings import _BRAKET_VERBATIM_BOX_NAME
 from qiskit_braket_provider.providers.target import aws_device_to_target
 
-from .mocks import mock_iqm_device
+from .mocks import mock_calibrated_rigetti_device, mock_iqm_device
 
 
 def _bell_circuit() -> QuantumCircuit:
@@ -206,6 +207,30 @@ def test_to_oq3_raises_on_gates_outside_basis(
 ) -> None:
     with pytest.raises(ValueError, match="not in the basis gate set"):
         to_oq3(circuit_factory(), basis_gates=basis_gates)
+
+
+@pytest.mark.parametrize("use_target", [False, True], ids=["braket_device", "target"])
+def test_compile_to_oq3_substitutes_rx_for_calibrated_rigetti(use_target: bool) -> None:
+    """compile_to_oq3 against a calibrated Rigetti device keeps the substituted rx gates."""
+    device = mock_calibrated_rigetti_device()
+    if use_target:
+        kwargs = {
+            "target": aws_device_to_target(device),
+            "qubit_labels": sorted(device.topology_graph.nodes),
+        }
+    else:
+        kwargs = {"braket_device": device}
+
+    oq3 = compile_to_oq3(_bell_circuit(), **kwargs)
+
+    _assert_contents(oq3, ["#pragma braket verbatim", "box {", "rx("], ["gate "])
+    native_gates = {gate.lower() for gate in device.properties.paradigm.nativeGateSet}
+    gate_names = {
+        instr.operator.name.lower()
+        for instr in Circuit.from_ir(oq3).instructions
+        if isinstance(instr.operator, Gate)
+    }
+    assert gate_names <= native_gates
 
 
 def test_to_oq3_accepts_control_flow_with_basis_gates() -> None:

@@ -75,7 +75,7 @@ from qiskit_braket_provider.providers.qasm_context import (
 )
 from qiskit_braket_provider.providers.target import (
     _get_controlled_gateset,  # ruff:ignore[unused-import]
-    _SubstitutedTarget,  # ruff:ignore[unused-import]
+    _SubstitutedTarget,
     aws_device_to_target,  # ruff:ignore[unused-import]
     gateset_from_properties,  # ruff:ignore[unused-import]
     local_simulator_to_target,  # ruff:ignore[unused-import]
@@ -812,8 +812,7 @@ def to_oq3(
     Raises:
         ValueError: If the circuit contains gates outside ``basis_gates``. Such
             gates would otherwise be serialized as ``gate`` definitions that
-            Braket cannot run; compile the circuit first, e.g. with
-            :func:`compile_to_oq3`.
+            Braket cannot run; transpile the circuit to the basis gates first.
     """
     pm = PassManager()
     pm.append(ConsolidateClbits())
@@ -836,8 +835,7 @@ def to_oq3(
     if unsupported := _gate_names(circuit) - set(basis_gates) - _NON_GATE_TARGET_OPS:
         raise ValueError(
             f"Gates {sorted(unsupported)} are not in the basis gate set and cannot be "
-            "serialized for Braket. Use compile_to_oq3, or transpile the circuit to "
-            "supported gates first."
+            "serialized for Braket. Transpile the circuit to the basis gates first."
         )
 
     oq3_source = qasm3.dumps(
@@ -894,6 +892,8 @@ def _compile_to_oq3(
     effective_basis_gates = result.basis_gates
     if effective_basis_gates is None and result.target is not None:
         effective_basis_gates = set(result.target.operation_names) - _NON_GATE_TARGET_OPS
+        if isinstance(result.target, _SubstitutedTarget):
+            effective_basis_gates |= result.target.substituted_gate_names()
 
     oq3_strings: list[str] = []
     for circ in result.circuits:
