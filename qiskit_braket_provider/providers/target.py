@@ -90,6 +90,14 @@ class _SubstitutedTarget(Target):
                 result._layout = original._layout
         return results[0] if single else results
 
+    def substituted_gate_names(self) -> set[str]:
+        """Return the names of the gates that substitutions replace target gates with."""
+        return {
+            instruction.name
+            for substitutes in self._gate_substitutes.values()
+            for instruction in substitutes.values()
+        }
+
 
 class _SubstituteGates(TransformationPass):
     def __init__(

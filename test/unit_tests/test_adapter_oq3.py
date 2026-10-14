@@ -14,7 +14,7 @@ from qiskit.circuit import (
 from qiskit.circuit.library import CXGate, HGate, XGate
 from qiskit.transpiler import Target
 
-from braket.circuits import Circuit
+from braket.circuits import Circuit, Gate
 from braket.circuits.serialization import (
     IRType,
     OpenQASMSerializationProperties,
@@ -224,8 +224,13 @@ def test_compile_to_oq3_substitutes_rx_for_calibrated_rigetti(use_target: bool) 
     oq3 = compile_to_oq3(_bell_circuit(), **kwargs)
 
     _assert_contents(oq3, ["#pragma braket verbatim", "box {", "rx("], ["gate "])
-    operators = {instr.operator.name for instr in Circuit.from_ir(oq3).instructions}
-    assert operators <= {"Rx", "Rz", "CZ", "Measure", "StartVerbatimBox", "EndVerbatimBox"}
+    native_gates = {gate.lower() for gate in device.properties.paradigm.nativeGateSet}
+    gate_names = {
+        instr.operator.name.lower()
+        for instr in Circuit.from_ir(oq3).instructions
+        if isinstance(instr.operator, Gate)
+    }
+    assert gate_names <= native_gates
 
 
 def test_to_oq3_accepts_control_flow_with_basis_gates() -> None:
