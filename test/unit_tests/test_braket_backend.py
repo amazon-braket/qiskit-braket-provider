@@ -791,4 +791,4 @@ def test_backend_run_default_options_with_nonstandard_supported_operation():
         for instruction in submitted.instructions
         if isinstance(instruction.operator, Gate)
     }
-    assert gate_names <= supported
+    assert all(name in supported for name in gate_names)

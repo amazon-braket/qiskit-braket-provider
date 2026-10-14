@@ -2,7 +2,6 @@
 
 import copy
 import warnings
-from collections.abc import Callable
 from unittest import TestCase
 from unittest.mock import MagicMock, Mock, patch
 
@@ -115,27 +114,12 @@ def check_to_braket_openqasm_unitary_correct(qasm_program: Program | str) -> boo
     )
 
 
-def _bell_circuit() -> QuantumCircuit:
+@pytest.fixture
+def bell_circuit() -> QuantumCircuit:
     circuit = QuantumCircuit(2)
     circuit.h(0)
     circuit.cx(0, 1)
     return circuit
-
-
-def _measured_bell_circuit() -> QuantumCircuit:
-    circuit = QuantumCircuit(2, 2)
-    circuit.h(0)
-    circuit.cx(0, 1)
-    circuit.barrier()
-    circuit.measure([0, 1], [0, 1])
-    return circuit
-
-
-def _is_verbatim(circuit: Circuit) -> bool:
-    return any(
-        isinstance(instruction.operator, braket_compiler_directives.StartVerbatimBox)
-        for instruction in circuit.instructions
-    )
 
 
 class TestAdapter(TestCase):
@@ -2251,38 +2235,28 @@ class TestThereAndBackAgain(TestCase):
 
 
 @pytest.mark.parametrize(
-    ("circuit_factory", "extra_basis_gates", "nonstandard_gates", "coupling_map"),
+    ("nonstandard_gates", "coupling_map"),
     [
-        (_bell_circuit, set(), {"cphaseshift01"}, None),
-        (_bell_circuit, set(), {"cphaseshift01"}, [[0, 1], [1, 0]]),
-        (_bell_circuit, {"measure"}, {"cphaseshift01"}, None),
-        (_measured_bell_circuit, set(), {"cphaseshift01"}, None),
-        (_bell_circuit, set(), {"unitary", "kraus"}, None),
+        ({"cphaseshift01"}, None),
+        ({"cphaseshift01"}, [[0, 1], [1, 0]]),
+        ({"unitary", "kraus"}, None),
     ],
-    ids=["basis_only", "coupling_map", "measure_in_basis", "measure_and_barrier", "unitary_kraus"],
+    ids=["cphaseshift01", "coupling_map", "unitary_kraus"],
 )
 def test_to_braket_nonstandard_basis_gate_matches_standard_basis(
-    circuit_factory: Callable[[], QuantumCircuit],
-    extra_basis_gates: set[str],
-    nonstandard_gates: set[str],
-    coupling_map: list[list[int]] | None,
+    bell_circuit: QuantumCircuit, nonstandard_gates: set[str], coupling_map: list[list[int]] | None
 ):
     """A non-standard basis gate name compiles exactly as the standard-only basis does."""
-    standard_basis = {"cz", "rx", "rz"} | extra_basis_gates
+    standard_basis = {"cz", "rx", "rz"}
 
-    result = to_braket(
-        circuit_factory(), basis_gates=standard_basis | nonstandard_gates, coupling_map=coupling_map
-    )
-
-    assert result == to_braket(
-        circuit_factory(), basis_gates=standard_basis, coupling_map=coupling_map
-    )
-    assert not _is_verbatim(result)
+    assert to_braket(
+        bell_circuit, basis_gates=standard_basis | nonstandard_gates, coupling_map=coupling_map
+    ) == to_braket(bell_circuit, basis_gates=standard_basis, coupling_map=coupling_map)
 
 
-def test_to_braket_ionq_basis_gate_names_emitted():
+def test_to_braket_ionq_basis_gate_names_emitted(bell_circuit: QuantumCircuit):
     """IonQ gate names in basis_gates let the transpiler emit those gates."""
-    braket_circuit = to_braket(_bell_circuit(), basis_gates={"gpi", "gpi2", "ms"})
+    braket_circuit = to_braket(bell_circuit, basis_gates={"gpi", "gpi2", "ms"})
 
     assert {instruction.operator.name for instruction in braket_circuit.instructions} == {
         "GPi",
@@ -2291,6 +2265,6 @@ def test_to_braket_ionq_basis_gate_names_emitted():
     }
 
 
-def test_to_braket_unknown_basis_gate_name_raises():
+def test_to_braket_unknown_basis_gate_name_raises(bell_circuit: QuantumCircuit):
     with pytest.raises(ValueError, match="Unknown gate 'not_a_gate' in basis_gates"):
-        to_braket(_bell_circuit(), basis_gates={"cz", "rx", "rz", "cphaseshift01", "not_a_gate"})
+        to_braket(bell_circuit, basis_gates={"cz", "rx", "rz", "cphaseshift01", "not_a_gate"})

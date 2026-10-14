@@ -67,22 +67,17 @@ def _default_target(circuits: Iterable[QuantumCircuit]) -> Target:
     return target
 
 
-def _has_nonstandard_basis_gate(basis_gates: Collection[str]) -> bool:
-    """Return whether any name in ``basis_gates`` is not a standard Qiskit gate name."""
-    return any(name not in _STANDARD_GATE_NAME_MAPPING for name in basis_gates)
-
-
-def _nonstandard_basis_target(
+def _basis_gates_target(
     basis_gates: Collection[str],
     circuits: Sequence[QuantumCircuit],
     coupling_map: list[list[int]] | None,
 ) -> Target:
-    """Build a ``Target`` for transpiling to basis gates that include non-standard names.
+    """Build a ``Target`` for transpiling to ``basis_gates``.
 
     Qiskit 2.x rejects non-standard gate names such as ``cphaseshift01`` in
     ``basis_gates``; they must be supplied through a ``Target`` instead. This target maps
-    each such name to the provider's gate definition. ``measure`` is always included, and
-    ``unitary`` and ``kraus`` are left out because a ``Target`` can't hold them.
+    each such name to the provider's gate definition. ``measure``, ``reset`` and ``delay``
+    are always included, as Qiskit allows them alongside ``basis_gates``.
 
     Use the returned target only for transpilation. With a coupling map it lists gates per
     qubit, which would make translation wrap the output in a verbatim box.
@@ -92,7 +87,7 @@ def _nonstandard_basis_target(
     """
     target_basis_gates: list[str] = []
     custom_name_mapping: dict[str, QiskitInstruction] = {}
-    for name in dict.fromkeys([*basis_gates, "measure"]):
+    for name in dict.fromkeys([*basis_gates, "measure", "reset", "delay"]):
         if name not in _STANDARD_GATE_NAME_MAPPING:
             instruction = _BRAKET_GATE_NAME_TO_QISKIT_GATE.get(
                 _QISKIT_TO_BRAKET_NAMES.get(name, name)
@@ -258,17 +253,14 @@ def _compile(
                 )
             )
         ):
-            if basis_gates and _has_nonstandard_basis_gate(basis_gates):
-                pm_target = _nonstandard_basis_target(basis_gates, circuits, coupling_map)
-                pm_basis_gates = None
+            if basis_gates:
+                pm_target = _basis_gates_target(basis_gates, circuits, coupling_map)
                 pm_coupling_map = None
             else:
                 pm_target = target
-                pm_basis_gates = list(basis_gates) if basis_gates else None
                 pm_coupling_map = coupling_map
             pm = generate_preset_pass_manager(
                 optimization_level=optimization_level,
-                basis_gates=pm_basis_gates,
                 coupling_map=pm_coupling_map,
                 target=pm_target,
                 layout_method=effective_layout_method,
