@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.26.0 (2026-10-13)
+
+### Features
+
+ * add compile_to_oq3() public API
+
 ## v0.25.0 (2026-09-10)
 
 ### Features
