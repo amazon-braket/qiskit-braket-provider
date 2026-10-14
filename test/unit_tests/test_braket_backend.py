@@ -719,20 +719,8 @@ class TestEmulatorBackend(TestCase):
 def test_verbatim_native_rigetti_circuit_preserves_rx_and_barrier():
     """Verbatim submission of a native Rigetti circuit keeps rx/barrier and emits no v/vi."""
     device = mock_calibrated_rigetti_device()
-    backend = BraketAwsBackend(device=device)
-
-    captured: dict[str, list[Circuit]] = {}
-
-    def capture_run_batch(circuits: list[Circuit], **_) -> Mock:
-        captured["circuits"] = circuits
-        task = Mock(spec=LocalQuantumTask)
-        task.id = "0"
-        batch = Mock(spec=AwsQuantumTaskBatch)
-        batch.tasks = [task]
-        return batch
-
-    device.run_batch = capture_run_batch
-
+    device.run_batch = Mock()
+    device.run_batch.return_value.tasks = [Mock(id="0")]
     circuit = QuantumCircuit(2)
     circuit.rz(1.5707963267948966, 0)
     circuit.sx(0)
@@ -740,14 +728,23 @@ def test_verbatim_native_rigetti_circuit_preserves_rx_and_barrier():
     circuit.barrier()
     circuit.cz(0, 1)
 
-    backend.run(circuit, shots=10, verbatim=True)
+    BraketAwsBackend(device=device).run(circuit, shots=10, verbatim=True)
 
-    source = captured["circuits"][0].to_ir(ir_type=IRType.OPENQASM).source
-    assert "rx(1.5707963267948966)" in source
-    assert "rx(-1.5707963267948966)" in source
-    assert "barrier" in source
-    assert "v $" not in source
-    assert "vi $" not in source
+    (submitted,) = device.run_batch.call_args.args[0]
+    assert submitted.to_ir(ir_type=IRType.OPENQASM).source == (
+        "OPENQASM 3.0;\n"
+        "bit[2] b;\n"
+        "#pragma braket verbatim\n"
+        "box{\n"
+        "rz(1.5707963267948966) $1;\n"
+        "rx(1.5707963267948966) $1;\n"
+        "rx(-1.5707963267948966) $2;\n"
+        "barrier $1, $2;\n"
+        "cz $1, $2;\n"
+        "}\n"
+        "b[0] = measure $1;\n"
+        "b[1] = measure $2;"
+    )
 
 
 def test_substitute_leaves_gate_unchanged_without_substitute():
