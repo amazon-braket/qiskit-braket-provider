@@ -75,7 +75,7 @@ from qiskit_braket_provider.providers.qasm_context import (
 )
 from qiskit_braket_provider.providers.target import (
     _get_controlled_gateset,  # ruff:ignore[unused-import]
-    _SubstitutedTarget,  # ruff:ignore[unused-import]
+    _SubstitutedTarget,
     aws_device_to_target,  # ruff:ignore[unused-import]
     gateset_from_properties,  # ruff:ignore[unused-import]
     local_simulator_to_target,  # ruff:ignore[unused-import]
@@ -892,8 +892,8 @@ def _compile_to_oq3(
     effective_basis_gates = result.basis_gates
     if effective_basis_gates is None and result.target is not None:
         effective_basis_gates = set(result.target.operation_names) - _NON_GATE_TARGET_OPS
-        for substitutes in getattr(result.target, "_gate_substitutes", {}).values():
-            effective_basis_gates |= {instr.name for instr in substitutes.values()}
+        if isinstance(result.target, _SubstitutedTarget):
+            effective_basis_gates |= result.target.substituted_gate_names()
 
     oq3_strings: list[str] = []
     for circ in result.circuits:
