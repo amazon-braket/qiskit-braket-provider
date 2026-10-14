@@ -99,8 +99,8 @@ def _nonstandard_basis_target(
             )
             if instruction is None:
                 raise ValueError(f"Unknown gate '{name}' in basis_gates.")
-            if isinstance(instruction, type):
-                continue
+            if not isinstance(instruction, QiskitInstruction):
+                continue  # unitary and kraus map to classes, which a Target can't hold
             custom_name_mapping[name] = instruction
         target_basis_gates.append(name)
 
@@ -258,13 +258,14 @@ def _compile(
                 )
             )
         ):
-            pm_basis_gates = list(basis_gates) if basis_gates else None
-            pm_coupling_map = coupling_map
-            pm_target = target
             if basis_gates and _has_nonstandard_basis_gate(basis_gates):
                 pm_target = _nonstandard_basis_target(basis_gates, circuits, coupling_map)
                 pm_basis_gates = None
                 pm_coupling_map = None
+            else:
+                pm_target = target
+                pm_basis_gates = list(basis_gates) if basis_gates else None
+                pm_coupling_map = coupling_map
             pm = generate_preset_pass_manager(
                 optimization_level=optimization_level,
                 basis_gates=pm_basis_gates,

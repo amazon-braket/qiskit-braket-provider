@@ -20,7 +20,7 @@ from qiskit_algorithms.optimizers import SLSQP
 
 from braket.aws import AwsDevice, AwsQuantumTaskBatch
 from braket.aws.queue_information import QueueDepthInfo, QueueType
-from braket.circuits import Circuit
+from braket.circuits import Circuit, Gate
 from braket.circuits.serialization import IRType
 from braket.device_schema import DeviceActionType
 from braket.device_schema.openqasm_program_set_device_action_properties import (
@@ -786,8 +786,12 @@ def test_backend_run_default_options_with_nonstandard_supported_operation():
     BraketAwsBackend(device=device).run(circuit)
 
     (submitted,) = device.run_batch.call_args.args[0]
-    assert {instruction.operator.name for instruction in submitted.instructions} <= {
-        "Rx",
-        "Rz",
-        "CZ",
+    supported = {
+        op.lower() for op in capabilities.action[DeviceActionType.OPENQASM].supportedOperations
     }
+    gate_names = {
+        instruction.operator.name.lower()
+        for instruction in submitted.instructions
+        if isinstance(instruction.operator, Gate)
+    }
+    assert gate_names <= supported

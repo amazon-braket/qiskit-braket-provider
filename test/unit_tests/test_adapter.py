@@ -2251,25 +2251,27 @@ class TestThereAndBackAgain(TestCase):
 
 
 @pytest.mark.parametrize(
-    ("circuit_factory", "extra_basis_gates", "coupling_map"),
+    ("circuit_factory", "extra_basis_gates", "nonstandard_gates", "coupling_map"),
     [
-        (_bell_circuit, set(), None),
-        (_bell_circuit, set(), [[0, 1], [1, 0]]),
-        (_bell_circuit, {"measure"}, None),
-        (_measured_bell_circuit, set(), None),
+        (_bell_circuit, set(), {"cphaseshift01"}, None),
+        (_bell_circuit, set(), {"cphaseshift01"}, [[0, 1], [1, 0]]),
+        (_bell_circuit, {"measure"}, {"cphaseshift01"}, None),
+        (_measured_bell_circuit, set(), {"cphaseshift01"}, None),
+        (_bell_circuit, set(), {"unitary", "kraus"}, None),
     ],
-    ids=["basis_only", "coupling_map", "measure_in_basis", "measure_and_barrier"],
+    ids=["basis_only", "coupling_map", "measure_in_basis", "measure_and_barrier", "unitary_kraus"],
 )
 def test_to_braket_nonstandard_basis_gate_matches_standard_basis(
     circuit_factory: Callable[[], QuantumCircuit],
     extra_basis_gates: set[str],
+    nonstandard_gates: set[str],
     coupling_map: list[list[int]] | None,
 ):
     """A non-standard basis gate name compiles exactly as the standard-only basis does."""
     standard_basis = {"cz", "rx", "rz"} | extra_basis_gates
 
     result = to_braket(
-        circuit_factory(), basis_gates=standard_basis | {"cphaseshift01"}, coupling_map=coupling_map
+        circuit_factory(), basis_gates=standard_basis | nonstandard_gates, coupling_map=coupling_map
     )
 
     assert result == to_braket(
