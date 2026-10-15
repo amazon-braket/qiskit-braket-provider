@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.26.1 (2026-10-15)
+
+### Bug Fixes and Other Changes
+
+ * verbatim rigetti native gates
+ * compile to oq3 rigetti rx
+
 ## v0.26.0 (2026-10-13)
 
 ### Features
