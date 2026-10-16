@@ -20,7 +20,7 @@ from qiskit_algorithms.optimizers import SLSQP
 
 from braket.aws import AwsDevice, AwsQuantumTaskBatch
 from braket.aws.queue_information import QueueDepthInfo, QueueType
-from braket.circuits import Circuit
+from braket.circuits import Circuit, Gate
 from braket.circuits.serialization import IRType
 from braket.device_schema import DeviceActionType
 from braket.device_schema.openqasm_program_set_device_action_properties import (
@@ -759,3 +759,36 @@ def test_substitute_leaves_gate_unchanged_without_substitute():
     result = target._substitute(circuit)
 
     assert [instr.operation.name for instr in result.data] == ["sx"]
+
+
+def test_backend_run_default_options_with_nonstandard_supported_operation():
+    """A default run on a QPU advertising a non-standard gate reaches the device."""
+    capabilities = copy.deepcopy(MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES)
+    capabilities.action[DeviceActionType.OPENQASM].supportedOperations = [
+        "RX",
+        "RZ",
+        "CZ",
+        "CPhaseShift01",
+    ]
+    device = Mock()
+    device.properties = capabilities
+    device.gate_calibrations = None
+    device.type = "QPU"
+    device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+    device.run_batch.return_value.tasks = [Mock(id="task-0")]
+    circuit = QuantumCircuit(2)
+    circuit.h(0)
+    circuit.cx(0, 1)
+
+    BraketAwsBackend(device=device).run(circuit)
+
+    (submitted,) = device.run_batch.call_args.args[0]
+    supported = {
+        op.lower() for op in capabilities.action[DeviceActionType.OPENQASM].supportedOperations
+    }
+    gate_names = {
+        instruction.operator.name.lower()
+        for instruction in submitted.instructions
+        if isinstance(instruction.operator, Gate)
+    }
+    assert all(name in supported for name in gate_names)

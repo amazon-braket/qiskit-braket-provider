@@ -114,6 +114,14 @@ def check_to_braket_openqasm_unitary_correct(qasm_program: Program | str) -> boo
     )
 
 
+@pytest.fixture
+def bell_circuit() -> QuantumCircuit:
+    circuit = QuantumCircuit(2)
+    circuit.h(0)
+    circuit.cx(0, 1)
+    return circuit
+
+
 class TestAdapter(TestCase):
     """Tests adapter."""
 
@@ -2224,3 +2232,39 @@ class TestThereAndBackAgain(TestCase):
         result = target._substitute(transpiled)
         assert result.layout is not None
         assert result.layout == transpiled.layout
+
+
+@pytest.mark.parametrize(
+    ("nonstandard_gates", "coupling_map"),
+    [
+        ({"cphaseshift01"}, None),
+        ({"cphaseshift01"}, [[0, 1], [1, 0]]),
+        ({"unitary", "kraus"}, None),
+    ],
+    ids=["cphaseshift01", "coupling_map", "unitary_kraus"],
+)
+def test_to_braket_nonstandard_basis_gate_matches_standard_basis(
+    bell_circuit: QuantumCircuit, nonstandard_gates: set[str], coupling_map: list[list[int]] | None
+):
+    """A non-standard basis gate name compiles exactly as the standard-only basis does."""
+    standard_basis = {"cz", "rx", "rz"}
+
+    assert to_braket(
+        bell_circuit, basis_gates=standard_basis | nonstandard_gates, coupling_map=coupling_map
+    ) == to_braket(bell_circuit, basis_gates=standard_basis, coupling_map=coupling_map)
+
+
+def test_to_braket_ionq_basis_gate_names_emitted(bell_circuit: QuantumCircuit):
+    """IonQ gate names in basis_gates let the transpiler emit those gates."""
+    braket_circuit = to_braket(bell_circuit, basis_gates={"gpi", "gpi2", "ms"})
+
+    assert {instruction.operator.name for instruction in braket_circuit.instructions} == {
+        "GPi",
+        "GPi2",
+        "MS",
+    }
+
+
+def test_to_braket_unknown_basis_gate_name_raises(bell_circuit: QuantumCircuit):
+    with pytest.raises(ValueError, match="Unknown gate 'not_a_gate' in basis_gates"):
+        to_braket(bell_circuit, basis_gates={"cz", "rx", "rz", "cphaseshift01", "not_a_gate"})

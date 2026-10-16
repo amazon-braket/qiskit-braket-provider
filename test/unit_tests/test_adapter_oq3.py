@@ -540,3 +540,19 @@ def test_compile_to_oq3_no_output_metadata(metadata: dict) -> None:
     qc = _bell_circuit()
     qc.metadata = metadata
     assert "output bit[" not in compile_to_oq3(qc)
+
+
+def test_compile_to_oq3_nonstandard_basis_keeps_non_gate_instructions() -> None:
+    """A non-standard basis keeps measure, barrier, reset and delay, as the standard basis does."""
+    circuit = QuantumCircuit(2, 2)
+    circuit.h(0)
+    circuit.cx(0, 1)
+    circuit.barrier()
+    circuit.reset(0)
+    circuit.delay(100, 1)
+    circuit.measure([0, 1], [0, 1])
+    standard_basis = ["cz", "rx", "rz"]
+
+    assert compile_to_oq3(circuit, basis_gates=[*standard_basis, "cphaseshift01"]) == (
+        compile_to_oq3(circuit, basis_gates=standard_basis)
+    )
