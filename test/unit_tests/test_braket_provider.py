@@ -78,6 +78,67 @@ class TestBraketProvider(TestCase):
             with self.subTest(f"{backend.name}"):
                 self.assertIsInstance(backend, BraketBackend)
 
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")
+    def test_provider_session_is_used_for_device_discovery(self, mock_get_devices: MagicMock):
+        """Use the provider's session when no session is passed to backends()."""
+        mock_get_devices.return_value = []
+        provider = BraketProvider(aws_session=self.mock_session)
+
+        provider.backends(types=[AwsDeviceType.SIMULATOR])
+
+        mock_get_devices.assert_called_once_with(
+            names=None, types=[AwsDeviceType.SIMULATOR], aws_session=self.mock_session
+        )
+
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")
+    def test_provider_session_is_used_by_get_backend(self, mock_get_devices: MagicMock):
+        """get_backend() uses the provider's session too."""
+        mock_get_devices.return_value = [
+            AwsDevice(MOCK_GATE_MODEL_SIMULATOR_SV["deviceArn"], self.mock_session)
+        ]
+        provider = BraketProvider(aws_session=self.mock_session)
+
+        backend = provider.get_backend("SV1")
+
+        self.assertIsInstance(backend, BraketAwsBackend)
+        self.assertIs(backend._device.aws_session, self.mock_session)
+        mock_get_devices.assert_called_once_with(names=["SV1"], aws_session=self.mock_session)
+
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")
+    def test_backend_keeps_discovered_device_session(self, mock_get_devices: MagicMock):
+        """A device found in another region may carry a copied AWS session."""
+        regional_session = Mock()
+        regional_session.region = SIMULATOR_REGION
+        regional_session.boto_session.region_name = SIMULATOR_REGION
+        regional_session.get_device.return_value = MOCK_GATE_MODEL_SIMULATOR_SV
+        mock_get_devices.return_value = [
+            AwsDevice(MOCK_GATE_MODEL_SIMULATOR_SV["deviceArn"], regional_session)
+        ]
+
+        backend = BraketProvider(aws_session=self.mock_session).get_backend("SV1")
+
+        self.assertIs(backend._device.aws_session, regional_session)
+        mock_get_devices.assert_called_once_with(names=["SV1"], aws_session=self.mock_session)
+
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")
+    def test_call_session_overrides_provider_session(self, mock_get_devices: MagicMock):
+        """A session passed to backends() takes precedence over the default."""
+        mock_get_devices.return_value = []
+        provider = BraketProvider(aws_session=self.mock_session)
+
+        provider.backends(aws_session=self.empty_mock_session)
+
+        mock_get_devices.assert_called_once_with(names=None, aws_session=self.empty_mock_session)
+
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")
+    def test_provider_without_session_uses_sdk_default(self, mock_get_devices: MagicMock):
+        """Leave session creation to the SDK when none was configured."""
+        mock_get_devices.return_value = []
+
+        BraketProvider().backends()
+
+        mock_get_devices.assert_called_once_with(names=None)
+
     def test_deprecation_warning_on_init(self):
         """Check if a DeprecationWarning is raised when AWSBraketProvider is initialized"""
         with self.assertWarns(DeprecationWarning):
@@ -90,11 +151,13 @@ class TestBraketProvider(TestCase):
             class SubclassAWSBraketProvider(AWSBraketProvider):
                 """This is a subclass of AWSBraketProvider for testing purposes."""
 
-    def test_provider_backends_kwargs_local(self):
+    @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice.get_devices")
+    def test_provider_backends_kwargs_local(self, mock_get_devices: MagicMock):
         """Tests getting local backends using kwargs"""
-        provider = BraketProvider()
+        provider = BraketProvider(aws_session=self.mock_session)
 
         self.assertIsInstance(provider.backends(name=None, local="sv1")[0], BraketLocalBackend)
+        mock_get_devices.assert_not_called()
 
     def test_real_devices(self):
         """Tests real devices."""
