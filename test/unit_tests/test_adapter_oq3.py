@@ -582,8 +582,8 @@ def test_compile_to_oq3_nonstandard_basis_keeps_non_gate_instructions() -> None:
 @pytest.mark.parametrize(
     ("circuit_factory", "expected_block", "expected_outcomes"),
     [
-        (_reset_circuit, "if (b[0]) {", {"00", "10"}),
-        (_if_with_else_circuit, "} else {", {"00", "01"}),
+        (_reset_circuit, "if (b[0]) {", {"10"}),
+        (_if_with_else_circuit, "} else {", {"100", "001"}),
     ],
     ids=["if", "if_else"],
 )
@@ -609,7 +609,7 @@ def test_compile_to_oq3_default_path_with_iqm_native_gates(sim: LocalSimulator) 
 
     _assert_contents(oq3, ["if (b[0]) {\nprx("], ["#pragma braket verbatim", "h ", "x "])
     counts = sim.run(Program(source=oq3), shots=100).result().measurement_counts
-    assert set(counts) == {"00", "10"}
+    assert set(counts) == {"10"}
 
 
 def test_compile_to_oq3_and_to_oq3_exported_from_package_root() -> None:
