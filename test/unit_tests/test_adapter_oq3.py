@@ -14,6 +14,7 @@ from qiskit.circuit import (
 from qiskit.circuit.library import CXGate, HGate, XGate
 from qiskit.transpiler import Target
 
+import qiskit_braket_provider
 from braket.circuits import Circuit, Gate
 from braket.circuits.serialization import (
     IRType,
@@ -29,7 +30,7 @@ from qiskit_braket_provider.providers.adapter import (
     to_oq3,
 )
 from qiskit_braket_provider.providers.gate_mappings import _BRAKET_VERBATIM_BOX_NAME
-from qiskit_braket_provider.providers.target import aws_device_to_target
+from qiskit_braket_provider.providers.target import aws_device_to_target, native_gate_set
 
 from .mocks import mock_calibrated_rigetti_device, mock_iqm_device
 
@@ -92,6 +93,32 @@ def _if_else_circuit() -> QuantumCircuit:
     qc.h(0)
     qc.measure(0, 0)
     qc.append(IfElseOp((qc.clbits[0], 1), true_body, None), [0], [0])
+    return qc
+
+
+def _reset_circuit() -> QuantumCircuit:
+    """Excite qubit 1, measure it, flip it back to |0> on a 1, then re-measure it."""
+    qc = QuantumCircuit(2, 2)
+    qc.h(0)
+    qc.x(1)
+    qc.measure(1, 0)
+    with qc.if_test((qc.clbits[0], 1)):
+        qc.x(1)
+    qc.measure(1, 1)
+    return qc
+
+
+def _if_with_else_circuit() -> QuantumCircuit:
+    """Measure a random qubit 0; reset it to |0> if 1, otherwise flip qubit 1."""
+    qc = QuantumCircuit(2, 3)
+    qc.h(0)
+    qc.measure(0, 0)
+    with qc.if_test((qc.clbits[0], 1)) as else_:
+        qc.x(0)
+    with else_:
+        qc.x(1)
+    qc.measure(0, 1)
+    qc.measure(1, 2)
     return qc
 
 
@@ -550,3 +577,41 @@ def test_compile_to_oq3_nonstandard_basis_keeps_non_gate_instructions() -> None:
     assert compile_to_oq3(circuit, basis_gates=[*standard_basis, "cphaseshift01"]) == (
         compile_to_oq3(circuit, basis_gates=standard_basis)
     )
+
+
+@pytest.mark.parametrize(
+    ("circuit_factory", "expected_block", "expected_outcomes"),
+    [
+        (_reset_circuit, "if (b[0]) {", {"00", "10"}),
+        (_if_with_else_circuit, "} else {", {"00", "01"}),
+    ],
+    ids=["if", "if_else"],
+)
+def test_compile_to_oq3_dynamic_circuit_runs_on_local_simulator(
+    sim: LocalSimulator,
+    circuit_factory: Callable[[], QuantumCircuit],
+    expected_block: str,
+    expected_outcomes: set[str],
+) -> None:
+    """Dynamic circuits compile on the default target and run with the expected outcomes."""
+    oq3 = compile_to_oq3(circuit_factory())
+
+    assert expected_block in oq3
+    counts = sim.run(Program(source=oq3), shots=100).result().measurement_counts
+    assert set(counts) == expected_outcomes
+
+
+def test_compile_to_oq3_default_path_with_iqm_native_gates(sim: LocalSimulator) -> None:
+    """IQM circuits with ``if`` compile on the default path, leaving the service pass to run."""
+    basis_gates = native_gate_set(mock_iqm_device().properties)
+
+    oq3 = compile_to_oq3(_reset_circuit(), basis_gates=basis_gates, optimization_level=1)
+
+    _assert_contents(oq3, ["if (b[0]) {\nprx("], ["#pragma braket verbatim", "h ", "x "])
+    counts = sim.run(Program(source=oq3), shots=100).result().measurement_counts
+    assert set(counts) == {"00", "10"}
+
+
+def test_compile_to_oq3_and_to_oq3_exported_from_package_root() -> None:
+    assert qiskit_braket_provider.compile_to_oq3 is compile_to_oq3
+    assert qiskit_braket_provider.to_oq3 is to_oq3

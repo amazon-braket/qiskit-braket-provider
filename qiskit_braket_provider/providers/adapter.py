@@ -15,6 +15,7 @@ import qiskit.circuit.library as qiskit_gates
 import qiskit.quantum_info as qiskit_qi
 from qiskit import QuantumCircuit, qasm3
 from qiskit.circuit import (
+    BoxOp,
     ControlFlowOp,
     ControlledGate,
     Gate,
@@ -149,6 +150,18 @@ def _has_control_flow(circuit: QuantumCircuit) -> bool:
     Does not descend into ``BoxOp`` bodies — verbatim regions are the caller's.
     """
     return any(instr.operation.name in _QISKIT_CONTROL_FLOW_OPS for instr in circuit.data)
+
+
+def _contains_control_flow(circuit: QuantumCircuit) -> bool:
+    """Return whether ``circuit`` has control flow, including inside verbatim boxes."""
+    for instruction in circuit.data:
+        operation = instruction.operation
+        if isinstance(operation, BoxOp):
+            if _contains_control_flow(operation.body):
+                return True
+        elif isinstance(operation, ControlFlowOp):
+            return True
+    return False
 
 
 def _is_iqm_target(target: Target | None) -> bool:
@@ -286,6 +299,11 @@ def to_braket(
         Circuit | list[Circuit]: Braket circuit or circuits
     """
     qc_circuits, single_instance = _get_circuits(circuits, circuit, add_measurements)
+    if any(_contains_control_flow(qc) for qc in qc_circuits if isinstance(qc, QuantumCircuit)):
+        raise NotImplementedError(
+            "A Braket Circuit cannot represent control flow. "
+            "Use compile_to_oq3 to compile circuits with control flow to OpenQASM 3."
+        )
 
     if len(args) > 4:
         raise ValueError(f"Unknown arguments passed: {args[4:]}")
@@ -359,20 +377,6 @@ def _translate_to_braket(
     for circuit_instruction in circuit.data:
         operation = circuit_instruction.operation
         qubits = circuit_instruction.qubits
-
-        if isinstance(operation, ControlFlowOp):
-            raise NotImplementedError(
-                f"Control-flow operation '{operation.name}' cannot be represented in a "
-                "Braket Circuit. Use compile_to_oq3 to compile circuits with control flow "
-                "to OpenQASM 3."
-            )
-
-        if getattr(operation, "condition", None):
-            raise NotImplementedError(
-                "Conditional operations are not supported. "
-                f"Found conditional gate '{operation.name}'. "
-                f"Only MeasureFF and CCPRx gates are supported in Braket."
-            )
 
         match gate_name := operation.name:
             case "measure":
