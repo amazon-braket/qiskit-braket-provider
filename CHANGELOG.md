@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.26.2 (2026-10-19)
+
+### Bug Fixes and Other Changes
+
+ * nonstandard basis gates
+
 ## v0.26.1 (2026-10-15)
 
 ### Bug Fixes and Other Changes
