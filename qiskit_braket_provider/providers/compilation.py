@@ -10,7 +10,8 @@ from dataclasses import dataclass
 
 from qiskit import QuantumCircuit, generate_preset_pass_manager
 from qiskit.circuit import Barrier, BoxOp, IfElseOp, Measure
-from qiskit.transpiler import PassManager, StagedPassManager, Target
+from qiskit.circuit import Instruction as QiskitInstruction
+from qiskit.transpiler import CouplingMap, PassManager, StagedPassManager, Target
 
 from braket.aws import AwsDevice
 from braket.devices import Device
@@ -18,6 +19,8 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_TO_QISKIT_NAMES,
     _BRAKET_VERBATIM_BOX_NAME,
+    _QISKIT_TO_BRAKET_NAMES,
+    _STANDARD_GATE_NAME_MAPPING,
 )
 from qiskit_braket_provider.providers.passes import (
     ExtractVerbatimBoxes,
@@ -61,6 +64,53 @@ def _default_target(circuits: Iterable[QuantumCircuit]) -> Target:
             target.add_instruction(instruction, name=name)
     target.add_instruction(Measure())
     target.add_instruction(Barrier(1))
+    target.add_instruction(IfElseOp, name="if_else")
+    return target
+
+
+def _basis_gates_target(
+    basis_gates: Collection[str],
+    circuits: Sequence[QuantumCircuit],
+    coupling_map: list[list[int]] | None,
+) -> Target:
+    """Build a ``Target`` for transpiling to ``basis_gates``.
+
+    Qiskit 2.x rejects non-standard gate names such as ``cphaseshift01`` in
+    ``basis_gates``; they must be supplied through a ``Target`` instead. This target maps
+    each such name to the provider's gate definition. ``measure``, ``reset`` and ``delay``
+    are always included, as Qiskit allows them alongside ``basis_gates``. ``if_else`` is
+    included so that dynamic circuits compile.
+
+    Use the returned target only for transpilation. With a coupling map it lists gates per
+    qubit, which would make translation wrap the output in a verbatim box.
+
+    Raises:
+        ValueError: If a name is neither a standard Qiskit gate nor a known Braket gate.
+    """
+    target_basis_gates: list[str] = []
+    custom_name_mapping: dict[str, QiskitInstruction] = {}
+    for name in dict.fromkeys([*basis_gates, "measure", "reset", "delay"]):
+        if name not in _STANDARD_GATE_NAME_MAPPING:
+            instruction = _BRAKET_GATE_NAME_TO_QISKIT_GATE.get(
+                _QISKIT_TO_BRAKET_NAMES.get(name, name)
+            )
+            if instruction is None:
+                raise ValueError(f"Unknown gate '{name}' in basis_gates.")
+            if not isinstance(instruction, QiskitInstruction):
+                continue  # unitary and kraus map to classes, which a Target can't hold
+            custom_name_mapping[name] = instruction
+        target_basis_gates.append(name)
+
+    num_qubits = max(circuit.num_qubits for circuit in circuits)
+    if coupling_map:
+        num_qubits = max(num_qubits, max(max(pair) for pair in coupling_map) + 1)
+
+    target = Target.from_configuration(
+        basis_gates=target_basis_gates,
+        num_qubits=num_qubits,
+        coupling_map=CouplingMap(coupling_map) if coupling_map else None,
+        custom_name_mapping=custom_name_mapping,
+    )
     target.add_instruction(IfElseOp, name="if_else")
     return target
 
@@ -207,11 +257,16 @@ def _compile(
                 )
             )
         ):
+            if basis_gates:
+                pm_target = _basis_gates_target(basis_gates, circuits, coupling_map)
+                pm_coupling_map = None
+            else:
+                pm_target = target
+                pm_coupling_map = coupling_map
             pm = generate_preset_pass_manager(
                 optimization_level=optimization_level,
-                basis_gates=list(basis_gates) if basis_gates else None,
-                coupling_map=coupling_map,
-                target=target,
+                coupling_map=pm_coupling_map,
+                target=pm_target,
                 layout_method=effective_layout_method,
                 routing_method=effective_routing_method,
                 seed_transpiler=seed_transpiler,

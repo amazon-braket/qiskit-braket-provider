@@ -91,6 +91,14 @@ class _SubstitutedTarget(Target):
                 result._layout = original._layout
         return results[0] if single else results
 
+    def substituted_gate_names(self) -> set[str]:
+        """Return the names of the gates that substitutions replace target gates with."""
+        return {
+            instruction.name
+            for substitutes in self._gate_substitutes.values()
+            for instruction in substitutes.values()
+        }
+
 
 class _SubstituteGates(TransformationPass):
     def __init__(
@@ -104,10 +112,9 @@ class _SubstituteGates(TransformationPass):
             return dag
         qubits = {q: i for i, q in enumerate(dag.qubits)}
         for node in dag.op_nodes():
-            if (op_name := node.op.name) in self._gate_substitutes:
-                dag.substitute_node(
-                    node, self._gate_substitutes[op_name][tuple(qubits[q] for q in node.qargs)]
-                )
+            substitutes = self._gate_substitutes.get(node.op.name, {})
+            if substitute := substitutes.get(tuple(qubits[q] for q in node.qargs)):
+                dag.substitute_node(node, substitute)
         return dag
 
 

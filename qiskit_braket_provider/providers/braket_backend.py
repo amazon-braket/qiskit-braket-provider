@@ -35,7 +35,7 @@ from .adapter import (
 from .braket_quantum_task import BraketQuantumTask
 
 if TYPE_CHECKING:
-    import datetime
+    import datetime as dt
     from collections.abc import Callable, Iterable
 
     from .braket_provider import BraketProvider
@@ -214,7 +214,7 @@ class BraketLocalBackend(BraketBackend[Device]):
         circuits: list[Circuit] = [
             to_braket(
                 circ,
-                target=self._target if not verbatim else None,
+                target=self._target,
                 qubit_labels=self._qubit_labels,
                 verbatim=verbatim,
             )
@@ -260,7 +260,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         provider: BraketProvider | None = None,
         name: str | None = None,
         description: str | None = None,
-        online_date: datetime.datetime | None = None,
+        online_date: dt.datetime | None = None,
         backend_version: str | None = None,
         *,
         device: AwsDevice | None = None,
@@ -464,7 +464,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         # Always use target for simulator
         target, basis_gates, qubit_labels = self._resolve_compilation_args(native, pass_manager)
         braket_circuits = (
-            to_braket(circuits, qubit_labels=self._qubit_labels, verbatim=True)
+            to_braket(circuits, qubit_labels=self._qubit_labels, target=self._target, verbatim=True)
             if verbatim
             else to_braket(
                 circuits,
@@ -538,7 +538,7 @@ class AWSBraketBackend(BraketAwsBackend):
         provider: BraketProvider | None = None,
         name: str | None = None,
         description: str | None = None,
-        online_date: datetime.datetime | None = None,
+        online_date: dt.datetime | None = None,
         backend_version: str | None = None,
         **fields,
     ) -> None:

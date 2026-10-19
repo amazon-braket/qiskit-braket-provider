@@ -4,6 +4,7 @@ import copy
 import enum
 import uuid
 from collections import Counter
+from math import pi
 from unittest.mock import Mock
 
 import numpy as np
@@ -13,11 +14,15 @@ from qiskit.providers import Options
 from qiskit.transpiler import Target
 
 from braket.aws import AwsDevice, AwsDeviceType
+from braket.circuits import GateCalibrations, QubitSet
+from braket.circuits import gates as braket_gates
 from braket.device_schema import DeviceActionType, StandardizedGateModelQpuDeviceProperties
 from braket.device_schema.iqm import IqmDeviceCapabilities
 from braket.device_schema.rigetti import RigettiDeviceCapabilities
 from braket.device_schema.simulators import GateModelSimulatorDeviceCapabilities
 from braket.devices import LocalSimulator
+from braket.parametric import FreeParameter
+from braket.pulse import PulseSequence
 from braket.task_result import ProgramSetTaskResult, TaskMetadata
 from braket.tasks import GateModelQuantumTaskResult, ProgramSetQuantumTaskResult
 from braket.tasks.local_quantum_task import LocalQuantumTask
@@ -556,6 +561,39 @@ def mock_simulator_device(*, supports_if: bool = True) -> Mock:
     device.type = AwsDeviceType.SIMULATOR
     device.name = "sv1"
     device.properties = properties
+    return device
+
+
+RIGETTI_CEPHEUS_ARN = "arn:aws:braket:us-west-1::device/qpu/rigetti/Cepheus-1-108Q"
+
+
+def mock_calibrated_rigetti_device() -> Mock:
+    """Return a mock Rigetti QPU whose ``rx`` is calibrated only at ±π/2 and ±π.
+
+    These calibrations make the device's Qiskit target list the rotations as ``sx``,
+    ``sxdg``, and ``x``, which are renamed back to ``rx`` after transpilation.
+    Native gates are ``rx``, ``rz``, ``cz``, and ``barrier`` on qubits 1 and 2.
+    """
+    capabilities = mock_emulator_capabilities()
+    capabilities.paradigm.nativeGateSet = [*capabilities.paradigm.nativeGateSet, "barrier"]
+    pulse = PulseSequence()
+    theta = FreeParameter("theta")
+    calibrations = GateCalibrations({
+        **{
+            (braket_gates.Rx(angle), QubitSet(qubit)): pulse
+            for angle in (pi / 2, -pi / 2, pi, -pi)
+            for qubit in (1, 2)
+        },
+        **{(braket_gates.Rz(theta), QubitSet(qubit)): pulse for qubit in (1, 2)},
+        (braket_gates.CZ(), QubitSet([1, 2])): pulse,
+    })
+    device = Mock(spec=AwsDevice)
+    device.type = AwsDeviceType.QPU
+    device.name = "Cepheus-1-108Q"
+    device.arn = RIGETTI_CEPHEUS_ARN
+    device.properties = capabilities
+    device.gate_calibrations = calibrations
+    device.topology_graph = mock_emulator_topology()
     return device
 
 
