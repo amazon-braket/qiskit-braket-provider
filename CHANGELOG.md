@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.27.0 (2026-10-20)
+
+### Features
+
+ * dynamic circuit support
+
 ## v0.26.2 (2026-10-19)
 
 ### Bug Fixes and Other Changes
