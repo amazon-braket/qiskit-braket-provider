@@ -1,5 +1,6 @@
 """Tests for the adapter OQ3 output path: ``to_oq3`` and ``compile_to_oq3``."""
 
+import warnings
 from collections.abc import Callable
 from unittest.mock import Mock
 
@@ -28,11 +29,16 @@ from qiskit_braket_provider.providers.adapter import (
     compile_to_oq3,
     to_braket,
     to_oq3,
+    to_qiskit,
 )
 from qiskit_braket_provider.providers.gate_mappings import _BRAKET_VERBATIM_BOX_NAME
 from qiskit_braket_provider.providers.target import aws_device_to_target, native_gate_set
 
 from .mocks import mock_calibrated_rigetti_device, mock_iqm_device
+
+
+def _to_oq3_from_source(source: str, **kwargs) -> str:
+    return to_oq3(to_qiskit(source), **kwargs)
 
 
 def _bell_circuit() -> QuantumCircuit:
@@ -615,3 +621,47 @@ def test_compile_to_oq3_default_path_with_iqm_native_gates(sim: LocalSimulator) 
 def test_compile_to_oq3_and_to_oq3_exported_from_package_root() -> None:
     assert qiskit_braket_provider.compile_to_oq3 is compile_to_oq3
     assert qiskit_braket_provider.to_oq3 is to_oq3
+
+
+@pytest.mark.parametrize(
+    ("body", "compile_kwargs", "expected_body"),
+    [
+        ("h $4;\nb[0] = measure $4;", {}, "h $4;\nb[0] = measure $4;"),
+        (
+            "h $0;\nx $2;\nb[0] = measure $0;\nif (b[0]) {\nx $2;\n} else {\nh $2;\n}",
+            {},
+            "h $0;\nx $2;\nb[0] = measure $0;\nif (b[0]) {\nx $2;\n} else {\nh $2;\n}",
+        ),
+        (
+            "h $4;\nb[0] = measure $4;",
+            {"verbatim": True},
+            "#pragma braket verbatim\nbox {\nh $4;\n}\nb[0] = measure $4;",
+        ),
+        (
+            "rx(1.5707963267948966) $2;\nb[0] = measure $2;",
+            {"braket_device": mock_calibrated_rigetti_device(), "verbatim": True},
+            "#pragma braket verbatim\nbox {\nrx(1.5707963267948966) $2;\n}\nb[0] = measure $2;",
+        ),
+    ],
+    ids=["gates", "if_else", "verbatim", "verbatim_on_device"],
+)
+def test_compile_to_oq3_preserves_physical_qubit_labels(
+    body: str, compile_kwargs: dict, expected_body: str
+) -> None:
+    """A program on physical qubits compiles, without warnings, to the same physical qubits."""
+    header = "OPENQASM 3.0;\nbit[1] b;\n"
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert compile_to_oq3(header + body, **compile_kwargs) == header + expected_body
+
+
+@pytest.mark.parametrize(
+    "convert", [compile_to_oq3, _to_oq3_from_source], ids=["compile_to_oq3", "to_oq3"]
+)
+def test_qubit_labels_ignored_with_warning_for_physical_qubits(convert: Callable) -> None:
+    """qubit_labels with a program on physical qubits warns, and the input's qubits are kept."""
+    source = "OPENQASM 3.0;\nbit[1] b;\nh $4;\nb[0] = measure $4;"
+
+    with pytest.warns(UserWarning, match="qubit_labels is ignored"):
+        assert convert(source, qubit_labels=[0, 1, 2, 3, 9]) == source

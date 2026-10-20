@@ -22,6 +22,8 @@ from qiskit_braket_provider.providers.gate_mappings import (
 _QUBIT_DECL_RE = re.compile(r"^qubit\[(\d+)\]\s+(\w+);\n?", re.MULTILINE)
 
 _PHYSICAL_QUBIT_RE = re.compile(r"\$(\d+)")
+_LOOSE_QUBIT_DECL_RE = re.compile(r"^qubit\s+_qubit\d+;\n?", re.MULTILINE)
+_LOOSE_QUBIT_RE = re.compile(r"\b_qubit(\d+)\b")
 
 
 class ConsolidateClbits(TransformationPass):
@@ -92,11 +94,12 @@ class WrapInVerbatimBox(TransformationPass):
             while split > 0 and isinstance(circuit.data[split - 1].operation, Measure):
                 split -= 1
 
-        inner = QuantumCircuit(*circuit.qregs, *circuit.cregs)
+        # Keep the bits as well as the registers: register-less circuits have no registers.
+        inner = QuantumCircuit(circuit.qubits, circuit.clbits, *circuit.qregs, *circuit.cregs)
         for instr in circuit.data[:split]:
             inner.append(instr.operation, instr.qubits, instr.clbits)
 
-        result = QuantumCircuit(*circuit.qregs, *circuit.cregs)
+        result = QuantumCircuit(circuit.qubits, circuit.clbits, *circuit.qregs, *circuit.cregs)
         result.append(BraketVerbatimBox(inner), result.qubits, result.clbits)
         for instr in circuit.data[split:]:
             result.append(instr.operation, instr.qubits, instr.clbits)
@@ -180,7 +183,7 @@ def _rename_gates_in_block_op(op: Instruction) -> Instruction:
 def _remap_qubits(oq3_source: str, qubit_labels: Sequence[int] | None) -> str:
     """Replace qubit references with physical qubit notation.
 
-    Handles two cases produced by ``qasm3.dumps()``:
+    Handles three cases produced by ``qasm3.dumps()``:
 
     1. **Layout-aware output** (``$N`` notation, no ``qubit[N] q;`` declaration):
        when the circuit's ``layout`` property is set, Qiskit emits physical
@@ -192,6 +195,12 @@ def _remap_qubits(oq3_source: str, qubit_labels: Sequence[int] | None) -> str:
        This path primarily serves Qiskit circuits submitted with
        ``verbatim=True``, where physical ``$N`` output is required but no
        Qiskit ``.layout`` has been attached to the circuit.
+
+    3. **Register-less output** (``qubit _qubitN;`` per qubit): circuits without a
+       quantum register, such as ``to_qiskit`` output for a program on physical
+       qubits, where qubit ``N`` is physical qubit ``$N``. Remove the declarations
+       and write ``_qubitN`` as ``$N``. ``qubit_labels`` is not applied, because
+       the input's physical qubits are already device qubits.
 
     Raises:
         ValueError: If the source contains more than one ``qubit[N] ...;``
@@ -207,6 +216,10 @@ def _remap_qubits(oq3_source: str, qubit_labels: Sequence[int] | None) -> str:
             f"Braket does not support multiple quantum registers; "
             f"got {len(declarations)}: {[name for _, name in declarations]}."
         )
+
+    if _LOOSE_QUBIT_DECL_RE.search(oq3_source):
+        oq3_source = _LOOSE_QUBIT_DECL_RE.sub("", oq3_source)
+        return _LOOSE_QUBIT_RE.sub(r"$\1", oq3_source)
 
     if not qubit_labels:
         return oq3_source

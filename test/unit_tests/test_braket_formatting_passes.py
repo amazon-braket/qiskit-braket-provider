@@ -643,8 +643,28 @@ def test_braket_verbatim_box_label_and_annotation(label_kwarg: dict, expected_la
             [],
             True,
         ),
+        (
+            "OPENQASM 3.0;\nbit _bit0;\nqubit _qubit0;\nqubit _qubit1;\nh _qubit1;\n",
+            None,
+            ["h $1;"],
+            ["_qubit"],
+            False,
+        ),
+        (
+            "OPENQASM 3.0;\nbit _bit0;\nqubit _qubit0;\nqubit _qubit1;\nh _qubit1;\n",
+            [3, 7],
+            ["h $1;"],
+            ["_qubit", "$7"],
+            False,
+        ),
     ],
-    ids=["virtual_form", "layout_aware_form", "noop_when_none"],
+    ids=[
+        "virtual_form",
+        "layout_aware_form",
+        "noop_when_none",
+        "loose_qubits_without_labels",
+        "loose_qubits_ignore_labels",
+    ],
 )
 def test_remap_qubits(
     source: str,

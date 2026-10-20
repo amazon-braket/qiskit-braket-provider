@@ -813,6 +813,8 @@ def to_oq3(
             Braket-supported gates.
         qubit_labels: Physical qubit indices for the target device. If provided,
             virtual qubits are remapped to physical qubit notation (``$0``, ``$1``, etc.).
+            Ignored, with a warning, for circuits on physical qubits (no quantum
+            register), which keep their physical qubits.
         should_wrap_verbatim: Whether to wrap the circuit in a verbatim box.
         include_measurement_in_verbatim: Whether trailing measurements go inside the
             verbatim box rather than after it. Only used when ``should_wrap_verbatim``
@@ -826,6 +828,14 @@ def to_oq3(
             gates would otherwise be serialized as ``gate`` definitions that
             Braket cannot run; transpile the circuit to the basis gates first.
     """
+    if qubit_labels is not None and not circuit.qregs:
+        warnings.warn(
+            "qubit_labels is ignored for circuits on physical qubits, which keep their "
+            "physical qubits in the output.",
+            UserWarning,
+            stacklevel=2,
+        )
+
     pm = PassManager()
     pm.append(ConsolidateClbits())
     if should_wrap_verbatim:
@@ -924,15 +934,18 @@ def _compile_to_oq3(
         else:
             should_wrap = True
 
-        qubit_labels = result.qubit_labels
-        if qubit_labels is not None and len(qubit_labels) > circ.num_qubits:
-            qubit_labels = qubit_labels[: circ.num_qubits]
+        circ_qubit_labels = result.qubit_labels
+        if qubit_labels is None and not circ.qregs:
+            # The device's labels don't apply to circuits on physical qubits.
+            circ_qubit_labels = None
+        if circ_qubit_labels is not None and len(circ_qubit_labels) > circ.num_qubits:
+            circ_qubit_labels = circ_qubit_labels[: circ.num_qubits]
 
         oq3_strings.append(
             to_oq3(
                 circ,
                 basis_gates=effective_basis_gates,
-                qubit_labels=qubit_labels,
+                qubit_labels=circ_qubit_labels,
                 should_wrap_verbatim=should_wrap,
                 include_measurement_in_verbatim=is_iqm,
             )
