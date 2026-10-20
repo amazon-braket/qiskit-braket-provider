@@ -16,7 +16,6 @@ from qiskit import (
     transpile,
 )
 from qiskit.circuit import Gate as QiskitGate
-from qiskit.circuit import Instruction as QiskitInstruction
 from qiskit.circuit import Measure, Parameter, ParameterVector
 from qiskit.circuit.library import CXGate, GlobalPhaseGate, HGate, PauliEvolutionGate
 from qiskit.circuit.library import standard_gates as qiskit_gates
@@ -1335,22 +1334,6 @@ class TestAdapter(TestCase):
         """
         self.assertTrue(check_to_braket_openqasm_unitary_correct(qasm_string))
 
-    def test_conditional_gate_with_condition_attribute(self):
-        """Tests that operations with condition attribute raise NotImplementedError."""
-        qc = QuantumCircuit(2, 2)
-        qc.h(0)
-        qc.measure(0, 0)
-
-        x_instr = QiskitInstruction("x", 1, 0, [])
-        x_instr.condition = (0, 1)
-        qc.append(x_instr, [1])
-
-        with pytest.raises(
-            NotImplementedError,
-            match=r"Conditional operations are not supported.*Only MeasureFF and CCPRx",
-        ):
-            to_braket(qc)
-
     def test_conditional_gate_with_if_test(self):
         """Tests that if_test conditional operations raise NotImplementedError."""
         qr = QuantumRegister(2, "q")
@@ -1365,7 +1348,7 @@ class TestAdapter(TestCase):
 
         with pytest.raises(
             NotImplementedError,
-            match=r"Conditional operations are not supported.*Only MeasureFF and CCPRx",
+            match=r"cannot represent control flow.*compile_to_oq3",
         ):
             to_braket(qc, verbatim=True)
 
@@ -1383,7 +1366,7 @@ class TestAdapter(TestCase):
 
         with pytest.raises(
             NotImplementedError,
-            match=r"Conditional operations are not supported.*Only MeasureFF and CCPRx",
+            match=r"cannot represent control flow.*compile_to_oq3",
         ):
             to_braket(qc, verbatim=True)
 

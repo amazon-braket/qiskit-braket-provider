@@ -9,7 +9,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from qiskit import QuantumCircuit, generate_preset_pass_manager
-from qiskit.circuit import Barrier, BoxOp, Measure
+from qiskit.circuit import Barrier, BoxOp, IfElseOp, Measure
 from qiskit.circuit import Instruction as QiskitInstruction
 from qiskit.transpiler import CouplingMap, PassManager, StagedPassManager, Target
 
@@ -64,6 +64,7 @@ def _default_target(circuits: Iterable[QuantumCircuit]) -> Target:
             target.add_instruction(instruction, name=name)
     target.add_instruction(Measure())
     target.add_instruction(Barrier(1))
+    target.add_instruction(IfElseOp, name="if_else")
     return target
 
 
@@ -77,7 +78,8 @@ def _basis_gates_target(
     Qiskit 2.x rejects non-standard gate names such as ``cphaseshift01`` in
     ``basis_gates``; they must be supplied through a ``Target`` instead. This target maps
     each such name to the provider's gate definition. ``measure``, ``reset`` and ``delay``
-    are always included, as Qiskit allows them alongside ``basis_gates``.
+    are always included, as Qiskit allows them alongside ``basis_gates``. ``if_else`` is
+    included so that dynamic circuits compile.
 
     Use the returned target only for transpilation. With a coupling map it lists gates per
     qubit, which would make translation wrap the output in a verbatim box.
@@ -103,12 +105,14 @@ def _basis_gates_target(
     if coupling_map:
         num_qubits = max(num_qubits, max(max(pair) for pair in coupling_map) + 1)
 
-    return Target.from_configuration(
+    target = Target.from_configuration(
         basis_gates=target_basis_gates,
         num_qubits=num_qubits,
         coupling_map=CouplingMap(coupling_map) if coupling_map else None,
         custom_name_mapping=custom_name_mapping,
     )
+    target.add_instruction(IfElseOp, name="if_else")
+    return target
 
 
 def _inline_verbatim_boxes(circuit: QuantumCircuit, verbatim_box_name: str) -> QuantumCircuit:

@@ -32,7 +32,13 @@ from .providers import (
     BraketSampler as BraketSampler,
 )
 from .providers import (
+    compile_to_oq3 as compile_to_oq3,
+)
+from .providers import (
     to_braket as to_braket,
+)
+from .providers import (
+    to_oq3 as to_oq3,
 )
 from .providers import (
     to_qiskit as to_qiskit,
