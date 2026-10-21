@@ -49,7 +49,7 @@ from qiskit_braket_provider.providers.compilation import (
     _default_target,  # ruff:ignore[unused-import]
 )
 from qiskit_braket_provider.providers.gate_mappings import (
-    _BRAKET_GATE_NAME_TO_QISKIT_GATE,
+    _BRAKET_GATE_NAME_TO_QISKIT_GATE,  # ruff:ignore[unused-import]
     _BRAKET_SUPPORTED_NOISES,  # ruff:ignore[unused-import]
     _BRAKET_VERBATIM_BOX_NAME,
     _CONTROLLED_GATES_BY_QUBIT_COUNT,  # ruff:ignore[unused-import]
@@ -72,8 +72,8 @@ from qiskit_braket_provider.providers.passes.braket_formatting_passes import (
     _remap_qubits,
 )
 from qiskit_braket_provider.providers.qasm_context import (
+    _create_qiskit_gate,
     _QiskitProgramContext,
-    _sympy_to_qiskit,
 )
 from qiskit_braket_provider.providers.target import (
     _get_controlled_gateset,  # ruff:ignore[unused-import]
@@ -727,27 +727,6 @@ def _create_qiskit_kraus(gate_params: list[np.ndarray]) -> QiskitInstruction:
         assert param.shape[0] == param.shape[1], "Kraus operators must be square matrices."
         gate_params[i] = _reverse_endianness(param)
     return qiskit_qi.Kraus(gate_params)
-
-
-def _create_qiskit_gate(
-    gate_name: str,
-    gate_params: list[float | FreeParameterExpression],
-    param_map: dict[str, Parameter],
-) -> QiskitInstruction:
-    gate_instance = _BRAKET_GATE_NAME_TO_QISKIT_GATE.get(gate_name)
-    if not gate_instance:
-        raise TypeError(f'Braket gate "{gate_name}" not supported in Qiskit')
-    new_gate_params = []
-    for param_expression, value in zip(gate_instance.params, gate_params, strict=True):
-        # extract the coefficient in the templated gate
-        param = next(iter(param_expression.parameters)).sympify()
-        coeff = float(param_expression.sympify().subs(param, 1))
-        new_gate_params.append(
-            _sympy_to_qiskit(coeff * value.expression, param_map)
-            if isinstance(value, FreeParameterExpression)
-            else coeff * value
-        )
-    return gate_instance.__class__(*new_gate_params)
 
 
 def convert_qiskit_to_braket_circuit(circuit: QuantumCircuit) -> Circuit:

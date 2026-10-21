@@ -2251,3 +2251,18 @@ def test_to_braket_ionq_basis_gate_names_emitted(bell_circuit: QuantumCircuit):
 def test_to_braket_unknown_basis_gate_name_raises(bell_circuit: QuantumCircuit):
     with pytest.raises(ValueError, match="Unknown gate 'not_a_gate' in basis_gates"):
         to_braket(bell_circuit, basis_gates={"cz", "rx", "rz", "cphaseshift01", "not_a_gate"})
+
+
+@pytest.mark.parametrize(
+    ("qasm_gate", "expected_turns"),
+    [
+        ("gpi(pi / 2) q[0];", [0.25]),
+        ("ms(pi / 2, pi, pi / 4) q[0], q[1];", [0.25, 0.5, 0.125]),
+    ],
+    ids=["gpi", "ms"],
+)
+def test_to_qiskit_openqasm_ionq_angles_in_turns(qasm_gate: str, expected_turns: list[float]):
+    """OpenQASM gives IonQ angles in radians, and qiskit-ionq gates take turns."""
+    circuit = to_qiskit(f"OPENQASM 3.0;\nqubit[2] q;\n{qasm_gate}", add_measurements=False)
+
+    assert circuit.data[0].operation.params == pytest.approx(expected_turns)
