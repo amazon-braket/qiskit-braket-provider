@@ -2262,7 +2262,7 @@ def test_to_braket_unknown_basis_gate_name_raises(bell_circuit: QuantumCircuit):
     ids=["gpi", "ms"],
 )
 def test_to_qiskit_openqasm_ionq_angles_in_turns(qasm_gate: str, expected_turns: list[float]):
-    """OpenQASM gives IonQ angles in radians, and qiskit-ionq gates take turns."""
+    """Braket's IonQ gates take angles in radians, and qiskit-ionq gates take turns."""
     circuit = to_qiskit(f"OPENQASM 3.0;\nqubit[2] q;\n{qasm_gate}", add_measurements=False)
 
     assert circuit.data[0].operation.params == pytest.approx(expected_turns)
