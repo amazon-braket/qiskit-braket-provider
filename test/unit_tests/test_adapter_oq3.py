@@ -5,12 +5,14 @@ from collections.abc import Callable
 from unittest.mock import Mock
 
 import pytest
-from qiskit import QuantumCircuit
+from qiskit import QuantumCircuit, QuantumRegister
 from qiskit.circuit import (
     BoxOp,
     ClassicalRegister,
+    Clbit,
     IfElseOp,
     Measure,
+    Qubit,
 )
 from qiskit.circuit.library import CXGate, HGate, XGate
 from qiskit.transpiler import Target
@@ -39,6 +41,22 @@ from .mocks import mock_calibrated_rigetti_device, mock_iqm_device
 
 def _to_oq3_from_source(source: str, **kwargs) -> str:
     return to_oq3(to_qiskit(source), **kwargs)
+
+
+def _loose_qubit_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit([Qubit(), Qubit()], [Clbit()])
+    qc.h(0)
+    qc.cx(0, 1)
+    qc.measure(1, 0)
+    return qc
+
+
+def _register_and_loose_qubit_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit(QuantumRegister(2, "q"), [Qubit()], ClassicalRegister(1, "c"))
+    qc.h(0)
+    qc.cx(0, 2)
+    qc.measure(2, 0)
+    return qc
 
 
 def _bell_circuit() -> QuantumCircuit:
@@ -665,3 +683,25 @@ def test_qubit_labels_ignored_with_warning_for_physical_qubits(convert: Callable
 
     with pytest.warns(UserWarning, match="qubit_labels is ignored"):
         assert convert(source, qubit_labels=[0, 1, 2, 3, 9]) == source
+
+
+def test_to_oq3_keeps_physical_qubits_translated_through_device_labels() -> None:
+    """A program translated with physical_qubit_labels keeps its physical qubits."""
+    source = "OPENQASM 3.0;\nbit[1] b;\nh $1;\nb[0] = measure $1;"
+
+    assert to_oq3(to_qiskit(source, physical_qubit_labels=list(range(1, 21)))) == source
+
+
+def test_to_oq3_keeps_hand_built_loose_qubits_virtual() -> None:
+    """Loose qubits in a circuit not built by to_qiskit stay virtual, without a warning."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        oq3 = to_oq3(_loose_qubit_circuit(), qubit_labels=[10, 11])
+
+    assert "qubit _qubit0;" in oq3
+    assert "$" not in oq3
+
+
+def test_to_oq3_register_with_loose_qubit_and_labels_raises() -> None:
+    with pytest.raises(ValueError, match="does not match the circuit's qubit count"):
+        to_oq3(_register_and_loose_qubit_circuit(), qubit_labels=[5, 6, 7])

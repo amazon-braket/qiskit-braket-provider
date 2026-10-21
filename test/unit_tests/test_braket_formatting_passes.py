@@ -29,6 +29,8 @@ from qiskit_braket_provider.providers.passes.braket_formatting_passes import (
     _shim_class_for,
 )
 
+_LOOSE_QUBIT_SOURCE = "OPENQASM 3.0;\nbit _bit0;\nqubit _qubit0;\nqubit _qubit1;\nh _qubit1;\n"
+
 
 def _bell_circuit() -> QuantumCircuit:
     qc = QuantumCircuit(2, 2)
@@ -643,28 +645,8 @@ def test_braket_verbatim_box_label_and_annotation(label_kwarg: dict, expected_la
             [],
             True,
         ),
-        (
-            "OPENQASM 3.0;\nbit _bit0;\nqubit _qubit0;\nqubit _qubit1;\nh _qubit1;\n",
-            None,
-            ["h $1;"],
-            ["_qubit"],
-            False,
-        ),
-        (
-            "OPENQASM 3.0;\nbit _bit0;\nqubit _qubit0;\nqubit _qubit1;\nh _qubit1;\n",
-            [3, 7],
-            ["h $1;"],
-            ["_qubit", "$7"],
-            False,
-        ),
     ],
-    ids=[
-        "virtual_form",
-        "layout_aware_form",
-        "noop_when_none",
-        "loose_qubits_without_labels",
-        "loose_qubits_ignore_labels",
-    ],
+    ids=["virtual_form", "layout_aware_form", "noop_when_none"],
 )
 def test_remap_qubits(
     source: str,
@@ -677,6 +659,23 @@ def test_remap_qubits(
     if expect_unchanged:
         assert result == source
     _assert_contents(result, expected_present, expected_absent)
+
+
+@pytest.mark.parametrize(
+    ("physical_qubits", "qubit_labels", "expected"),
+    [
+        ([0, 1], None, "OPENQASM 3.0;\nbit _bit0;\nh $1;\n"),
+        ([0, 1], [3, 7], "OPENQASM 3.0;\nbit _bit0;\nh $1;\n"),
+        ([4, 9], None, "OPENQASM 3.0;\nbit _bit0;\nh $9;\n"),
+        (None, None, _LOOSE_QUBIT_SOURCE),
+    ],
+    ids=["physical_qubits", "ignores_qubit_labels", "noncontiguous_labels", "not_physical"],
+)
+def test_remap_qubits_physical_qubit_form(
+    physical_qubits: list[int] | None, qubit_labels: list[int] | None, expected: str
+) -> None:
+    """Loose qubits become their physical labels only when physical_qubits is given."""
+    assert _remap_qubits(_LOOSE_QUBIT_SOURCE, qubit_labels, physical_qubits) == expected
 
 
 def test_remap_qubits_raises_on_label_length_mismatch() -> None:

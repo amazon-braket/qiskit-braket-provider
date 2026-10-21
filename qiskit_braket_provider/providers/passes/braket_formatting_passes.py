@@ -180,7 +180,11 @@ def _rename_gates_in_block_op(op: Instruction) -> Instruction:
     return op.replace_blocks([_rename_gates_in_circuit(block) for block in op.blocks])
 
 
-def _remap_qubits(oq3_source: str, qubit_labels: Sequence[int] | None) -> str:
+def _remap_qubits(
+    oq3_source: str,
+    qubit_labels: Sequence[int] | None,
+    physical_qubits: Sequence[int] | None = None,
+) -> str:
     """Replace qubit references with physical qubit notation.
 
     Handles three cases produced by ``qasm3.dumps()``:
@@ -196,11 +200,11 @@ def _remap_qubits(oq3_source: str, qubit_labels: Sequence[int] | None) -> str:
        ``verbatim=True``, where physical ``$N`` output is required but no
        Qiskit ``.layout`` has been attached to the circuit.
 
-    3. **Register-less output** (``qubit _qubitN;`` per qubit): circuits without a
-       quantum register, such as ``to_qiskit`` output for a program on physical
-       qubits, where qubit ``N`` is physical qubit ``$N``. Remove the declarations
-       and write ``_qubitN`` as ``$N``. ``qubit_labels`` is not applied, because
-       the input's physical qubits are already device qubits.
+    3. **Physical qubit output** (``qubit _qubitN;`` per qubit): ``to_qiskit`` output
+       for a program on physical qubits, which has no quantum register. When
+       ``physical_qubits`` gives the physical label of each qubit, remove the
+       declarations and write ``_qubitN`` as ``$physical_qubits[N]``.
+       ``qubit_labels`` is not applied, because these are already device qubits.
 
     Raises:
         ValueError: If the source contains more than one ``qubit[N] ...;``
@@ -217,9 +221,9 @@ def _remap_qubits(oq3_source: str, qubit_labels: Sequence[int] | None) -> str:
             f"got {len(declarations)}: {[name for _, name in declarations]}."
         )
 
-    if _LOOSE_QUBIT_DECL_RE.search(oq3_source):
+    if physical_qubits is not None and _LOOSE_QUBIT_DECL_RE.search(oq3_source):
         oq3_source = _LOOSE_QUBIT_DECL_RE.sub("", oq3_source)
-        return _LOOSE_QUBIT_RE.sub(r"$\1", oq3_source)
+        return _LOOSE_QUBIT_RE.sub(lambda m: f"${physical_qubits[int(m.group(1))]}", oq3_source)
 
     if not qubit_labels:
         return oq3_source

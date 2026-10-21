@@ -144,6 +144,17 @@ def _has_nontrivial_layout(circuit: QuantumCircuit) -> bool:
     return layout is not None and layout != list(range(len(layout)))
 
 
+def _physical_qubits(circuit: QuantumCircuit) -> list[int] | None:
+    """Return the physical qubit labels of a ``to_qiskit`` circuit on physical qubits.
+
+    Returns ``None`` for other circuits, including ones a transpiler has laid out
+    onto a quantum register.
+    """
+    if circuit.qregs:
+        return None
+    return (circuit.metadata or {}).get("braket_physical_qubits")
+
+
 def _has_control_flow(circuit: QuantumCircuit) -> bool:
     """Return True if ``circuit`` contains any top-level control-flow op.
 
@@ -813,8 +824,8 @@ def to_oq3(
             Braket-supported gates.
         qubit_labels: Physical qubit indices for the target device. If provided,
             virtual qubits are remapped to physical qubit notation (``$0``, ``$1``, etc.).
-            Ignored, with a warning, for circuits on physical qubits (no quantum
-            register), which keep their physical qubits.
+            Ignored, with a warning, for ``to_qiskit`` output of a program on physical
+            qubits, which keeps its physical qubits.
         should_wrap_verbatim: Whether to wrap the circuit in a verbatim box.
         include_measurement_in_verbatim: Whether trailing measurements go inside the
             verbatim box rather than after it. Only used when ``should_wrap_verbatim``
@@ -828,7 +839,8 @@ def to_oq3(
             gates would otherwise be serialized as ``gate`` definitions that
             Braket cannot run; transpile the circuit to the basis gates first.
     """
-    if qubit_labels is not None and not circuit.qregs:
+    physical_qubits = _physical_qubits(circuit)
+    if qubit_labels is not None and physical_qubits is not None:
         warnings.warn(
             "qubit_labels is ignored for circuits on physical qubits, which keep their "
             "physical qubits in the output.",
@@ -869,7 +881,8 @@ def to_oq3(
     )
 
     output_names = (circuit.metadata or {}).get("braket_output_variables", {})
-    return _normalize_formatting(_remap_qubits(oq3_source, qubit_labels), output_names)
+    oq3_source = _remap_qubits(oq3_source, qubit_labels, physical_qubits)
+    return _normalize_formatting(oq3_source, output_names)
 
 
 def _compile_to_oq3(
@@ -935,7 +948,7 @@ def _compile_to_oq3(
             should_wrap = True
 
         circ_qubit_labels = result.qubit_labels
-        if qubit_labels is None and not circ.qregs:
+        if qubit_labels is None and _physical_qubits(circ) is not None:
             # The device's labels don't apply to circuits on physical qubits.
             circ_qubit_labels = None
         if circ_qubit_labels is not None and len(circ_qubit_labels) > circ.num_qubits:
