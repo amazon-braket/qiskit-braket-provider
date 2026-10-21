@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 import pytest
 from qiskit import QuantumCircuit, qasm3
-from qiskit.circuit import BoxOp, ClassicalRegister, Clbit, IfElseOp, QuantumRegister
+from qiskit.circuit import BoxOp, ClassicalRegister, Clbit, IfElseOp, QuantumRegister, Qubit
 from qiskit.circuit.library import CXGate, GlobalPhaseGate, PhaseGate, RGate, RXXGate
 from qiskit.transpiler import PassManager
 
@@ -434,8 +434,8 @@ def test_wrap_in_verbatim_box_preserves_if_else_body_when_including_measurement(
 
 @pytest.mark.parametrize(
     "circuit",
-    [QuantumCircuit(2, 2), QuantumCircuit()],
-    ids=["wires_only", "nothing_at_all"],
+    [QuantumCircuit(2, 2), QuantumCircuit(), QuantumCircuit([Qubit(), Qubit()], [Clbit()])],
+    ids=["wires_only", "nothing_at_all", "bits_without_registers"],
 )
 def test_wrap_in_verbatim_box_empty_circuit(circuit: QuantumCircuit) -> None:
     """An empty circuit yields a single empty verbatim box spanning its wires."""
