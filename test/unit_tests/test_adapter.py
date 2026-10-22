@@ -41,7 +41,6 @@ from braket.pulse import PulseSequence
 from braket.registers import QubitSet
 from qiskit_braket_provider import exception, to_braket, to_qiskit
 from qiskit_braket_provider.providers.adapter import (
-    _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_SUPPORTED_NOISES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
     _compile,
@@ -55,6 +54,7 @@ from qiskit_braket_provider.providers.adapter import (
     translate_sparse_pauli_op,
 )
 from qiskit_braket_provider.providers.braket_instructions import CCPRx, MeasureFF
+from qiskit_braket_provider.providers.gate_mappings import _BRAKET_GATE_NAME_TO_QISKIT_GATE
 from test.unit_tests.mocks import (
     MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES,
     MOCK_RIGETTI_STANARDIZED_PROPERTIES,
@@ -1804,7 +1804,7 @@ rx(sin(theta) + 2.0*phi) q[0];"""
         with (
             self.assertRaises(TypeError),
             patch.dict(
-                "qiskit_braket_provider.providers.adapter._BRAKET_GATE_NAME_TO_QISKIT_GATE",
+                "qiskit_braket_provider.providers.qasm_context._BRAKET_GATE_NAME_TO_QISKIT_GATE",
                 {"cnot": None},
             ),
         ):

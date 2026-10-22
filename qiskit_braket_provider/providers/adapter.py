@@ -49,7 +49,6 @@ from qiskit_braket_provider.providers.compilation import (
     _default_target,  # ruff:ignore[unused-import]
 )
 from qiskit_braket_provider.providers.gate_mappings import (
-    _BRAKET_GATE_NAME_TO_QISKIT_GATE,  # ruff:ignore[unused-import]
     _BRAKET_SUPPORTED_NOISES,  # ruff:ignore[unused-import]
     _BRAKET_VERBATIM_BOX_NAME,
     _CONTROLLED_GATES_BY_QUBIT_COUNT,  # ruff:ignore[unused-import]
