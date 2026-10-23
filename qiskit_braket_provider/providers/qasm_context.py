@@ -692,7 +692,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         """Resolve an identifier or indexed identifier to a classical bit index."""
         if isinstance(node, IndexExpression):
             name = node.collection.name
-            index = node.index[0].value
+            index = self._resolve_register_index(name, node.index[0])
         elif isinstance(node, Identifier):
             name = node.name
             var_type = self.get_type(name)
@@ -708,3 +708,26 @@ class _QiskitProgramContext(AbstractProgramContext):
             raise TypeError(f"Unsupported condition operand type: {type(node)}")
 
         return self._clbit_offset[name] + index
+
+    def _resolve_register_index(self, name: str, index_node: Expression) -> int:
+        """Evaluate a constant index into bit register ``name``.
+
+        Negative indices count back from the end of the register, as in OpenQASM 3.
+
+        Raises:
+            TypeError: If the index does not evaluate to a constant integer.
+            IndexError: If the index is out of range for the register.
+        """
+        index = self._evaluate_expression(index_node)
+        if not isinstance(index, IntegerLiteral):
+            raise TypeError(
+                f"Index into '{name}' in a branching condition must be a constant integer, "
+                f"got {type(index).__name__}."
+            )
+        size_node = self.get_type(name).size
+        size = size_node.value if size_node is not None else 1
+        if not -size <= index.value < size:
+            raise IndexError(
+                f"Index {index.value} is out of range for register '{name}' (bit[{size}])."
+            )
+        return index.value % size
