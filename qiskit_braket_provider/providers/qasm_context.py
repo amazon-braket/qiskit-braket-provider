@@ -153,6 +153,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._verbatim_box_name = verbatim_box_name
         self._clbit_offset: dict[str, int] = {}
         self._result_types: list[Results] = []
+        self._physical_qubit_labels = physical_qubit_labels
         label_to_qiskit_index: dict[int, int] | None = (
             {label: i for i, label in enumerate(physical_qubit_labels)}
             if physical_qubit_labels
@@ -173,6 +174,11 @@ class _QiskitProgramContext(AbstractProgramContext):
                 "Every verbatim box start marker must have a matching end marker."
             )
         top = self._circuit_stack[0]
+        if top.num_qubits and not top.qregs:
+            # Only $N references create qubits outside a register. Record each qubit's
+            # physical label, so that the OpenQASM output can keep them.
+            labels = self._physical_qubit_labels or range(top.num_qubits)
+            top.metadata["braket_physical_qubits"] = list(labels[: top.num_qubits])
         return self._finalize_scoped_bodies(top)
 
     def add_result(self, result: Results) -> None:

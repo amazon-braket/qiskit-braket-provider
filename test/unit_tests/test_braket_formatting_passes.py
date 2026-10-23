@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 import pytest
 from qiskit import QuantumCircuit, qasm3
-from qiskit.circuit import BoxOp, ClassicalRegister, Clbit, IfElseOp, QuantumRegister
+from qiskit.circuit import BoxOp, ClassicalRegister, Clbit, IfElseOp, QuantumRegister, Qubit
 from qiskit.circuit.library import CXGate, GlobalPhaseGate, PhaseGate, RGate, RXXGate
 from qiskit.transpiler import PassManager
 
@@ -28,6 +28,8 @@ from qiskit_braket_provider.providers.passes.braket_formatting_passes import (
     _remap_qubits,
     _shim_class_for,
 )
+
+_LOOSE_QUBIT_SOURCE = "OPENQASM 3.0;\nbit _bit0;\nqubit _qubit0;\nqubit _qubit1;\nh _qubit1;\n"
 
 
 def _bell_circuit() -> QuantumCircuit:
@@ -432,8 +434,8 @@ def test_wrap_in_verbatim_box_preserves_if_else_body_when_including_measurement(
 
 @pytest.mark.parametrize(
     "circuit",
-    [QuantumCircuit(2, 2), QuantumCircuit()],
-    ids=["wires_only", "nothing_at_all"],
+    [QuantumCircuit(2, 2), QuantumCircuit(), QuantumCircuit([Qubit(), Qubit()], [Clbit()])],
+    ids=["wires_only", "nothing_at_all", "bits_without_registers"],
 )
 def test_wrap_in_verbatim_box_empty_circuit(circuit: QuantumCircuit) -> None:
     """An empty circuit yields a single empty verbatim box spanning its wires."""
@@ -657,6 +659,23 @@ def test_remap_qubits(
     if expect_unchanged:
         assert result == source
     _assert_contents(result, expected_present, expected_absent)
+
+
+@pytest.mark.parametrize(
+    ("physical_qubits", "qubit_labels", "expected"),
+    [
+        ([0, 1], None, "OPENQASM 3.0;\nbit _bit0;\nh $1;\n"),
+        ([0, 1], [3, 7], "OPENQASM 3.0;\nbit _bit0;\nh $1;\n"),
+        ([4, 9], None, "OPENQASM 3.0;\nbit _bit0;\nh $9;\n"),
+        (None, None, _LOOSE_QUBIT_SOURCE),
+    ],
+    ids=["physical_qubits", "ignores_qubit_labels", "noncontiguous_labels", "not_physical"],
+)
+def test_remap_qubits_physical_qubit_form(
+    physical_qubits: list[int] | None, qubit_labels: list[int] | None, expected: str
+) -> None:
+    """Loose qubits become their physical labels only when physical_qubits is given."""
+    assert _remap_qubits(_LOOSE_QUBIT_SOURCE, qubit_labels, physical_qubits) == expected
 
 
 def test_remap_qubits_raises_on_label_length_mismatch() -> None:
