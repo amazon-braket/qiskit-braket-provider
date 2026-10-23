@@ -214,11 +214,16 @@ class _QiskitProgramContext(AbstractProgramContext):
         target.add_bits(source.clbits[target.num_clbits :])
 
     def _ensure_qubit_capacity(self, target: Sequence[int]) -> None:
-        """Grow the active circuit so it can address every index in target."""
+        """Grow the active circuit so it can address every index in target.
+
+        New qubits are added to every circuit on the stack, so that sibling branch
+        bodies built later share the same qubit objects as the parent.
+        """
         active = self._active_circuit
         max_qubits = (max(target) + 1) if target else -1
-        num_missing_qubits = max_qubits - active.num_qubits
-        active.add_bits([Qubit() for _ in range(num_missing_qubits)])
+        new_qubits = [Qubit() for _ in range(max_qubits - active.num_qubits)]
+        for circuit in self._circuit_stack:
+            circuit.add_bits(new_qubits)
         self.num_qubits = max(self.num_qubits, active.num_qubits)
 
     def add_qubits(self, name: str, num_qubits: int | None = 1) -> None:
