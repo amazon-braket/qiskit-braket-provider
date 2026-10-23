@@ -43,6 +43,26 @@ please ensure that:
    ```
    runs the minimal environment, but will fail on first failed test will all print outputs to STDOUT. 
 
+3. Tutorial notebooks under `docs/tutorials/` are integration-tested in the
+   [amazon-braket-examples](https://github.com/amazon-braket/amazon-braket-examples) repository.
+   When you change a tutorial, update the matching notebook under `examples/qiskit/` and run:
+
+   ```shell script
+   pytest test/integ_tests/test_all_notebooks.py -k "qiskit-2 or qiskit-3 or qiskit-4 or qiskit-5 or qiskit-6 or qiskit-7 or qiskit-8"
+   ```
+
+   The tutorial-to-example mapping is:
+
+   | Provider tutorial | Examples repository notebook |
+   | --- | --- |
+   | `docs/tutorials/0_tutorial_qiskit-braket-provider_overview` | [2_Overview_of_the_Qiskit_Braket_provider.ipynb](https://github.com/amazon-braket/amazon-braket-examples/blob/main/examples/qiskit/2_Overview_of_the_Qiskit_Braket_provider.ipynb) |
+   | `docs/tutorials/1_tutorial_vqe` | [3_Running_VQE_on_Braket.ipynb](https://github.com/amazon-braket/amazon-braket-examples/blob/main/examples/qiskit/3_Running_VQE_on_Braket.ipynb) |
+   | `docs/tutorials/2_tutorial_hybrid_jobs` | [4_Hybrid_Jobs_with_Qiskit.ipynb](https://github.com/amazon-braket/amazon-braket-examples/blob/main/examples/qiskit/4_Hybrid_Jobs_with_Qiskit.ipynb) |
+   | `docs/tutorials/3_tutorial_minimum_eigen_optimizer` | [5_Minimum_Eigen_Optimizer.ipynb](https://github.com/amazon-braket/amazon-braket-examples/blob/main/examples/qiskit/5_Minimum_Eigen_Optimizer.ipynb) |
+   | `docs/tutorials/4_tutorial_native_programming` | [6_Native_Programming.ipynb](https://github.com/amazon-braket/amazon-braket-examples/blob/main/examples/qiskit/6_Native_Programming.ipynb) |
+   | `docs/tutorials/5_tutorial_transpilation` | [7_Transpilation.ipynb](https://github.com/amazon-braket/amazon-braket-examples/blob/main/examples/qiskit/7_Transpilation.ipynb) |
+   | `docs/tutorials/6_tutorial_primitives` | [8_Braket_Native_Primitives.ipynb](https://github.com/amazon-braket/amazon-braket-examples/blob/main/examples/qiskit/8_Braket_Native_Primitives.ipynb) |
+
 
 ### PR Title Format
 

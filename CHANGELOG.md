@@ -1,5 +1,75 @@
 # Changelog
 
+## v0.27.0 (2026-10-20)
+
+### Features
+
+ * dynamic circuit support
+
+## v0.26.2 (2026-10-19)
+
+### Bug Fixes and Other Changes
+
+ * nonstandard basis gates
+
+## v0.26.1 (2026-10-15)
+
+### Bug Fixes and Other Changes
+
+ * verbatim rigetti native gates
+ * compile to oq3 rigetti rx
+
+## v0.26.0 (2026-10-13)
+
+### Features
+
+ * add compile_to_oq3() public API
+
+## v0.25.0 (2026-09-10)
+
+### Features
+
+ * add Braket-formatting transpiler passes and OQ3 helpers
+
+### Bug Fixes and Other Changes
+
+ * reverse program-set counts keys to little-endian
+
+## v0.24.0 (2026-09-02)
+
+### Features
+
+ * add Braket-formatting transpiler passes
+
+### Documentation Changes
+
+ * add document tutorial testing in amazon-braket-examples
+ * add llms.txt generation
+
+## v0.23.2 (2026-08-21)
+
+### Bug Fixes and Other Changes
+
+ * pragma physical qubit labels
+
+## v0.23.1 (2026-08-20)
+
+### Bug Fixes and Other Changes
+
+ * translate physical qubits through device label mapping
+
+## v0.23.0 (2026-08-18)
+
+### Features
+
+ * Support OpenQASM output variables
+
+## v0.22.1 (2026-08-13)
+
+### Bug Fixes and Other Changes
+
+ * typo in 5_tutorial_transpilation.ipynb
+
 ## v0.22.0 (2026-08-10)
 
 ### Features

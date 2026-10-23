@@ -75,6 +75,29 @@ _BRAKET_TO_QISKIT_NAMES = {
     "kraus": "kraus",
 }
 
+"""Reverse of :data:`_BRAKET_TO_QISKIT_NAMES` — maps Qiskit gate names to Braket names."""
+_QISKIT_TO_BRAKET_NAMES = {
+    qiskit_name: braket_name for braket_name, qiskit_name in _BRAKET_TO_QISKIT_NAMES.items()
+}
+
+"""Qiskit op names that are not gate calls in the emitted OpenQASM 3.
+
+Excluded from ``basis_gates`` when filtering a ``Target``'s
+``operation_names`` or caller-supplied gate names in :func:`compile_to_oq3`.
+"""
+_NON_GATE_TARGET_OPS = frozenset({
+    "measure",
+    "barrier",
+    "box",
+    "gphase",
+    "if_else",
+})
+
+"""Qiskit-side op names for control-flow constructs."""
+_QISKIT_CONTROL_FLOW_OPS = frozenset({
+    "if_else",
+})
+
 _CONTROLLED_GATES_BY_QUBIT_COUNT = {
     1: {
         "ch": "h",
@@ -215,6 +238,12 @@ _BRAKET_GATE_NAME_TO_QISKIT_GATE: dict[str, QiskitInstruction | None] = {
 
 _BRAKET_VERBATIM_BOX_NAME = "verbatim"
 
+_BRAKET_VERBATIM_PRAGMA_PAYLOAD = "pragma braket verbatim"
+
+_BRAKET_VERBATIM_PRAGMA_LINE = f"#{_BRAKET_VERBATIM_PRAGMA_PAYLOAD}"
+
+_OUTPUT_VARIABLES_KEY = "braket_output_variables"
+
 _EPS = 1e-10  # global variable used to chop very small numbers to zero
 
 _BRAKET_SUPPORTED_NOISES = [
@@ -289,3 +318,135 @@ def _reverse_endianness(matrix: np.ndarray) -> np.ndarray:
         matrix.reshape([2] * n_q * 2),
         list(range(n_q))[::-1] + list(range(n_q, 2 * n_q))[::-1],
     ).reshape((2**n_q, 2**n_q))
+
+
+class BraketPhaseShiftGate(qiskit_gates.PhaseGate):
+    """Qiskit ``PhaseGate`` rendered as Braket's ``phaseshift`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = "phaseshift"
+
+
+class BraketCNotGate(qiskit_gates.CXGate):
+    """Qiskit ``CXGate`` rendered as Braket's ``cnot`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = "cnot"
+
+
+class BraketTiGate(qiskit_gates.TdgGate):
+    """Qiskit ``TdgGate`` rendered as Braket's ``ti`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = "ti"
+
+
+class BraketSiGate(qiskit_gates.SdgGate):
+    """Qiskit ``SdgGate`` rendered as Braket's ``si`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = "si"
+
+
+class BraketVGate(qiskit_gates.SXGate):
+    """Qiskit ``SXGate`` rendered as Braket's ``v`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = "v"
+
+
+class BraketViGate(qiskit_gates.SXdgGate):
+    """Qiskit ``SXdgGate`` rendered as Braket's ``vi`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = "vi"
+
+
+class BraketXXGate(qiskit_gates.RXXGate):
+    """Qiskit ``RXXGate`` rendered as Braket's ``xx`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = "xx"
+
+
+class BraketYYGate(qiskit_gates.RYYGate):
+    """Qiskit ``RYYGate`` rendered as Braket's ``yy`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = "yy"
+
+
+class BraketZZGate(qiskit_gates.RZZGate):
+    """Qiskit ``RZZGate`` rendered as Braket's ``zz`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = "zz"
+
+
+class BraketIGate(qiskit_gates.IGate):
+    """Qiskit ``IGate`` rendered as Braket's ``i`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = "i"
+
+
+class BraketCCNotGate(qiskit_gates.CCXGate):
+    """Qiskit ``CCXGate`` rendered as Braket's ``ccnot`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = "ccnot"
+
+
+class BraketCPhaseShiftGate(qiskit_gates.CPhaseGate):
+    """Qiskit ``CPhaseGate`` rendered as Braket's ``cphaseshift`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = "cphaseshift"
+
+
+class BraketPRxGate(qiskit_gates.RGate):
+    """Qiskit ``RGate`` rendered as Braket's ``prx`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = "prx"
+
+
+class BraketGPhaseGate(qiskit_gates.GlobalPhaseGate):
+    """Qiskit ``GlobalPhaseGate`` rendered as Braket's ``gphase`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = "gphase"
+
+
+_QISKIT_TO_BRAKET_SHIM: dict[type, type] = {
+    qiskit_gates.PhaseGate: BraketPhaseShiftGate,
+    qiskit_gates.CXGate: BraketCNotGate,
+    qiskit_gates.TdgGate: BraketTiGate,
+    qiskit_gates.SdgGate: BraketSiGate,
+    qiskit_gates.SXGate: BraketVGate,
+    qiskit_gates.SXdgGate: BraketViGate,
+    qiskit_gates.RXXGate: BraketXXGate,
+    qiskit_gates.RYYGate: BraketYYGate,
+    qiskit_gates.RZZGate: BraketZZGate,
+    qiskit_gates.IGate: BraketIGate,
+    qiskit_gates.CCXGate: BraketCCNotGate,
+    qiskit_gates.CPhaseGate: BraketCPhaseShiftGate,
+    qiskit_gates.RGate: BraketPRxGate,
+    qiskit_gates.GlobalPhaseGate: BraketGPhaseGate,
+}
+
+_SHIM_CLASSES: frozenset[type] = frozenset(_QISKIT_TO_BRAKET_SHIM.values())

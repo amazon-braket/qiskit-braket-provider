@@ -16,7 +16,11 @@ from qiskit_braket_provider import (
     BraketQuantumTask,
 )
 from qiskit_braket_provider.providers.braket_quantum_task import retry_if_result_none
-from test.unit_tests.mocks import MOCK_LOCAL_QUANTUM_TASK, MOCK_PROGRAM_SET_QUANTUM_TASK
+from test.unit_tests.mocks import (
+    MOCK_ASYMMETRIC_PROGRAM_SET_QUANTUM_TASK,
+    MOCK_LOCAL_QUANTUM_TASK,
+    MOCK_PROGRAM_SET_QUANTUM_TASK,
+)
 
 
 class TestBraketQuantumTask(TestCase):
@@ -98,6 +102,16 @@ class TestBraketQuantumTask(TestCase):
             ],
         )
         self.assertEqual(task.result().results[0].shots, 20)
+
+    def test_program_set_counts_little_endian(self):
+        """Program-set counts keys must be little-endian, matching single-task."""
+        task = BraketQuantumTask(
+            backend=BraketLocalBackend(name="default"),
+            task_id="TaskID",
+            tasks=MOCK_ASYMMETRIC_PROGRAM_SET_QUANTUM_TASK,
+            shots=4,
+        )
+        self.assertEqual(task.result().results[0].data.counts, {"01": 3, "10": 1})
 
     @patch(
         "qiskit_braket_provider.providers.braket_quantum_task.AwsQuantumTaskBatch._retrieve_results"

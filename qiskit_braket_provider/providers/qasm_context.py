@@ -15,6 +15,7 @@ from qiskit.circuit import (
     Barrier,
     BoxOp,
     CircuitInstruction,
+    ClassicalRegister,
     Clbit,
     ForLoopOp,
     Gate,
@@ -54,12 +55,15 @@ from braket.default_simulator.openqasm.parser.openqasm_ast import (
 )
 from braket.default_simulator.openqasm.program_context import (
     AbstractProgramContext,
+    QubitTable,
 )
 from braket.ir.jaqcd import AdjointGradient
 from braket.ir.jaqcd.program_v1 import Results
+from qiskit_braket_provider.providers.braket_annotations import BraketVerbatimBox
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_VERBATIM_BOX_NAME,
+    _OUTPUT_VARIABLES_KEY,
     _SYMPY_FUNCTION_TO_QISKIT_METHOD,
 )
 
@@ -93,6 +97,25 @@ def _sympy_to_qiskit(
     raise TypeError(f"unrecognized parameter type in conversion: {type(expr)}")
 
 
+class _LabelMappedQubitTable(QubitTable):
+    """QubitTable that translates ``$N`` references through a device label map."""
+
+    def __init__(self, label_to_qiskit_index: dict[int, int] | None = None) -> None:
+        super().__init__()
+        self._label_to_qiskit_index = label_to_qiskit_index
+
+    def get_by_identifier(self, identifier: Identifier | IndexedIdentifier) -> tuple[int, ...]:
+        indices = super().get_by_identifier(identifier)
+        if self._label_to_qiskit_index is None:
+            return indices
+        if not isinstance(identifier, Identifier) or not identifier.name.startswith("$"):
+            return indices
+        try:
+            return tuple(self._label_to_qiskit_index[label] for label in indices)
+        except KeyError as e:
+            raise ValueError(f"Physical qubit ${e.args[0]} is not on the target device.") from None
+
+
 class _QiskitProgramContext(AbstractProgramContext):
     """Program context for converting OpenQASM 3 programs to Qiskit circuits.
 
@@ -107,12 +130,21 @@ class _QiskitProgramContext(AbstractProgramContext):
 
     num_qubits: int
 
-    def __init__(self, verbatim_box_name: str = _BRAKET_VERBATIM_BOX_NAME) -> None:
+    def __init__(
+        self,
+        verbatim_box_name: str = _BRAKET_VERBATIM_BOX_NAME,
+        physical_qubit_labels: Sequence[int] | None = None,
+    ) -> None:
         """Initialize the Qiskit program context.
 
         Args:
             verbatim_box_name: Name to use for BoxOp labels when converting verbatim boxes.
                 Default: "verbatim"
+            physical_qubit_labels: Device physical qubit labels in Qiskit-index order
+                (as ``sorted(topology.nodes)``). When provided, ``$N`` references are
+                resolved to the matching Qiskit index and unknown labels raise
+                ``ValueError``. When ``None``, ``$N`` maps directly to Qiskit index
+                ``N``. Default: ``None``.
         """
         super().__init__()
         self._circuit_stack: list[QuantumCircuit] = [QuantumCircuit()]
@@ -121,6 +153,12 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._verbatim_box_name = verbatim_box_name
         self._clbit_offset: dict[str, int] = {}
         self._result_types: list[Results] = []
+        label_to_qiskit_index: dict[int, int] | None = (
+            {label: i for i, label in enumerate(physical_qubit_labels)}
+            if physical_qubit_labels
+            else None
+        )
+        self.qubit_mapping = _LabelMappedQubitTable(label_to_qiskit_index)
 
     @property
     def _active_circuit(self) -> QuantumCircuit:
@@ -214,6 +252,34 @@ class _QiskitProgramContext(AbstractProgramContext):
             # this is used to deal with Qiskit's QuantumCircuit storing all classical bits in a flat list
             self._clbit_offset[name] = self._active_circuit.num_clbits
             self._active_circuit.add_bits([Clbit() for _ in range(size)])
+
+    def add_output_declaration(self, name: str, var_type: ClassicalType) -> None:
+        """Group an OpenQASM output variable's bits into a named classical register.
+
+        The declared type is also recorded in the circuit metadata, since a ``QuantumCircuit``
+        has no native way to mark a register as an output.
+
+        Args:
+            name (str): The declared output variable name.
+            var_type (ClassicalType): The evaluated declared type.
+
+        Raises:
+            TypeError: If the declared type is not a bit or bit register, the
+                only output types a Qiskit circuit can report.
+        """
+        if not isinstance(var_type, BitType):
+            raise TypeError(
+                f"Output variable {name!r} of type {type(var_type).__name__} is not "
+                f"supported; only bit output variables can be converted."
+            )
+        active = self._active_circuit
+        offset = self._clbit_offset[name]
+        size = var_type.size.value if var_type.size is not None else 1
+        active.add_register(
+            ClassicalRegister(bits=active.clbits[offset : offset + size], name=name)
+        )
+        metadata = self._circuit_stack[0].metadata
+        metadata.setdefault(_OUTPUT_VARIABLES_KEY, {})[name] = var_type
 
     def is_builtin_gate(self, name: str) -> bool:
         return name in _BRAKET_GATE_NAME_TO_QISKIT_GATE
@@ -364,7 +430,11 @@ class _QiskitProgramContext(AbstractProgramContext):
             body = self._circuit_stack.pop()
             parent = self._active_circuit
             self._extend_bits(parent, body)
-            parent.append(BoxOp(body, label=self._verbatim_box_name), parent.qubits, parent.clbits)
+            parent.append(
+                BraketVerbatimBox(body, label=self._verbatim_box_name),
+                parent.qubits,
+                parent.clbits,
+            )
             self._in_verbatim_box = False
 
         else:

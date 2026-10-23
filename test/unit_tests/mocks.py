@@ -4,6 +4,8 @@ import copy
 import enum
 import uuid
 from collections import Counter
+from math import pi
+from unittest.mock import Mock
 
 import numpy as np
 from networkx import DiGraph, from_dict_of_lists, relabel_nodes
@@ -11,9 +13,16 @@ from qiskit import QuantumCircuit
 from qiskit.providers import Options
 from qiskit.transpiler import Target
 
-from braket.device_schema import StandardizedGateModelQpuDeviceProperties
+from braket.aws import AwsDevice, AwsDeviceType
+from braket.circuits import GateCalibrations, QubitSet
+from braket.circuits import gates as braket_gates
+from braket.device_schema import DeviceActionType, StandardizedGateModelQpuDeviceProperties
+from braket.device_schema.iqm import IqmDeviceCapabilities
 from braket.device_schema.rigetti import RigettiDeviceCapabilities
 from braket.device_schema.simulators import GateModelSimulatorDeviceCapabilities
+from braket.devices import LocalSimulator
+from braket.parametric import FreeParameter
+from braket.pulse import PulseSequence
 from braket.task_result import ProgramSetTaskResult, TaskMetadata
 from braket.tasks import GateModelQuantumTaskResult, ProgramSetQuantumTaskResult
 from braket.tasks.local_quantum_task import LocalQuantumTask
@@ -316,45 +325,63 @@ MOCK_PROGRAM_RESULT = {
         }
     },
 }
-MOCK_PROGRAM_SET_RESULT = ProgramSetQuantumTaskResult.from_object(
-    ProgramSetTaskResult(
-        braketSchemaHeader={
-            "name": "braket.task_result.program_set_task_result",
+_PROGRAM_SET_TASK_METADATA = {
+    "braketSchemaHeader": {
+        "name": "braket.task_result.program_set_task_metadata",
+        "version": "1",
+    },
+    "id": "TaskID",
+    "deviceId": "arn:aws:braket:::device/quantum-simulator/amazon/sv1",
+    "requestedShots": 120,
+    "successfulShots": 100,
+    "programMetadata": [{"executables": [{}]}],
+    "deviceParameters": {
+        "braketSchemaHeader": {
+            "name": "braket.device_schema.simulators.gate_model_simulator_device_parameters",
             "version": "1",
         },
-        programResults=[MOCK_PROGRAM_RESULT] * 2,
-        taskMetadata={
+        "paradigmParameters": {
             "braketSchemaHeader": {
-                "name": "braket.task_result.program_set_task_metadata",
+                "name": "braket.device_schema.gate_model_parameters",
                 "version": "1",
             },
-            "id": "TaskID",
-            "deviceId": "arn:aws:braket:::device/quantum-simulator/amazon/sv1",
-            "requestedShots": 120,
-            "successfulShots": 100,
-            "programMetadata": [{"executables": [{}]}],
-            "deviceParameters": {
-                "braketSchemaHeader": {
-                    "name": "braket.device_schema.simulators.gate_model_simulator_device_parameters",
-                    "version": "1",
-                },
-                "paradigmParameters": {
-                    "braketSchemaHeader": {
-                        "name": "braket.device_schema.gate_model_parameters",
-                        "version": "1",
-                    },
-                    "qubitCount": 5,
-                    "disableQubitRewiring": False,
-                },
-            },
-            "createdAt": "2024-10-15T19:06:58.986Z",
-            "endedAt": "2024-10-15T19:07:00.382Z",
-            "status": "COMPLETED",
-            "totalFailedExecutables": 1,
+            "qubitCount": 5,
+            "disableQubitRewiring": False,
         },
+    },
+    "createdAt": "2024-10-15T19:06:58.986Z",
+    "endedAt": "2024-10-15T19:07:00.382Z",
+    "status": "COMPLETED",
+    "totalFailedExecutables": 1,
+}
+
+
+def _program_set_result(program_results: list) -> ProgramSetQuantumTaskResult:
+    return ProgramSetQuantumTaskResult.from_object(
+        ProgramSetTaskResult(
+            braketSchemaHeader={
+                "name": "braket.task_result.program_set_task_result",
+                "version": "1",
+            },
+            programResults=program_results,
+            taskMetadata=_PROGRAM_SET_TASK_METADATA,
+        )
     )
-)
+
+
+MOCK_PROGRAM_SET_RESULT = _program_set_result([MOCK_PROGRAM_RESULT] * 2)
 MOCK_PROGRAM_SET_QUANTUM_TASK = LocalQuantumTask(MOCK_PROGRAM_SET_RESULT)
+
+_MOCK_ASYMMETRIC_PROGRAM_RESULT: dict = copy.deepcopy(MOCK_PROGRAM_RESULT)
+_MOCK_ASYMMETRIC_PROGRAM_RESULT["executableResults"][0]["measurements"] = [
+    [1, 0],
+    [1, 0],
+    [1, 0],
+    [0, 1],
+]
+MOCK_ASYMMETRIC_PROGRAM_SET_QUANTUM_TASK = LocalQuantumTask(
+    _program_set_result([_MOCK_ASYMMETRIC_PROGRAM_RESULT])
+)
 
 
 def _emulator_one_qubit_properties() -> dict:
@@ -460,6 +487,114 @@ def mock_emulator_capabilities(*, program_sets: bool = False) -> RigettiDeviceCa
     capabilities = RigettiDeviceCapabilities.parse_obj(capabilities_json)
     capabilities.standardized = MOCK_EMULATOR_STANDARDIZED_PROPERTIES
     return capabilities
+
+
+IQM_ARN = "arn:aws:braket:eu-north-1::device/qpu/iqm/Emerald"
+
+_MOCK_IQM_NUM_QUBITS = 5
+
+MOCK_IQM_CAPABILITIES_JSON = {
+    "braketSchemaHeader": {
+        "name": "braket.device_schema.iqm.iqm_device_capabilities",
+        "version": "1",
+    },
+    "service": {
+        "executionWindows": [
+            {
+                "executionDay": "Everyday",
+                "windowStartHour": "00:00",
+                "windowEndHour": "23:59:59",
+            }
+        ],
+        "shotsRange": [1, 20000],
+    },
+    "action": {
+        "braket.ir.openqasm.program": {
+            "actionType": "braket.ir.openqasm.program",
+            "version": ["1"],
+            "supportedOperations": ["prx", "cz", "measure", "if"],
+            "supportedResultTypes": [],
+        }
+    },
+    "paradigm": {
+        "qubitCount": _MOCK_IQM_NUM_QUBITS,
+        "nativeGateSet": ["prx", "cz"],
+        "connectivity": {
+            "fullyConnected": False,
+            "connectivityGraph": {str(q): [str(q + 1)] for q in range(1, _MOCK_IQM_NUM_QUBITS)},
+        },
+    },
+    "deviceParameters": {},
+}
+
+
+def mock_iqm_device(*, supports_if: bool = True) -> Mock:
+    """Return a mock IQM ``AwsDevice`` with a linear topology and ``prx``/``cz`` native gates.
+
+    When ``supports_if`` is false, ``if`` is dropped from the advertised OpenQASM operations.
+    """
+    capabilities_json: dict = copy.deepcopy(MOCK_IQM_CAPABILITIES_JSON)
+    if not supports_if:
+        action = capabilities_json["action"]["braket.ir.openqasm.program"]
+        action["supportedOperations"].remove("if")
+    edges = [(q, q + 1) for q in range(1, _MOCK_IQM_NUM_QUBITS)]
+    device = Mock(spec=AwsDevice)
+    device.type = AwsDeviceType.QPU
+    device.name = "Emerald"
+    device.arn = IQM_ARN
+    device.properties = IqmDeviceCapabilities.parse_obj(capabilities_json)
+    device.topology_graph = DiGraph(edges + [(v, u) for u, v in edges])
+    device.gate_calibrations = None
+    return device
+
+
+def mock_simulator_device(*, supports_if: bool = True) -> Mock:
+    """Return a mock simulator device with the local state-vector simulator's capabilities.
+
+    When ``supports_if`` is true, ``if`` is added to the advertised OpenQASM operations.
+    """
+    properties = LocalSimulator("braket_sv").properties.copy(deep=True)
+    action = properties.action[DeviceActionType.OPENQASM]
+    if supports_if:
+        action.supportedOperations = [*action.supportedOperations, "if"]
+    device = Mock()
+    device.type = AwsDeviceType.SIMULATOR
+    device.name = "sv1"
+    device.properties = properties
+    return device
+
+
+RIGETTI_CEPHEUS_ARN = "arn:aws:braket:us-west-1::device/qpu/rigetti/Cepheus-1-108Q"
+
+
+def mock_calibrated_rigetti_device() -> Mock:
+    """Return a mock Rigetti QPU whose ``rx`` is calibrated only at ±π/2 and ±π.
+
+    These calibrations make the device's Qiskit target list the rotations as ``sx``,
+    ``sxdg``, and ``x``, which are renamed back to ``rx`` after transpilation.
+    Native gates are ``rx``, ``rz``, ``cz``, and ``barrier`` on qubits 1 and 2.
+    """
+    capabilities = mock_emulator_capabilities()
+    capabilities.paradigm.nativeGateSet = [*capabilities.paradigm.nativeGateSet, "barrier"]
+    pulse = PulseSequence()
+    theta = FreeParameter("theta")
+    calibrations = GateCalibrations({
+        **{
+            (braket_gates.Rx(angle), QubitSet(qubit)): pulse
+            for angle in (pi / 2, -pi / 2, pi, -pi)
+            for qubit in (1, 2)
+        },
+        **{(braket_gates.Rz(theta), QubitSet(qubit)): pulse for qubit in (1, 2)},
+        (braket_gates.CZ(), QubitSet([1, 2])): pulse,
+    })
+    device = Mock(spec=AwsDevice)
+    device.type = AwsDeviceType.QPU
+    device.name = "Cepheus-1-108Q"
+    device.arn = RIGETTI_CEPHEUS_ARN
+    device.properties = capabilities
+    device.gate_calibrations = calibrations
+    device.topology_graph = mock_emulator_topology()
+    return device
 
 
 class MockBraketBackend(BraketBackend):

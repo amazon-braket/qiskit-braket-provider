@@ -20,11 +20,15 @@ Provider classes and functions
     BraketProvider
     BraketQuantumTask
     BraketSampler
+    compile_to_oq3
     to_braket
+    to_oq3
     to_qiskit
 """
 
+from .adapter import compile_to_oq3 as compile_to_oq3
 from .adapter import to_braket as to_braket
+from .adapter import to_oq3 as to_oq3
 from .adapter import to_qiskit as to_qiskit
 from .braket_backend import AWSBraketBackend as AWSBraketBackend
 from .braket_backend import BraketAwsBackend as BraketAwsBackend
