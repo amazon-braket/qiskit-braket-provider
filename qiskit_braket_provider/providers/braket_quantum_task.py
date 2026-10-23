@@ -157,7 +157,7 @@ class BraketQuantumTask(JobV1):
                 raise NotImplementedError(
                     "We don't provide queue information for the LocalQuantumTask."
                 )
-            return AwsQuantumTask(self.task_id()).queue_position()
+            return task.queue_position()
         return None
 
     def task_id(self) -> str:
