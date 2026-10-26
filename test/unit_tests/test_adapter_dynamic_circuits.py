@@ -110,6 +110,51 @@ if (c[0] == 0) {
             [("y", [0])],
             id="asymmetric_branches_different_qubits",
         ),
+        pytest.param(
+            """
+OPENQASM 3.0;
+bit[1] c;
+c[0] = measure $0;
+if (c[0] == 1) {
+    x $1;
+} else {
+    h $1;
+}
+""",
+            [("x", [1])],
+            [("h", [1])],
+            id="physical_qubit_first_used_in_both_branches",
+        ),
+        pytest.param(
+            """
+OPENQASM 3.0;
+bit[1] c;
+c[0] = measure $0;
+if (c[0] == 1) {
+    x $1;
+} else {
+    h $2;
+}
+""",
+            [("x", [1])],
+            [("h", [2])],
+            id="different_physical_qubits_first_used_in_each_branch",
+        ),
+        pytest.param(
+            """
+OPENQASM 3.0;
+bit[1] c;
+c[0] = measure $0;
+if (c[0] == 1) {
+    x $0;
+} else {
+    h $1;
+}
+""",
+            [("x", [0])],
+            [("h", [1])],
+            id="physical_qubit_first_used_in_else_branch",
+        ),
     ],
 )
 def test_if_else_branch_bodies(
