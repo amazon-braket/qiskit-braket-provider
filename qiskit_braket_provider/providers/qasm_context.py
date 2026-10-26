@@ -25,6 +25,7 @@ from qiskit.circuit import (
     Qubit,
     WhileLoopOp,
 )
+from qiskit.circuit import Instruction as QiskitInstruction
 from sympy import Add, Expr, Mul, Pow, Symbol
 
 from braket.default_simulator.openqasm._helpers.arrays import convert_range_def_to_range
@@ -59,6 +60,7 @@ from braket.default_simulator.openqasm.program_context import (
 )
 from braket.ir.jaqcd import AdjointGradient
 from braket.ir.jaqcd.program_v1 import Results
+from braket.parametric import FreeParameterExpression
 from qiskit_braket_provider.providers.braket_annotations import BraketVerbatimBox
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
@@ -95,6 +97,27 @@ def _sympy_to_qiskit(
             method_name = _SYMPY_FUNCTION_TO_QISKIT_METHOD[obj.func]
             return getattr(_sympy_to_qiskit(obj.args[0], param_map), method_name)()
     raise TypeError(f"unrecognized parameter type in conversion: {type(expr)}")
+
+
+def _create_qiskit_gate(
+    gate_name: str,
+    gate_params: list[float | FreeParameterExpression],
+    param_map: dict[str, Parameter],
+) -> QiskitInstruction:
+    gate_instance = _BRAKET_GATE_NAME_TO_QISKIT_GATE.get(gate_name)
+    if not gate_instance:
+        raise TypeError(f'Braket gate "{gate_name}" not supported in Qiskit')
+    new_gate_params = []
+    for param_expression, value in zip(gate_instance.params, gate_params, strict=True):
+        # extract the coefficient in the templated gate
+        param = next(iter(param_expression.parameters)).sympify()
+        coeff = float(param_expression.sympify().subs(param, 1))
+        new_gate_params.append(
+            _sympy_to_qiskit(coeff * value.expression, param_map)
+            if isinstance(value, FreeParameterExpression)
+            else coeff * value
+        )
+    return gate_instance.__class__(*new_gate_params)
 
 
 class _LabelMappedQubitTable(QubitTable):
@@ -306,14 +329,12 @@ class _QiskitProgramContext(AbstractProgramContext):
         ctrl_modifiers: list[int],
         power: int,
     ) -> None:
-        gate: Gate = _BRAKET_GATE_NAME_TO_QISKIT_GATE[gate_name].copy()
         params = (
             [float(param) if isinstance(param, Number) else param for param in params]  # type: ignore[arg-type]
             if params is not None
             else []
         )
-        if params:
-            gate.params = params
+        gate: Gate = _create_qiskit_gate(gate_name, params, self._param_map)
         gate = gate.power(float(power)) if power != 1 else gate
         if ctrl_modifiers:
             gate = gate.control(
@@ -336,22 +357,15 @@ class _QiskitProgramContext(AbstractProgramContext):
         classical_destination: Identifier | IndexedIdentifier | None = None,
     ) -> None:
         if classical_destination is None:
-            self._ensure_qubit_capacity(target)
-            self._add_measure_into_loose_clbits(target)
-            return
+            raise ValueError(
+                "Measurements without a classical destination are not supported. "
+                "Assign the result to a bit, as in 'b[0] = measure q[0];'."
+            )
         name = get_identifier_name(classical_destination)
         if name not in self._clbit_offset:
             raise ValueError(f"Classical bit register {name!r} is not declared")
         self._ensure_qubit_capacity(target)
         self._add_measure_into_register(target, classical_targets, self._clbit_offset[name])
-
-    def _add_measure_into_loose_clbits(self, target: tuple[int, ...]) -> None:
-        """Measure without a classical destination, synthesizing loose clbits to receive the results."""
-        active = self._active_circuit
-        if active.num_clbits < len(target):
-            active.add_bits([Clbit() for _ in range(len(target) - active.num_clbits)])
-        for idx, qubit in enumerate(target):
-            active.measure(qubit, idx)
 
     def _add_measure_into_register(
         self,

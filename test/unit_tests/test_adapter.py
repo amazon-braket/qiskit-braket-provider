@@ -41,7 +41,6 @@ from braket.pulse import PulseSequence
 from braket.registers import QubitSet
 from qiskit_braket_provider import exception, to_braket, to_qiskit
 from qiskit_braket_provider.providers.adapter import (
-    _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_SUPPORTED_NOISES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
     _compile,
@@ -55,6 +54,7 @@ from qiskit_braket_provider.providers.adapter import (
     translate_sparse_pauli_op,
 )
 from qiskit_braket_provider.providers.braket_instructions import CCPRx, MeasureFF
+from qiskit_braket_provider.providers.gate_mappings import _BRAKET_GATE_NAME_TO_QISKIT_GATE
 from test.unit_tests.mocks import (
     MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES,
     MOCK_RIGETTI_STANARDIZED_PROPERTIES,
@@ -1285,9 +1285,10 @@ class TestAdapter(TestCase):
         qasm_string = """
         input float theta;
         qubit q;
+        bit b;
         gphase(pi / 4);
         rx(theta) q;
-        measure q;
+        b = measure q;
         """
         qasm_program = Program(source=qasm_string, inputs={"theta": 1.0})
         self.assertTrue(check_to_braket_openqasm_unitary_correct(qasm_program))
@@ -1804,7 +1805,7 @@ rx(sin(theta) + 2.0*phi) q[0];"""
         with (
             self.assertRaises(TypeError),
             patch.dict(
-                "qiskit_braket_provider.providers.adapter._BRAKET_GATE_NAME_TO_QISKIT_GATE",
+                "qiskit_braket_provider.providers.qasm_context._BRAKET_GATE_NAME_TO_QISKIT_GATE",
                 {"cnot": None},
             ),
         ):
@@ -2251,3 +2252,22 @@ def test_to_braket_ionq_basis_gate_names_emitted(bell_circuit: QuantumCircuit):
 def test_to_braket_unknown_basis_gate_name_raises(bell_circuit: QuantumCircuit):
     with pytest.raises(ValueError, match="Unknown gate 'not_a_gate' in basis_gates"):
         to_braket(bell_circuit, basis_gates={"cz", "rx", "rz", "cphaseshift01", "not_a_gate"})
+
+
+@pytest.mark.parametrize(
+    ("qasm", "expected_turns"),
+    [
+        ("qubit q; gpi(pi / 2) q;", [0.25]),
+        ("qubit q; gpi2(pi) q;", [0.5]),
+        ("qubit[2] q; ms(pi / 2, pi, pi / 4) q[0], q[1];", [0.25, 0.5, 0.125]),
+    ],
+    ids=["gpi", "gpi2", "ms"],
+)
+def test_to_qiskit_openqasm_ionq_gates(qasm: str, expected_turns: list[float]):
+    """Braket's IonQ gates take angles in radians, and qiskit-ionq gates take turns."""
+    circuit = to_qiskit(qasm, add_measurements=False)
+
+    assert circuit.data[0].operation.params == pytest.approx(expected_turns)
+    assert np.allclose(
+        Operator(circuit).reverse_qargs().to_matrix(), Circuit.from_ir(qasm).to_unitary()
+    )
