@@ -13,7 +13,7 @@ from qiskit import QuantumCircuit
 from qiskit.providers import BackendV2, Options, QubitProperties
 from qiskit.transpiler import PassManager, Target
 
-from braket.aws import AwsDevice, AwsDeviceType, AwsQuantumTask
+from braket.aws import AwsDevice, AwsDeviceType, AwsQuantumTask, AwsSession
 from braket.aws.queue_information import QueueDepthInfo
 from braket.circuits import Circuit
 from braket.device_schema import DeviceActionType
@@ -264,6 +264,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         backend_version: str | None = None,
         *,
         device: AwsDevice | None = None,
+        aws_session: AwsSession | None = None,
         **fields,
     ) -> None:
         """Initialize the backend.
@@ -283,13 +284,15 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
             online_date (datetime | None): Online date. Default: ``None``.
             backend_version (str | None): Backend version. Default: ``None``.
             device (AwsDevice | None): Braket device instance. Default: ``None``.
+            aws_session (AwsSession | None): Session used when creating a device from an ARN.
+                A supplied device retains its own session. Default: ``None``.
             **fields: Extra arguments.
         """
         if not (arn or device):
             raise ValueError("Must specify either arn or device")
         if arn and device:
             raise ValueError("Can only specify one of arn and device")
-        aws_device = AwsDevice(arn) if arn else device
+        aws_device = AwsDevice(arn, aws_session=aws_session) if arn else device
         super().__init__(
             aws_device,
             name or aws_device.name,
@@ -322,7 +325,10 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         return BraketQuantumTask(
             task_id=task_id,
             backend=self,
-            tasks=[AwsQuantumTask(arn=task_id) for task_id in task_ids],
+            tasks=[
+                AwsQuantumTask(arn=task_id, aws_session=self._device.aws_session)
+                for task_id in task_ids
+            ],
         )
 
     def emulator(self) -> BraketLocalBackend:
