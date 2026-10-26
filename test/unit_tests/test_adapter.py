@@ -1285,9 +1285,10 @@ class TestAdapter(TestCase):
         qasm_string = """
         input float theta;
         qubit q;
+        bit b;
         gphase(pi / 4);
         rx(theta) q;
-        measure q;
+        b = measure q;
         """
         qasm_program = Program(source=qasm_string, inputs={"theta": 1.0})
         self.assertTrue(check_to_braket_openqasm_unitary_correct(qasm_program))

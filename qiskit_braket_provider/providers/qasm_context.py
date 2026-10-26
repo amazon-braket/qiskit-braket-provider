@@ -352,22 +352,15 @@ class _QiskitProgramContext(AbstractProgramContext):
         classical_destination: Identifier | IndexedIdentifier | None = None,
     ) -> None:
         if classical_destination is None:
-            self._ensure_qubit_capacity(target)
-            self._add_measure_into_loose_clbits(target)
-            return
+            raise ValueError(
+                "Measurements without a classical destination are not supported. "
+                "Assign the result to a bit, as in 'b[0] = measure q[0];'."
+            )
         name = get_identifier_name(classical_destination)
         if name not in self._clbit_offset:
             raise ValueError(f"Classical bit register {name!r} is not declared")
         self._ensure_qubit_capacity(target)
         self._add_measure_into_register(target, classical_targets, self._clbit_offset[name])
-
-    def _add_measure_into_loose_clbits(self, target: tuple[int, ...]) -> None:
-        """Measure without a classical destination, synthesizing loose clbits to receive the results."""
-        active = self._active_circuit
-        if active.num_clbits < len(target):
-            active.add_bits([Clbit() for _ in range(len(target) - active.num_clbits)])
-        for idx, qubit in enumerate(target):
-            active.measure(qubit, idx)
 
     def _add_measure_into_register(
         self,
