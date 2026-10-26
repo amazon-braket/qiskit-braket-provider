@@ -110,6 +110,51 @@ if (c[0] == 0) {
             [("y", [0])],
             id="asymmetric_branches_different_qubits",
         ),
+        pytest.param(
+            """
+OPENQASM 3.0;
+bit[1] c;
+c[0] = measure $0;
+if (c[0] == 1) {
+    x $1;
+} else {
+    h $1;
+}
+""",
+            [("x", [1])],
+            [("h", [1])],
+            id="physical_qubit_first_used_in_both_branches",
+        ),
+        pytest.param(
+            """
+OPENQASM 3.0;
+bit[1] c;
+c[0] = measure $0;
+if (c[0] == 1) {
+    x $1;
+} else {
+    h $2;
+}
+""",
+            [("x", [1])],
+            [("h", [2])],
+            id="different_physical_qubits_first_used_in_each_branch",
+        ),
+        pytest.param(
+            """
+OPENQASM 3.0;
+bit[1] c;
+c[0] = measure $0;
+if (c[0] == 1) {
+    x $0;
+} else {
+    h $1;
+}
+""",
+            [("x", [0])],
+            [("h", [1])],
+            id="physical_qubit_first_used_in_else_branch",
+        ),
     ],
 )
 def test_if_else_branch_bodies(
@@ -1615,16 +1660,20 @@ if (c[0] == 1) {
     assert _measure_clbit_indices(body) == [3]  # d[1]: d starts at flat 2
 
 
-def test_bare_measure_without_classical_destination_writes_into_loose_clbits():
-    qasm = """
-OPENQASM 3;
-qubit[3] q;
-measure q;
-"""
-    qc = to_qiskit(qasm)
-    assert qc.cregs == []  # no classical register was declared
-    assert qc.num_clbits == 3  # one loose clbit per measured qubit
-    assert _measure_clbit_indices(qc) == [0, 1, 2]
+@pytest.mark.parametrize(
+    "body",
+    [
+        "measure q[1];",
+        "measure q;",
+        "bit[1] c;\nc[0] = measure q[0];\nmeasure q[1];",
+        "bit[1] c;\nc[0] = measure q[0];\nif (c[0] == 1) {\n    measure q[1];\n}",
+    ],
+    ids=["single_qubit", "register", "after_assigned_measure", "inside_branch"],
+)
+def test_bare_measure_without_classical_destination_raises(body: str):
+    """A measurement whose result isn't assigned to a bit is rejected."""
+    with pytest.raises(ValueError, match="without a classical destination"):
+        to_qiskit(f"OPENQASM 3.0;\nqubit[2] q;\n{body}")
 
 
 def test_output_bit_register_named_after_variable():

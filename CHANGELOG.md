@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.27.1 (2026-10-26)
+
+### Bug Fixes and Other Changes
+
+ * scale IonQ angles from OpenQASM input in to_qiskit
+ * Keep physical qubits in OpenQASM output
+
+### Documentation Changes
+
+ * fix typo in docs/tutorials/5_tutorial_transpilation.ipynb.
+
 ## v0.27.0 (2026-10-20)
 
 ### Features
