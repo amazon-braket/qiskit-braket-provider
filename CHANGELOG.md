@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.27.2 (2026-10-27)
+
+### Bug Fixes and Other Changes
+
+ * fix(qasm): Share new physical qubits across if/else branches
+ * fix(qasm): Reject measurements without a classical destination
+
 ## v0.27.1 (2026-10-26)
 
 ### Bug Fixes and Other Changes
