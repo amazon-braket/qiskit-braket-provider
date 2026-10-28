@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import enum
 import logging
+import re
 import warnings
 from abc import ABC
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
@@ -19,12 +20,14 @@ from braket.circuits import Circuit
 from braket.device_schema import DeviceActionType
 from braket.devices import Device, LocalSimulator
 from braket.emulation.emulator import Emulator
+from braket.ir.openqasm import Program
 from braket.program_sets import ProgramSet
 from braket.tasks.local_quantum_task import LocalQuantumTask
 
 from .._version import __version__
 from ..exception import QiskitBraketException
 from .adapter import (
+    _compile_to_oq3,
     aws_device_to_target,
     gateset_from_properties,
     local_simulator_to_target,
@@ -54,6 +57,24 @@ def _device_max_program_set_executables(device: Device) -> int | None:
         if DeviceActionType.OPENQASM_PROGRAM_SET in action
         else None
     )
+
+
+_MEASURE_RE = re.compile(r"\bmeasure\b")
+
+
+def _compile_programs(circuits: list[QuantumCircuit], **compile_kwargs) -> list[Program]:
+    """Compile Qiskit circuits to the OpenQASM programs a run endpoint submits."""
+    sources = _compile_to_oq3(circuits, wrap_qubit_specific_targets_only=True, **compile_kwargs)
+    return [Program(source=source) for source in sources]
+
+
+def _with_state_vector_result(program: Program) -> Program:
+    """Request the state vector, as a run with ``shots=0`` returns it instead of counts."""
+    if _MEASURE_RE.search(program.source):
+        raise ValueError(
+            "A circuit with measurements can't return a state vector, so it can't run with shots=0."
+        )
+    return Program(source=f"{program.source}\n#pragma braket result state_vector")
 
 
 class BraketBackend(BackendV2, ABC, Generic[T]):
@@ -211,25 +232,22 @@ class BraketLocalBackend(BraketBackend[Device]):
     ) -> BraketQuantumTask:
         convert_input = [run_input] if isinstance(run_input, QuantumCircuit) else list(run_input)
         verbatim = options.pop("verbatim", False)
-        circuits: list[Circuit] = [
-            to_braket(
-                circ,
-                target=self._target,
-                qubit_labels=self._qubit_labels,
-                verbatim=verbatim,
-            )
-            for circ in convert_input
-        ]
+        programs = _compile_programs(
+            convert_input,
+            target=self._target,
+            qubit_labels=self._qubit_labels,
+            verbatim=verbatim,
+        )
 
         if shots == 0 and not self._is_emulator:
-            circuits = [x.state_vector() for x in circuits]
+            programs = [_with_state_vector_result(program) for program in programs]
         if "meas_level" in options:
             self._validate_meas_level(options["meas_level"])
             del options["meas_level"]
         tasks = []
         try:
-            for circuit in circuits:
-                task: LocalQuantumTask = self._device.run(task_specification=circuit, shots=shots)
+            for program in programs:
+                task: LocalQuantumTask = self._device.run(task_specification=program, shots=shots)
                 tasks.append(task)
 
         except Exception as ex:
