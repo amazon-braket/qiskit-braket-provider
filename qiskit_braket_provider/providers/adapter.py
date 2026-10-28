@@ -59,6 +59,7 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _QISKIT_CONTROLLED_GATE_NAMES_TO_BRAKET_GATES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
     _QISKIT_TO_BRAKET_NAMES,
+    _QISKIT_TO_OQ3_NAMES,
     _reverse_endianness,
 )
 from qiskit_braket_provider.providers.passes import (
@@ -837,11 +838,11 @@ def to_oq3(
         basis_gates = _QISKIT_TO_BRAKET_NAMES.values()
 
     # basis_gates arrives as Qiskit names; RenameGates has already substituted
-    # shims for renameable gates, so translate to Braket names for qasm3.dumps.
+    # shims for renameable gates, so translate to the names the shims carry.
     basis_gates = [
         translated
         for g in basis_gates
-        if (translated := _QISKIT_TO_BRAKET_NAMES.get(g, g)) not in _NON_GATE_TARGET_OPS
+        if (translated := _QISKIT_TO_OQ3_NAMES.get(g, g)) not in _NON_GATE_TARGET_OPS
     ]
 
     if unsupported := _gate_names(circuit) - set(basis_gates) - _NON_GATE_TARGET_OPS:
