@@ -6,7 +6,7 @@ Qiskit Target objects, including gate sets, connectivity, and parameter restrict
 
 import warnings
 from collections import defaultdict
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from math import inf, pi
 from typing import Self, TypeAlias
 
@@ -342,7 +342,7 @@ def _qpu_target(device: AwsDevice, description: str) -> Target:
         instruction_props_2q.update(
             _build_instruction_props_2q(
                 standardized,
-                {frozenset(edge) for edge in topology.edges},
+                {edge for u, v in topology.edges for edge in ((u, v), (v, u))},
                 indices,
                 default_instruction_props,
             )
@@ -394,7 +394,7 @@ def _qpu_target(device: AwsDevice, description: str) -> Target:
 
 def _build_instruction_props_2q(
     standardized: StandardizedPropertiesV1 | StandardizedPropertiesV2,
-    topology_edges: Collection[frozenset[int]],
+    topology_edges: set[tuple[int, int]],
     indices: Mapping[int, int],
     default_properties: InstructionProperties,
 ) -> dict[str, dict[tuple[int, ...], InstructionProperties]]:
@@ -414,8 +414,9 @@ def _build_instruction_props_2q(
             )
             continue
         # Standardized properties can be calibrated for an edge the topology no longer has.
-        # Topology edges are compared undirected because standardized 2q props are.
-        if frozenset(qubits) not in topology_edges:
+        # qbp ignores the 2q `direction` field and treats edges as bidirectional,
+        # so topology_edges holds both orientations.
+        if tuple(qubits) not in topology_edges:
             warnings.warn(
                 f"Edge {k} not found in topology. Skipping edge {k} and its associated properties.",
                 UserWarning,
