@@ -6,7 +6,7 @@ Qiskit Target objects, including gate sets, connectivity, and parameter restrict
 
 import warnings
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from math import inf, pi
 from typing import Self, TypeAlias
 
@@ -340,7 +340,12 @@ def _qpu_target(device: AwsDevice, description: str) -> Target:
                         )
             qubit_properties.append(QubitProperties(t1=props.T1.value, t2=props.T2.value))
         instruction_props_2q.update(
-            _build_instruction_props_2q(standardized, indices, default_instruction_props)
+            _build_instruction_props_2q(
+                standardized,
+                {frozenset(edge) for edge in topology.edges},
+                indices,
+                default_instruction_props,
+            )
         )
 
     default_props_1q: dict[tuple[int, ...], None] = {(i,): None for i in indices.values()}
@@ -389,6 +394,7 @@ def _qpu_target(device: AwsDevice, description: str) -> Target:
 
 def _build_instruction_props_2q(
     standardized: StandardizedPropertiesV1 | StandardizedPropertiesV2,
+    topology_edges: Collection[frozenset[int]],
     indices: Mapping[int, int],
     default_properties: InstructionProperties,
 ) -> dict[str, dict[tuple[int, ...], InstructionProperties]]:
@@ -403,6 +409,15 @@ def _build_instruction_props_2q(
             warnings.warn(
                 f"Edge {k} contains qubits {missing_qubits} not found in topology. "
                 f"Skipping edge {k} and its associated properties.",
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+        # Standardized properties can be calibrated for an edge the topology no longer has.
+        # Topology edges are compared undirected because standardized 2q props are.
+        if frozenset(qubits) not in topology_edges:
+            warnings.warn(
+                f"Edge {k} not found in topology. Skipping edge {k} and its associated properties.",
                 UserWarning,
                 stacklevel=2,
             )
