@@ -6,6 +6,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
+import pytest
 from botocore import errorfactory
 from networkx import DiGraph, complete_graph
 from qiskit import QuantumCircuit, generate_preset_pass_manager, transpile
@@ -14,7 +15,8 @@ from qiskit.circuit.library import n_local
 from qiskit.circuit.random import random_circuit
 from qiskit.primitives import BackendEstimatorV2, BackendSamplerV2
 from qiskit.quantum_info import SparsePauliOp, Statevector
-from qiskit.transpiler import Target
+from qiskit.transpiler import PassManager, Target
+from qiskit.transpiler.passes import RemoveBarriers
 from qiskit_algorithms.minimum_eigensolvers import VQE, VQEResult
 from qiskit_algorithms.optimizers import SLSQP
 
@@ -28,6 +30,7 @@ from braket.device_schema.openqasm_program_set_device_action_properties import (
 )
 from braket.emulation.emulator import Emulator
 from braket.emulation.local_emulator import LocalEmulator
+from braket.ir.openqasm import Program
 from braket.program_sets import ProgramSet
 from braket.tasks.local_quantum_task import LocalQuantumTask
 from qiskit_braket_provider import (
@@ -50,6 +53,7 @@ from test.unit_tests.mocks import (
     mock_calibrated_rigetti_device,
     mock_emulator_capabilities,
     mock_emulator_topology,
+    mock_simulator_device,
 )
 
 
@@ -75,6 +79,13 @@ def combine_dicts(dict1: dict[str, float], dict2: dict[str, float]) -> dict[str,
         else:
             combined_dict[key] = [value]
     return combined_dict
+
+
+def _submitted_source(task_specification: Circuit | Program) -> str:
+    """Return the OpenQASM source of a submitted Braket circuit or OpenQASM program."""
+    if isinstance(task_specification, Program):
+        return task_specification.source
+    return task_specification.to_ir(ir_type=IRType.OPENQASM).source
 
 
 class TestBraketBackend(TestCase):
@@ -731,7 +742,7 @@ def test_verbatim_native_rigetti_circuit_preserves_rx_and_barrier():
     BraketAwsBackend(device=device).run(circuit, shots=10, verbatim=True)
 
     (submitted,) = device.run_batch.call_args.args[0]
-    assert submitted.to_ir(ir_type=IRType.OPENQASM).source == (
+    assert _submitted_source(submitted) == (
         "OPENQASM 3.0;\n"
         "bit[2] b;\n"
         "#pragma braket verbatim\n"
@@ -792,3 +803,66 @@ def test_backend_run_default_options_with_nonstandard_supported_operation():
         if isinstance(instruction.operator, Gate)
     }
     assert all(name in supported for name in gate_names)
+
+
+def test_local_backend_run_writes_each_measurement_to_its_clbit():
+    """Measurements land in the clbits they target, not in qubit order."""
+    circuit = QuantumCircuit(3, 3)
+    circuit.x(0)
+    circuit.measure(0, 2)
+    circuit.measure(1, 1)
+    circuit.measure(2, 0)
+
+    counts = BraketLocalBackend().run(circuit, shots=10).result().get_counts()
+
+    assert counts == {"100": 10}
+
+
+def test_local_backend_run_with_measurements_and_zero_shots_raises():
+    """A measured circuit can't return a state vector, so shots=0 is rejected."""
+    circuit = QuantumCircuit(1, 1)
+    circuit.h(0)
+    circuit.measure(0, 0)
+
+    with pytest.raises(ValueError):
+        BraketLocalBackend().run(circuit, shots=0)
+
+
+def test_aws_backend_native_run_rejects_disallowed_native_angle():
+    """A native run keeps the device's native angle restrictions, such as Rigetti's rx angles."""
+    device = mock_calibrated_rigetti_device()
+    device.run_batch = Mock()
+    circuit = QuantumCircuit(2, 1)
+    circuit.rx(0.3, 0)
+    circuit.measure(0, 0)
+
+    with pytest.raises(ValueError, match=r"Angle 0\.3 for rx parameter 0 is not supported"):
+        BraketAwsBackend(device=device).run(
+            circuit, shots=10, native=True, pass_manager=PassManager([RemoveBarriers()])
+        )
+    device.run_batch.assert_not_called()
+
+
+def test_aws_backend_run_on_simulator_submits_unwrapped_program():
+    """A default run on an on-demand simulator isn't wrapped in a verbatim box."""
+    device = mock_simulator_device()
+    device.topology_graph = None
+    device.run_batch = Mock()
+    device.run_batch.return_value.tasks = [Mock(id="0")]
+    circuit = QuantumCircuit(2, 2)
+    circuit.h(0)
+    circuit.cx(0, 1)
+    circuit.measure([0, 1], [0, 1])
+
+    BraketAwsBackend(device=device).run(circuit, shots=10)
+
+    (submitted,) = device.run_batch.call_args.args[0]
+    assert _submitted_source(submitted) == (
+        "OPENQASM 3.0;\n"
+        "bit[2] b;\n"
+        "qubit[2] q;\n"
+        "h q[0];\n"
+        "cnot q[0], q[1];\n"
+        "b[0] = measure q[0];\n"
+        "b[1] = measure q[1];"
+    )

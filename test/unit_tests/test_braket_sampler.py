@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import numpy as np
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
-from qiskit.circuit import Parameter
+from qiskit.circuit import Parameter, ParameterVector
 from qiskit.primitives import BackendSamplerV2
 from qiskit.primitives.containers import BitArray
 from qiskit.primitives.containers.sampler_pub import SamplerPub
@@ -148,3 +148,20 @@ class TestBraketSampler(TestCase):
             task.result(), self.sampler_backend.run(pubs).result(), strict=True
         ):
             self.assert_correct_results(actual.data.meas, expected.data.meas)
+
+
+def test_sampler_run_binds_parameter_vector_elements():
+    """Values for ParameterVector elements reach the right gates."""
+    phi = ParameterVector("phi", 2)
+    circuit = QuantumCircuit(2)
+    circuit.rx(phi[0], 0)
+    circuit.rx(phi[1], 1)
+    circuit.measure_all()
+
+    result = BraketSampler(BraketLocalBackend()).run(
+        [(circuit, [[np.pi, 0], [0, np.pi]])], shots=10
+    )
+
+    meas = result.result()[0].data.meas
+    assert meas[0].get_counts() == {"01": 10}
+    assert meas[1].get_counts() == {"10": 10}
