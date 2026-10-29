@@ -239,15 +239,23 @@ class BraketLocalBackend(BraketBackend[Device]):
             verbatim=verbatim,
         )
 
-        if shots == 0 and not self._is_emulator:
-            programs = [_with_state_vector_result(program) for program in programs]
+        # Emulators only accept Braket circuits, so they get the programs as circuits.
+        specifications: list[Program] | list[Circuit]
+        if self._is_emulator:
+            specifications = [Circuit.from_ir(program) for program in programs]
+        elif shots == 0:
+            specifications = [_with_state_vector_result(program) for program in programs]
+        else:
+            specifications = programs
         if "meas_level" in options:
             self._validate_meas_level(options["meas_level"])
             del options["meas_level"]
         tasks = []
         try:
-            for program in programs:
-                task: LocalQuantumTask = self._device.run(task_specification=program, shots=shots)
+            for specification in specifications:
+                task: LocalQuantumTask = self._device.run(
+                    task_specification=specification, shots=shots
+                )
                 tasks.append(task)
 
         except Exception as ex:

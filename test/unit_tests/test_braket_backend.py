@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from botocore import errorfactory
 from networkx import DiGraph, complete_graph
-from qiskit import QuantumCircuit, generate_preset_pass_manager, transpile
+from qiskit import QuantumCircuit, QuantumRegister, generate_preset_pass_manager, transpile
 from qiskit.circuit import Instruction as QiskitInstruction
 from qiskit.circuit.library import n_local
 from qiskit.circuit.random import random_circuit
@@ -816,6 +816,17 @@ def test_local_backend_run_writes_each_measurement_to_its_clbit():
     counts = BraketLocalBackend().run(circuit, shots=10).result().get_counts()
 
     assert counts == {"100": 10}
+
+
+def test_local_backend_run_rejects_multiple_quantum_registers() -> None:
+    """A circuit with more than one quantum register is rejected."""
+    circuit = QuantumCircuit(QuantumRegister(1, "a"), QuantumRegister(1, "b"))
+    circuit.h(0)
+    circuit.cx(0, 1)
+    circuit.measure_all()
+
+    with pytest.raises(ValueError, match="Braket does not support multiple quantum registers"):
+        BraketLocalBackend().run(circuit, shots=10)
 
 
 def test_local_backend_run_with_measurements_and_zero_shots_raises():

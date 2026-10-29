@@ -87,10 +87,9 @@ class TestBraketSampler(TestCase):
         self.assertEqual(device.run_batch.call_args.kwargs, {"shots": -1})
 
     def test_run_local_multiple_registers(self):
-        """Tests that correct results are returned for circuits with multiple registers"""
+        """Tests that correct results are returned for circuits with multiple classical registers"""
         circuit = QuantumCircuit(
-            QuantumRegister(3, "qreg_a"),
-            QuantumRegister(9, "qreg_b"),
+            QuantumRegister(12, "qreg"),
             ClassicalRegister(10, "creg_a"),
             ClassicalRegister(2, "creg_b"),
         )
