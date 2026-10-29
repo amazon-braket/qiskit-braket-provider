@@ -4,6 +4,7 @@ import warnings
 from collections.abc import Callable
 from unittest.mock import Mock
 
+import numpy as np
 import pytest
 from qiskit import QuantumCircuit, QuantumRegister
 from qiskit.circuit import (
@@ -16,7 +17,7 @@ from qiskit.circuit import (
     ParameterVector,
     Qubit,
 )
-from qiskit.circuit.library import CXGate, HGate, XGate
+from qiskit.circuit.library import C3SXGate, CXGate, HGate, XGate
 from qiskit.transpiler import PassManager, Target
 from qiskit.transpiler.passes import RemoveBarriers
 
@@ -795,3 +796,55 @@ def test_compile_to_oq3_input_names_maps_parameters_to_emitted_inputs() -> None:
     assert input_names == [{"alpha": "alpha", "phi[0]": "_phi_0_", "phi[1]": "_phi_1_", "t": "t_0"}]
     for name in input_names[0].values():
         assert f"input float {name};" in oq3
+
+
+@pytest.mark.parametrize(
+    ("gate_name", "add_gate", "expected"),
+    [
+        ("ch", lambda qc: qc.ch(0, 1), "ctrl @ h q[0], q[1];"),
+        ("cs", lambda qc: qc.cs(0, 1), "ctrl @ s q[0], q[1];"),
+        ("csdg", lambda qc: qc.csdg(0, 1), "ctrl @ si q[0], q[1];"),
+        ("csx", lambda qc: qc.csx(0, 1), "ctrl @ v q[0], q[1];"),
+        ("crx", lambda qc: qc.crx(0.5, 0, 1), "ctrl @ rx(0.5) q[0], q[1];"),
+        ("cry", lambda qc: qc.cry(0.5, 0, 1), "ctrl @ ry(0.5) q[0], q[1];"),
+        ("crz", lambda qc: qc.crz(0.5, 0, 1), "ctrl @ rz(0.5) q[0], q[1];"),
+        ("ccz", lambda qc: qc.ccz(0, 1, 2), "ctrl @ cz q[0], q[1], q[2];"),
+        (
+            "c3sx",
+            lambda qc: qc.append(C3SXGate(), [0, 1, 2, 3]),
+            "ctrl(3) @ v q[0], q[1], q[2], q[3];",
+        ),
+        ("u", lambda qc: qc.u(0.1, 0.2, 0.3, 0), "U(0.1, 0.2, 0.3) q[0];"),
+    ],
+    ids=["ch", "cs", "csdg", "csx", "crx", "cry", "crz", "ccz", "c3sx", "u"],
+)
+def test_to_oq3_writes_gates_braket_defines(
+    sim: LocalSimulator,
+    gate_name: str,
+    add_gate: Callable[[QuantumCircuit], object],
+    expected: str,
+) -> None:
+    """Controlled gates use Braket's ctrl modifier and u is Braket's U, so the program runs."""
+    circuit = QuantumCircuit(4)
+    add_gate(circuit)
+
+    oq3 = to_oq3(circuit, basis_gates=[gate_name])
+
+    assert expected in oq3
+    sim.run(Program(source=oq3), shots=1).result()
+
+
+def test_compile_to_oq3_on_local_simulator_target_matches_to_braket() -> None:
+    """Compiling against the local simulator's target gives the program to_braket builds."""
+    circuit = QuantumCircuit(4)
+    circuit.ch(0, 1)
+    circuit.ccz(0, 1, 2)
+    circuit.append(C3SXGate(), [0, 1, 2, 3])
+    circuit.u(0.1, 0.2, 0.3, 0)
+    device = LocalSimulator()
+
+    oq3 = compile_to_oq3(circuit, braket_device=device, verbatim=False)
+
+    assert np.allclose(
+        Circuit.from_ir(oq3).to_unitary(), to_braket(circuit, braket_device=device).to_unitary()
+    )

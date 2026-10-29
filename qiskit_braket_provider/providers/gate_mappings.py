@@ -432,6 +432,94 @@ class BraketGPhaseGate(qiskit_gates.GlobalPhaseGate):
         self.name = "gphase"
 
 
+class BraketUGate(qiskit_gates.UGate):
+    """Qiskit ``UGate`` rendered as Braket's ``U`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = "U"
+
+
+"""Prefix of the placeholder names that stand for Braket's ``ctrl`` modifier.
+
+Qiskit's exporter only accepts identifiers as gate names, so a controlled gate is
+exported as ``_braket_ctrl<n>_<base>`` and rewritten to ``ctrl(<n>) @ <base>`` afterwards.
+"""
+_CONTROL_MODIFIER_PLACEHOLDER = "_braket_ctrl"
+
+
+class BraketCHGate(qiskit_gates.CHGate):
+    """Qiskit ``CHGate`` rendered as Braket's ``ctrl @ h`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = f"{_CONTROL_MODIFIER_PLACEHOLDER}1_h"
+
+
+class BraketCSGate(qiskit_gates.CSGate):
+    """Qiskit ``CSGate`` rendered as Braket's ``ctrl @ s`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = f"{_CONTROL_MODIFIER_PLACEHOLDER}1_s"
+
+
+class BraketCSdgGate(qiskit_gates.CSdgGate):
+    """Qiskit ``CSdgGate`` rendered as Braket's ``ctrl @ si`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = f"{_CONTROL_MODIFIER_PLACEHOLDER}1_si"
+
+
+class BraketCSXGate(qiskit_gates.CSXGate):
+    """Qiskit ``CSXGate`` rendered as Braket's ``ctrl @ v`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = f"{_CONTROL_MODIFIER_PLACEHOLDER}1_v"
+
+
+class BraketCRXGate(qiskit_gates.CRXGate):
+    """Qiskit ``CRXGate`` rendered as Braket's ``ctrl @ rx`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = f"{_CONTROL_MODIFIER_PLACEHOLDER}1_rx"
+
+
+class BraketCRYGate(qiskit_gates.CRYGate):
+    """Qiskit ``CRYGate`` rendered as Braket's ``ctrl @ ry`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = f"{_CONTROL_MODIFIER_PLACEHOLDER}1_ry"
+
+
+class BraketCRZGate(qiskit_gates.CRZGate):
+    """Qiskit ``CRZGate`` rendered as Braket's ``ctrl @ rz`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = f"{_CONTROL_MODIFIER_PLACEHOLDER}1_rz"
+
+
+class BraketCCZGate(qiskit_gates.CCZGate):
+    """Qiskit ``CCZGate`` rendered as Braket's ``ctrl @ cz`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = f"{_CONTROL_MODIFIER_PLACEHOLDER}1_cz"
+
+
+class BraketC3SXGate(qiskit_gates.C3SXGate):
+    """Qiskit ``C3SXGate`` rendered as Braket's ``ctrl(3) @ v`` in OpenQASM 3."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = f"{_CONTROL_MODIFIER_PLACEHOLDER}3_v"
+
+
 _QISKIT_TO_BRAKET_SHIM: dict[type, type] = {
     qiskit_gates.PhaseGate: BraketPhaseShiftGate,
     qiskit_gates.CXGate: BraketCNotGate,
@@ -447,6 +535,37 @@ _QISKIT_TO_BRAKET_SHIM: dict[type, type] = {
     qiskit_gates.CPhaseGate: BraketCPhaseShiftGate,
     qiskit_gates.RGate: BraketPRxGate,
     qiskit_gates.GlobalPhaseGate: BraketGPhaseGate,
+    qiskit_gates.UGate: BraketUGate,
+    qiskit_gates.CHGate: BraketCHGate,
+    qiskit_gates.CSGate: BraketCSGate,
+    qiskit_gates.CSdgGate: BraketCSdgGate,
+    qiskit_gates.CSXGate: BraketCSXGate,
+    qiskit_gates.CRXGate: BraketCRXGate,
+    qiskit_gates.CRYGate: BraketCRYGate,
+    qiskit_gates.CRZGate: BraketCRZGate,
+    qiskit_gates.CCZGate: BraketCCZGate,
+    qiskit_gates.C3SXGate: BraketC3SXGate,
+}
+
+
+"""Placeholder gate names of the controlled gates Braket writes with ``ctrl``, by Qiskit name."""
+_QISKIT_TO_CONTROL_PLACEHOLDER: dict[str, str] = {
+    "ch": f"{_CONTROL_MODIFIER_PLACEHOLDER}1_h",
+    "cs": f"{_CONTROL_MODIFIER_PLACEHOLDER}1_s",
+    "csdg": f"{_CONTROL_MODIFIER_PLACEHOLDER}1_si",
+    "csx": f"{_CONTROL_MODIFIER_PLACEHOLDER}1_v",
+    "crx": f"{_CONTROL_MODIFIER_PLACEHOLDER}1_rx",
+    "cry": f"{_CONTROL_MODIFIER_PLACEHOLDER}1_ry",
+    "crz": f"{_CONTROL_MODIFIER_PLACEHOLDER}1_rz",
+    "ccz": f"{_CONTROL_MODIFIER_PLACEHOLDER}1_cz",
+    "c3sx": f"{_CONTROL_MODIFIER_PLACEHOLDER}3_v",
+}
+
+"""Qiskit gate names mapped to the names :func:`to_oq3` writes in OpenQASM 3."""
+_QISKIT_TO_OQ3_NAMES: dict[str, str] = {
+    **_QISKIT_TO_BRAKET_NAMES,
+    **_QISKIT_TO_CONTROL_PLACEHOLDER,
+    "u": "U",
 }
 
 _SHIM_CLASSES: frozenset[type] = frozenset(_QISKIT_TO_BRAKET_SHIM.values())

@@ -751,6 +751,24 @@ def test_remap_qubits_layout_aware_out_of_range_raises_value_error() -> None:
             ["output bit[2] c;", "bit[1] scratch;"],
             ["output bit[1] scratch;"],
         ),
+        (
+            "OPENQASM 3.0;\n_braket_ctrl1_h q[0], q[1];\n",
+            (),
+            ["ctrl @ h q[0], q[1];"],
+            ["_braket_ctrl"],
+        ),
+        (
+            "OPENQASM 3.0;\n_braket_ctrl3_v q[0], q[1], q[2], q[3];\n",
+            (),
+            ["ctrl(3) @ v q[0], q[1], q[2], q[3];"],
+            ["_braket_ctrl"],
+        ),
+        (
+            "OPENQASM 3.0;\n  _braket_ctrl1_rx(0.5) q[0], q[1];\n",
+            (),
+            ["ctrl @ rx(0.5) q[0], q[1];"],
+            ["_braket_ctrl"],
+        ),
     ],
     ids=[
         "annotated_box_gets_pragma",
@@ -759,6 +777,9 @@ def test_remap_qubits_layout_aware_out_of_range_raises_value_error() -> None:
         "noop_without_box",
         "replaces_float64",
         "restores_output_declaration",
+        "one_control",
+        "three_controls",
+        "parametrized_gate",
     ],
 )
 def test_normalize_formatting(
