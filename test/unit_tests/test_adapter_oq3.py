@@ -1,5 +1,6 @@
 """Tests for the adapter OQ3 output path: ``to_oq3`` and ``compile_to_oq3``."""
 
+import re
 import warnings
 from collections.abc import Callable
 from unittest.mock import Mock
@@ -99,6 +100,13 @@ def _rccx_in_if_else_circuit() -> QuantumCircuit:
     qc.measure(0, 0)
     with qc.if_test((qc.clbits[0], 1)):
         qc.rccx(0, 1, 2)
+    return qc
+
+
+def _ch_and_global_phase_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit(2)
+    qc.ch(0, 1)
+    qc.append(GlobalPhaseGate(0.2), [])
     return qc
 
 
@@ -242,18 +250,22 @@ def test_to_oq3_auto_basis_gates() -> None:
 
 
 @pytest.mark.parametrize(
-    ("circuit_factory", "basis_gates"),
+    ("circuit_factory", "basis_gates", "unsupported"),
     [
-        (_rccx_circuit, None),
-        (_rccx_in_if_else_circuit, None),
-        (_bell_circuit, ["h"]),
+        (_rccx_circuit, None, ["rccx"]),
+        (_rccx_in_if_else_circuit, None, ["rccx"]),
+        (_bell_circuit, ["h"], ["cx"]),
+        (_ch_and_global_phase_circuit, ["h"], ["ch", "global_phase"]),
     ],
-    ids=["default_basis", "nested_in_if_else", "explicit_basis"],
+    ids=["default_basis", "nested_in_if_else", "explicit_basis", "placeholder_names"],
 )
 def test_to_oq3_raises_on_gates_outside_basis(
-    circuit_factory: Callable[[], QuantumCircuit], basis_gates: list[str] | None
+    circuit_factory: Callable[[], QuantumCircuit],
+    basis_gates: list[str] | None,
+    unsupported: list[str],
 ) -> None:
-    with pytest.raises(ValueError, match="not in the basis gate set"):
+    """The error names the unsupported gates as Qiskit names them."""
+    with pytest.raises(ValueError, match=re.escape(f"Gates {unsupported} are not in the basis")):
         to_oq3(circuit_factory(), basis_gates=basis_gates)
 
 
