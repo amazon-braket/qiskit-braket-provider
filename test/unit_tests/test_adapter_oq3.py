@@ -103,10 +103,46 @@ def _rccx_in_if_else_circuit() -> QuantumCircuit:
     return qc
 
 
-def _ch_and_global_phase_circuit() -> QuantumCircuit:
+def _ch_and_u_circuit() -> QuantumCircuit:
     qc = QuantumCircuit(2)
     qc.ch(0, 1)
+    qc.u(0.1, 0.2, 0.3, 0)
+    return qc
+
+
+def _rz_with_circuit_phase() -> QuantumCircuit:
+    qc = QuantumCircuit(1)
+    qc.rz(0.4, 0)
+    qc.global_phase = 0.2
+    return qc
+
+
+def _rz_with_global_phase_gate() -> QuantumCircuit:
+    qc = QuantumCircuit(1)
+    qc.rz(0.4, 0)
     qc.append(GlobalPhaseGate(0.2), [])
+    return qc
+
+
+def _rz_with_both_global_phases() -> QuantumCircuit:
+    qc = _rz_with_global_phase_gate()
+    qc.global_phase = 0.2
+    return qc
+
+
+def _rz_with_parameter_phase() -> QuantumCircuit:
+    qc = QuantumCircuit(1)
+    qc.rz(0.4, 0)
+    qc.global_phase = Parameter("p")
+    return qc
+
+
+def _rz_with_global_phase_gate_in_if() -> QuantumCircuit:
+    qc = QuantumCircuit(1, 1)
+    qc.measure(0, 0)
+    with qc.if_test((qc.clbits[0], 1)):
+        qc.rz(0.4, 0)
+        qc.append(GlobalPhaseGate(0.2), [])
     return qc
 
 
@@ -255,9 +291,14 @@ def test_to_oq3_auto_basis_gates() -> None:
         (_rccx_circuit, None, ["rccx"]),
         (_rccx_in_if_else_circuit, None, ["rccx"]),
         (_bell_circuit, ["h"], ["cx"]),
-        (_ch_and_global_phase_circuit, ["h"], ["ch", "global_phase"]),
+        (_ch_and_u_circuit, ["h"], ["ch", "u"]),
     ],
-    ids=["default_basis", "nested_in_if_else", "explicit_basis", "placeholder_names"],
+    ids=[
+        "default_basis",
+        "nested_in_if_else",
+        "explicit_basis",
+        "placeholder_names",
+    ],
 )
 def test_to_oq3_raises_on_gates_outside_basis(
     circuit_factory: Callable[[], QuantumCircuit],
@@ -775,36 +816,45 @@ def test_compile_to_oq3_on_local_simulator_target_matches_to_braket() -> None:
 
 
 @pytest.mark.parametrize(
-    ("phase", "expected"),
-    [(0.2, "gphase(0.2);"), (Parameter("p"), "gphase(p);")],
-    ids=["float", "parameter"],
+    ("circuit_factory", "expected"),
+    [
+        (_rz_with_circuit_phase, "gphase(0.2);"),
+        (_rz_with_global_phase_gate, "gphase(0.2);"),
+        (_rz_with_both_global_phases, "gphase(0.4);"),
+        (_rz_with_parameter_phase, "gphase(p);"),
+    ],
+    ids=["circuit_phase", "gate", "both", "parameter"],
 )
-@pytest.mark.parametrize("explicit_gate", [False, True], ids=["circuit_phase", "gate"])
 def test_to_oq3_writes_global_phase(
-    phase: float | Parameter, expected: str, explicit_gate: bool
+    circuit_factory: Callable[[], QuantumCircuit], expected: str
 ) -> None:
-    """A circuit's global phase, or a GlobalPhaseGate, is written as Braket's gphase."""
-    circuit = QuantumCircuit(1)
-    circuit.rz(0.4, 0)
-    if explicit_gate:
-        circuit.append(GlobalPhaseGate(phase), [])
-    else:
-        circuit.global_phase = phase
+    """Either form of global phase is written as one gphase before the gates."""
+    oq3 = to_oq3(circuit_factory(), basis_gates=["rz", "global_phase"])
 
-    oq3 = to_oq3(circuit, basis_gates=["rz", "global_phase"])
-
-    assert expected in oq3.splitlines()
+    lines = oq3.splitlines()
+    assert [line for line in lines if "gphase" in line] == [expected]
+    assert lines.index(expected) < lines.index("rz(0.4) q[0];")
     assert "global_phase" not in oq3
 
 
-@pytest.mark.parametrize("basis_gates", [["rz"], None], ids=["without_global_phase", "default"])
-def test_to_oq3_omits_global_phase_outside_basis(basis_gates: list[str] | None) -> None:
-    """The global phase is dropped unless the given basis gates include global_phase."""
-    circuit = QuantumCircuit(1)
-    circuit.rz(0.4, 0)
-    circuit.global_phase = 0.2
+@pytest.mark.parametrize(
+    ("circuit_factory", "basis_gates"),
+    [
+        (_rz_with_circuit_phase, ["rz"]),
+        (_rz_with_circuit_phase, None),
+        (_rz_with_global_phase_gate, ["rz"]),
+        (_rz_with_global_phase_gate_in_if, ["rz", "if_else", "measure"]),
+    ],
+    ids=["circuit_phase", "default_basis", "gate", "gate_in_if"],
+)
+def test_to_oq3_drops_global_phase_outside_basis_with_warning(
+    circuit_factory: Callable[[], QuantumCircuit], basis_gates: list[str] | None
+) -> None:
+    """Either form of global phase is dropped with a warning unless the basis names global_phase."""
+    with pytest.warns(UserWarning, match="global phase"):
+        oq3 = to_oq3(circuit_factory(), basis_gates=basis_gates)
 
-    assert "gphase" not in to_oq3(circuit, basis_gates=basis_gates)
+    assert "gphase" not in oq3
 
 
 def test_compile_to_oq3_on_local_simulator_keeps_global_phase(sim: LocalSimulator) -> None:

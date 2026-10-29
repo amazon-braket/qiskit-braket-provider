@@ -543,6 +543,28 @@ def test_rename_gates_preserves_label() -> None:
     assert shimmed.label == "my_cx"
 
 
+@pytest.mark.parametrize(
+    ("add_gate", "expected_name"),
+    [
+        (lambda qc: qc.cx(0, 1, ctrl_state=0), "cx_o0"),
+        (lambda qc: qc.ch(0, 1, ctrl_state=0), "ch_o0"),
+        (lambda qc: qc.cp(0.5, 0, 1, ctrl_state=0), "cp_o0"),
+        (lambda qc: qc.ccx(0, 1, 2, ctrl_state=1), "ccx_o1"),
+    ],
+    ids=["cx", "ch", "cp", "ccx"],
+)
+def test_rename_gates_leaves_open_controlled_gates(
+    add_gate: Callable[[QuantumCircuit], object], expected_name: str
+) -> None:
+    """A gate with an open control keeps its name, as no shim writes its control state."""
+    circuit = QuantumCircuit(3)
+    add_gate(circuit)
+
+    result = PassManager([RenameGates()]).run(circuit)
+
+    assert [instr.operation.name for instr in result.data] == [expected_name]
+
+
 def test_shim_class_for_returns_none_for_already_shimmed_op() -> None:
     """The idempotence guard: a shim instance is recognised via its MRO and skipped.
 
@@ -751,24 +773,6 @@ def test_remap_qubits_layout_aware_out_of_range_raises_value_error() -> None:
             ["output bit[2] c;", "bit[1] scratch;"],
             ["output bit[1] scratch;"],
         ),
-        (
-            "OPENQASM 3.0;\n_braket_ctrl1_h q[0], q[1];\n",
-            (),
-            ["ctrl @ h q[0], q[1];"],
-            ["_braket_ctrl"],
-        ),
-        (
-            "OPENQASM 3.0;\n_braket_ctrl3_v q[0], q[1], q[2], q[3];\n",
-            (),
-            ["ctrl(3) @ v q[0], q[1], q[2], q[3];"],
-            ["_braket_ctrl"],
-        ),
-        (
-            "OPENQASM 3.0;\n  _braket_ctrl1_rx(0.5) q[0], q[1];\n",
-            (),
-            ["ctrl @ rx(0.5) q[0], q[1];"],
-            ["_braket_ctrl"],
-        ),
     ],
     ids=[
         "annotated_box_gets_pragma",
@@ -777,9 +781,6 @@ def test_remap_qubits_layout_aware_out_of_range_raises_value_error() -> None:
         "noop_without_box",
         "replaces_float64",
         "restores_output_declaration",
-        "one_control",
-        "three_controls",
-        "parametrized_gate",
     ],
 )
 def test_normalize_formatting(

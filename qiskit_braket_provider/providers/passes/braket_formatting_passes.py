@@ -3,7 +3,13 @@
 import re
 from collections.abc import Iterable, Sequence
 
-from qiskit.circuit import ClassicalRegister, Instruction, Measure, QuantumCircuit
+from qiskit.circuit import (
+    ClassicalRegister,
+    ControlledGate,
+    Instruction,
+    Measure,
+    QuantumCircuit,
+)
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.dagcircuit import DAGCircuit
 from qiskit.transpiler.basepasses import TransformationPass
@@ -143,8 +149,11 @@ def _shim_class_for(op: Instruction) -> type | None:
 
     Walks ``type(op).__mro__`` so ops that are Qiskit-generated singleton
     subclasses (e.g. ``_SingletonCXGate`` for ``CXGate``) match their mapped
-    parent. Returns ``None`` if ``op`` is already a shim instance.
+    parent. Returns ``None`` if ``op`` is already a shim instance, or if it has
+    an open control, since the shims only write closed controls.
     """
+    if isinstance(op, ControlledGate) and op.ctrl_state != 2**op.num_ctrl_qubits - 1:
+        return None
     for cls in type(op).__mro__:
         if cls in _SHIM_CLASSES:
             return None
