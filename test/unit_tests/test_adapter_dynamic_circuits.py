@@ -909,10 +909,8 @@ c[0] = measure q[1];
 @pytest.mark.parametrize(
     "condition, match",
     [
-        pytest.param("c[-3]", r"Index -3 is out of range for register 'c' \(bit\[2\]\)", id="neg"),
-        pytest.param(
-            "c[2] == 1", r"Index 2 is out of range for register 'c' \(bit\[2\]\)", id="pos"
-        ),
+        pytest.param("c[-3]", r"Index -3 is out of range for 'c', which has size 2\.", id="neg"),
+        pytest.param("c[2] == 1", r"Index 2 is out of range for 'c', which has size 2\.", id="pos"),
     ],
 )
 def test_out_of_range_index_condition_raises(condition: str, match: str):
@@ -930,8 +928,8 @@ if ({condition}) {{
         to_qiskit(qasm)
 
 
-def test_non_constant_index_condition_raises():
-    """An index that does not evaluate to a constant integer is rejected."""
+def test_symbolic_loop_index_condition_raises():
+    """A condition indexed by the variable of a loop that is not unrolled is not supported yet."""
     qasm = """
 OPENQASM 3.0;
 qubit[2] q;
@@ -944,8 +942,70 @@ for int i in [0:1] {
 }
 """
     with pytest.raises(
-        TypeError, match=r"Index into 'c' in a branching condition must be a constant integer"
+        NotImplementedError,
+        match=r"Index into 'c' in a branching condition does not evaluate to an integer.*"
+        r"symbolic indices in branching conditions are not supported yet",
     ):
+        to_qiskit(qasm)
+
+
+@pytest.mark.parametrize(
+    "declarations, expected_clbit",
+    [
+        pytest.param("bit[2] c;", 1, id="only_register"),
+        pytest.param("bit[1] a;\nbit[2] c;", 2, id="offset_register"),
+    ],
+)
+def test_negative_index_measure_destination(declarations: str, expected_clbit: int):
+    """`c[-1] = measure q[0]` measures into the last bit of `c`."""
+    qasm = f"""
+OPENQASM 3.0;
+qubit[1] q;
+{declarations}
+c[-1] = measure q[0];
+"""
+    qc = to_qiskit(qasm)
+    assert _measure_clbit_indices(qc) == [expected_clbit]
+
+
+@pytest.mark.parametrize(
+    "declarations, measurement, match",
+    [
+        pytest.param(
+            "bit[2] c;\nbit[2] d;",
+            "c[2] = measure q[0];",
+            r"Index 2 is out of range for 'c', which has size 2\.",
+            id="index_past_end",
+        ),
+        pytest.param(
+            "bit[2] c;\nbit[2] d;",
+            "c[{0, 3}] = measure q;",
+            r"Index 3 is out of range for 'c', which has size 2\.",
+            id="discrete_set",
+        ),
+        pytest.param(
+            "bit[2] c;\nbit[2] d;",
+            "c[1:2] = measure q;",
+            r"Index 2 is out of range for 'c', which has size 2\.",
+            id="range",
+        ),
+        pytest.param(
+            "bit c;\nbit[2] d;",
+            "c[0] = measure q[0];",
+            r"'c' is a scalar bit and cannot be indexed\.",
+            id="scalar_bit",
+        ),
+    ],
+)
+def test_out_of_range_measure_destination_raises(declarations: str, measurement: str, match: str):
+    """A measurement into an index outside its register is rejected, not written to another bit."""
+    qasm = f"""
+OPENQASM 3.0;
+qubit[2] q;
+{declarations}
+{measurement}
+"""
+    with pytest.raises(IndexError, match=match):
         to_qiskit(qasm)
 
 
