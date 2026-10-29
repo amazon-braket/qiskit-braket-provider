@@ -894,12 +894,13 @@ def test_compile_to_oq3_on_local_simulator_keeps_global_phase(sim: LocalSimulato
     ],
     ids=["gpi", "gpi2", "ms", "zz"],
 )
-def test_to_oq3_ionq_gates_in_radians(gate: QiskitGate) -> None:
+@pytest.mark.parametrize("verbatim", [False, True], ids=["plain", "verbatim"])
+def test_to_oq3_ionq_gates_in_radians(gate: QiskitGate, verbatim: bool) -> None:
     """qiskit-ionq gates take angles in turns, and Braket's IonQ gates take radians."""
     circuit = QuantumCircuit(gate.num_qubits)
     circuit.append(gate, circuit.qubits)
 
-    oq3 = to_oq3(circuit, basis_gates={gate.name})
+    oq3 = to_oq3(circuit, basis_gates={gate.name}, should_wrap_verbatim=verbatim)
 
     assert np.allclose(
         Operator(circuit).reverse_qargs().to_matrix(), Circuit.from_ir(oq3).to_unitary()
