@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.27.3 (2026-10-29)
+
+### Bug Fixes and Other Changes
+
+ * drop calibrated edges missing from device topology
+
 ## v0.27.2 (2026-10-27)
 
 ### Bug Fixes and Other Changes

@@ -2171,6 +2171,26 @@ class TestThereAndBackAgain(TestCase):
         # Verify the target still works with remaining qubits
         self.assertEqual(target.num_qubits, len(MOCK_RIGETTI_TOPOLOGY_GRAPH.nodes))
 
+    def test_calibrated_edge_missing_from_topology_is_skipped(self):
+        """Tests that a calibrated edge missing from the topology does not change the target."""
+        mock_device = Mock()
+        mock_device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES.copy()
+        mock_device.gate_calibrations = None
+        mock_device.type = "QPU"
+        mock_device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+
+        mock_device.properties.standardized = copy.deepcopy(MOCK_RIGETTI_STANARDIZED_PROPERTIES)
+        baseline = aws_device_to_target(mock_device)
+
+        # Qubits 2 and 6 are both in the topology, but not connected to each other
+        stale = copy.deepcopy(MOCK_RIGETTI_STANARDIZED_PROPERTIES)
+        stale.twoQubitProperties["2-6"] = copy.deepcopy(stale.twoQubitProperties["2-5"])
+        mock_device.properties.standardized = stale
+        with self.assertWarnsRegex(UserWarning, "Edge 2-6 not found in topology"):
+            target = aws_device_to_target(mock_device)
+
+        self.assertEqual(set(target["cx"]), set(baseline["cx"]))
+
     def test_empty_circuit_with_barrier(self):
         """Test edge case: empty Qiskit circuit with global barrier raises ValueError."""
         circuit = QuantumCircuit(0)
