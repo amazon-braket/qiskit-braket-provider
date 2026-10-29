@@ -53,7 +53,6 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_VERBATIM_BOX_NAME,
     _CONTROLLED_GATES_BY_QUBIT_COUNT,  # ruff:ignore[unused-import]
     _EPS,
-    _GPHASE_PLACEHOLDER,
     _NON_GATE_TARGET_OPS,
     _PAULI_MAP,
     _QISKIT_CONTROL_FLOW_OPS,
@@ -836,6 +835,8 @@ def to_oq3(
     pm.append(RenameGates())
     circuit = pm.run(circuit)
 
+    # As in to_braket, the global phase is only written when the basis gates name it.
+    writes_global_phase = basis_gates is not None and "global_phase" in basis_gates
     if basis_gates is None:
         basis_gates = _QISKIT_TO_BRAKET_NAMES.values()
 
@@ -847,7 +848,7 @@ def to_oq3(
         if (translated := _QISKIT_TO_OQ3_NAMES.get(g, g)) not in _NON_GATE_TARGET_OPS
     ]
 
-    if _GPHASE_PLACEHOLDER in basis_gates and _has_global_phase(circuit):
+    if writes_global_phase and _has_global_phase(circuit):
         circuit.append(BraketGPhaseGate(circuit.global_phase), [])
         circuit.global_phase = 0
 
