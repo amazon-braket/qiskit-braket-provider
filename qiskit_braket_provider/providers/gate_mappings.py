@@ -89,7 +89,6 @@ _NON_GATE_TARGET_OPS = frozenset({
     "measure",
     "barrier",
     "box",
-    "gphase",
     "if_else",
 })
 
@@ -424,12 +423,19 @@ class BraketPRxGate(qiskit_gates.RGate):
         self.name = "prx"
 
 
+"""Placeholder name for Braket's ``gphase``, which Qiskit's exporter rejects as a keyword.
+
+:func:`_normalize_formatting` rewrites it back to ``gphase``.
+"""
+_GPHASE_PLACEHOLDER = "_braket_gphase"
+
+
 class BraketGPhaseGate(qiskit_gates.GlobalPhaseGate):
     """Qiskit ``GlobalPhaseGate`` rendered as Braket's ``gphase`` in OpenQASM 3."""
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
-        self.name = "gphase"
+        self.name = _GPHASE_PLACEHOLDER
 
 
 class BraketUGate(qiskit_gates.UGate):
@@ -566,6 +572,8 @@ _QISKIT_TO_OQ3_NAMES: dict[str, str] = {
     **_QISKIT_TO_BRAKET_NAMES,
     **_QISKIT_TO_CONTROL_PLACEHOLDER,
     "u": "U",
+    "global_phase": _GPHASE_PLACEHOLDER,
+    "gphase": _GPHASE_PLACEHOLDER,
 }
 
 _SHIM_CLASSES: frozenset[type] = frozenset(_QISKIT_TO_BRAKET_SHIM.values())

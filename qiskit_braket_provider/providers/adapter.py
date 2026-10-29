@@ -54,6 +54,7 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_VERBATIM_BOX_NAME,
     _CONTROLLED_GATES_BY_QUBIT_COUNT,  # ruff:ignore[unused-import]
     _EPS,
+    _GPHASE_PLACEHOLDER,
     _NON_GATE_TARGET_OPS,
     _PAULI_MAP,
     _QISKIT_CONTROL_FLOW_OPS,
@@ -61,6 +62,7 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
     _QISKIT_TO_BRAKET_NAMES,
     _QISKIT_TO_OQ3_NAMES,
+    BraketGPhaseGate,
     _reverse_endianness,
 )
 from qiskit_braket_provider.providers.passes import (
@@ -875,6 +877,10 @@ def to_oq3(
         if (translated := _QISKIT_TO_OQ3_NAMES.get(g, g)) not in _NON_GATE_TARGET_OPS
     ]
 
+    if _GPHASE_PLACEHOLDER in basis_gates and _has_global_phase(circuit):
+        circuit.append(BraketGPhaseGate(circuit.global_phase), [])
+        circuit.global_phase = 0
+
     if unsupported := _gate_names(circuit) - set(basis_gates) - _NON_GATE_TARGET_OPS:
         raise ValueError(
             f"Gates {sorted(unsupported)} are not in the basis gate set and cannot be "
@@ -892,6 +898,12 @@ def to_oq3(
     output_names = (circuit.metadata or {}).get("braket_output_variables", {})
     oq3_source = _remap_qubits(oq3_source, qubit_labels, physical_qubits)
     return _normalize_formatting(oq3_source, output_names)
+
+
+def _has_global_phase(circuit: QuantumCircuit) -> bool:
+    """Return whether ``circuit`` has a parameterized or nonzero global phase."""
+    phase = circuit.global_phase
+    return isinstance(phase, ParameterExpression) or abs(phase) > _EPS
 
 
 def _compile_to_oq3(

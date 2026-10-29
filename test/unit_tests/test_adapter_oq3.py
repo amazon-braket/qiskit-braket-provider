@@ -17,7 +17,8 @@ from qiskit.circuit import (
     ParameterVector,
     Qubit,
 )
-from qiskit.circuit.library import C3SXGate, CXGate, HGate, XGate
+from qiskit.circuit.library import C3SXGate, CXGate, GlobalPhaseGate, HGate, XGate
+from qiskit.quantum_info import Statevector
 from qiskit.transpiler import PassManager, Target
 from qiskit.transpiler.passes import RemoveBarriers
 
@@ -848,3 +849,47 @@ def test_compile_to_oq3_on_local_simulator_target_matches_to_braket() -> None:
     assert np.allclose(
         Circuit.from_ir(oq3).to_unitary(), to_braket(circuit, braket_device=device).to_unitary()
     )
+
+
+@pytest.mark.parametrize(
+    ("phase", "expected"),
+    [(0.2, "gphase(0.2);"), (Parameter("p"), "gphase(p);")],
+    ids=["float", "parameter"],
+)
+@pytest.mark.parametrize("explicit_gate", [False, True], ids=["circuit_phase", "gate"])
+def test_to_oq3_writes_global_phase(
+    phase: float | Parameter, expected: str, explicit_gate: bool
+) -> None:
+    """A circuit's global phase, or a GlobalPhaseGate, is written as Braket's gphase."""
+    circuit = QuantumCircuit(1)
+    circuit.rz(0.4, 0)
+    if explicit_gate:
+        circuit.append(GlobalPhaseGate(phase), [])
+    else:
+        circuit.global_phase = phase
+
+    oq3 = to_oq3(circuit, basis_gates=["rz", "global_phase"])
+
+    assert expected in oq3.splitlines()
+    assert "global_phase" not in oq3
+
+
+def test_to_oq3_omits_global_phase_outside_basis() -> None:
+    """The global phase is dropped when the basis gates don't include global_phase."""
+    circuit = QuantumCircuit(1)
+    circuit.rz(0.4, 0)
+    circuit.global_phase = 0.2
+
+    assert "gphase" not in to_oq3(circuit, basis_gates=["rz"])
+
+
+def test_compile_to_oq3_on_local_simulator_keeps_global_phase(sim: LocalSimulator) -> None:
+    """The local simulator's state vector matches Qiskit's, global phase included."""
+    circuit = QuantumCircuit(1)
+    circuit.rz(0.4, 0)
+    circuit.global_phase = 0.2
+
+    oq3 = compile_to_oq3(circuit, braket_device=sim, verbatim=False)
+    result = sim.run(Program(source=f"{oq3}\n#pragma braket result state_vector"), shots=0).result()
+
+    assert np.allclose(result.values[0], Statevector(circuit).data)
