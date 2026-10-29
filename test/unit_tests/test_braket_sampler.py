@@ -10,7 +10,7 @@ from qiskit.primitives import BackendSamplerV2
 from qiskit.primitives.containers import BitArray
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 
-from braket.circuits import Circuit
+from braket.ir.openqasm import Program
 from braket.program_sets import CircuitBinding
 from qiskit_braket_provider.providers import BraketLocalBackend
 from qiskit_braket_provider.providers.braket_sampler import BraketSampler
@@ -140,7 +140,7 @@ class TestBraketSampler(TestCase):
         task = self.sampler.run(pubs)
         program_set = task.program_set
         self.assertEqual(len(program_set), 2)
-        self.assertTrue(isinstance(program_set[0], Circuit))
+        self.assertTrue(isinstance(program_set[0], Program))
         self.assertTrue(isinstance(program_set[1], CircuitBinding))
         self.assertEqual(program_set.total_executables, 2)
         for actual, expected in zip(

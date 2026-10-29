@@ -33,7 +33,6 @@ from .adapter import (
     local_simulator_to_target,
     native_angle_restrictions,
     native_gate_set,
-    to_braket,
 )
 from .braket_quantum_task import BraketQuantumTask
 
@@ -123,11 +122,11 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
 
     def _run_program_set(
         self,
-        braket_circuits: list[Circuit],
+        programs: list[Program],
         shots: int | None,
         **options,
     ) -> BraketQuantumTask:
-        program_set = ProgramSet(braket_circuits, shots_per_executable=shots)
+        program_set = ProgramSet(programs, shots_per_executable=shots)
         task = self._device.run(program_set, **options)
         return BraketQuantumTask(
             task_id=task.id, tasks=task, backend=self, shots=program_set.total_shots
@@ -489,10 +488,12 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
 
         # Always use target for simulator
         target, basis_gates, qubit_labels = self._resolve_compilation_args(native, pass_manager)
-        braket_circuits = (
-            to_braket(circuits, qubit_labels=self._qubit_labels, target=self._target, verbatim=True)
+        programs = (
+            _compile_programs(
+                circuits, qubit_labels=self._qubit_labels, target=self._target, verbatim=True
+            )
             if verbatim
-            else to_braket(
+            else _compile_programs(
                 circuits,
                 qubit_labels=qubit_labels,
                 target=target,
@@ -507,11 +508,9 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
             )
         )
         return (
-            self._run_program_set(braket_circuits, shots, **options)
-            if self._max_program_set_executables is not None
-            and shots != 0
-            and len(braket_circuits) > 1
-            else self._run_batch(braket_circuits, shots, **options)
+            self._run_program_set(programs, shots, **options)
+            if self._max_program_set_executables is not None and shots != 0 and len(programs) > 1
+            else self._run_batch(programs, shots, **options)
         )
 
     def _resolve_compilation_args(
@@ -527,11 +526,11 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
 
     def _run_batch(
         self,
-        braket_circuits: list[Circuit],
+        programs: list[Program],
         shots: int,
         **options,
     ) -> BraketQuantumTask:
-        batch_task = self._device.run_batch(braket_circuits, shots=shots, **options)
+        batch_task = self._device.run_batch(programs, shots=shots, **options)
         tasks: list[AwsQuantumTask] = batch_task.tasks
         task_id = _TASK_ID_DIVIDER.join(task.id for task in tasks)
         return BraketQuantumTask(task_id=task_id, tasks=tasks, backend=self, shots=shots)

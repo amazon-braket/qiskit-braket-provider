@@ -23,7 +23,6 @@ from qiskit_algorithms.optimizers import SLSQP
 from braket.aws import AwsDevice, AwsQuantumTaskBatch
 from braket.aws.queue_information import QueueDepthInfo, QueueType
 from braket.circuits import Circuit, Gate
-from braket.circuits.serialization import IRType
 from braket.device_schema import DeviceActionType
 from braket.device_schema.openqasm_program_set_device_action_properties import (
     OpenQASMProgramSetDeviceActionProperties,
@@ -79,13 +78,6 @@ def combine_dicts(dict1: dict[str, float], dict2: dict[str, float]) -> dict[str,
         else:
             combined_dict[key] = [value]
     return combined_dict
-
-
-def _submitted_source(task_specification: Circuit | Program) -> str:
-    """Return the OpenQASM source of a submitted Braket circuit or OpenQASM program."""
-    if isinstance(task_specification, Program):
-        return task_specification.source
-    return task_specification.to_ir(ir_type=IRType.OPENQASM).source
 
 
 class TestBraketBackend(TestCase):
@@ -354,14 +346,17 @@ class TestBraketAwsBackend(TestCase):
         circuit.h(0)
 
         backend.run([circuit, circuit], shots=0, meas_level=2)
-        braket_circuit = Circuit().h(0)
-        device.run_batch.assert_called_once_with([braket_circuit, braket_circuit], shots=0)
+        program = Program(source="OPENQASM 3.0;\nqubit[1] q;\nh q[0];")
+        device.run_batch.assert_called_once_with([program, program], shots=0)
 
         backend.run([circuit, circuit], shots=0, native=True, num_processes=2)
-        native_circuit = Circuit().add_verbatim_box(
-            Circuit().rz(1, np.pi / 2).rx(1, np.pi / 2).rz(1, np.pi / 2)
+        native_program = Program(
+            source=(
+                "OPENQASM 3.0;\n#pragma braket verbatim\nbox {\nrz(1.5707963267948966) $1;\n"
+                "rx(1.5707963267948966) $1;\nrz(1.5707963267948966) $1;\n}"
+            )
         )
-        device.run_batch.assert_called_with([native_circuit, native_circuit], shots=0)
+        device.run_batch.assert_called_with([native_program, native_program], shots=0)
         self.assertEqual(device.run_batch.call_count, 2)
 
     def test_run_multiple_circuits_program_set(self):
@@ -387,17 +382,18 @@ class TestBraketAwsBackend(TestCase):
         circuit.h(0)
 
         backend.run([circuit, circuit], shots=5, meas_level=2)
-        braket_circuit = Circuit().h(0)
-        device.run.assert_called_once_with(
-            ProgramSet([braket_circuit, braket_circuit], shots_per_executable=5)
-        )
+        program = Program(source="OPENQASM 3.0;\nqubit[1] q;\nh q[0];")
+        device.run.assert_called_once_with(ProgramSet([program, program], shots_per_executable=5))
 
         backend.run([circuit, circuit], shots=5, native=True, num_processes=2)
-        native_circuit = Circuit().add_verbatim_box(
-            Circuit().rz(1, np.pi / 2).rx(1, np.pi / 2).rz(1, np.pi / 2)
+        native_program = Program(
+            source=(
+                "OPENQASM 3.0;\n#pragma braket verbatim\nbox {\nrz(1.5707963267948966) $1;\n"
+                "rx(1.5707963267948966) $1;\nrz(1.5707963267948966) $1;\n}"
+            )
         )
         device.run.assert_called_with(
-            ProgramSet([native_circuit, native_circuit], shots_per_executable=5)
+            ProgramSet([native_program, native_program], shots_per_executable=5)
         )
         self.assertEqual(device.run.call_count, 2)
 
@@ -421,10 +417,13 @@ class TestBraketAwsBackend(TestCase):
         circuit.h(0)
 
         backend.run(circuit, shots=0, pass_manager=generate_preset_pass_manager(1, backend))
-        native_circuit = Circuit().add_verbatim_box(
-            Circuit().rz(1, np.pi / 2).rx(1, np.pi / 2).rz(1, np.pi / 2)
+        native_program = Program(
+            source=(
+                "OPENQASM 3.0;\n#pragma braket verbatim\nbox {\nrz(1.5707963267948966) $1;\n"
+                "rx(1.5707963267948966) $1;\nrz(1.5707963267948966) $1;\n}"
+            )
         )
-        device.run_batch.assert_called_once_with([native_circuit], shots=0)
+        device.run_batch.assert_called_once_with([native_program], shots=0)
 
     def test_run_invalid_run_input(self):
         """Tests run with invalid input to run"""
@@ -520,8 +519,8 @@ class TestBraketAwsBackend(TestCase):
 
         self.assertEqual(sum(result.get_counts().values()), 10)
 
-    @patch("qiskit_braket_provider.providers.braket_backend.to_braket")
-    def test_native_transpilation(self, mock_to_braket: MagicMock):
+    @patch("qiskit_braket_provider.providers.braket_backend._compile_programs")
+    def test_native_transpilation(self, mock_compile_programs: MagicMock):
         """Tests running circuit with native mode"""
         mock_device = Mock()
         mock_device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
@@ -541,10 +540,10 @@ class TestBraketAwsBackend(TestCase):
         backend = AWSBraketBackend(device=mock_device)
 
         backend.run(circuit, native=True)
-        assert mock_to_braket.call_args.kwargs["target"] == backend.target
+        assert mock_compile_programs.call_args.kwargs["target"] == backend.target
 
         backend.run(circuit, verbatim=True)
-        assert mock_to_braket.call_args.kwargs["verbatim"] is True
+        assert mock_compile_programs.call_args.kwargs["verbatim"] is True
 
     @patch("qiskit_braket_provider.providers.braket_provider.AwsDevice")
     def test_queue_depth(self, mocked_device: MagicMock):
@@ -742,19 +741,16 @@ def test_verbatim_native_rigetti_circuit_preserves_rx_and_barrier():
     BraketAwsBackend(device=device).run(circuit, shots=10, verbatim=True)
 
     (submitted,) = device.run_batch.call_args.args[0]
-    assert _submitted_source(submitted) == (
+    assert submitted.source == (
         "OPENQASM 3.0;\n"
-        "bit[2] b;\n"
         "#pragma braket verbatim\n"
-        "box{\n"
+        "box {\n"
         "rz(1.5707963267948966) $1;\n"
         "rx(1.5707963267948966) $1;\n"
         "rx(-1.5707963267948966) $2;\n"
         "barrier $1, $2;\n"
         "cz $1, $2;\n"
-        "}\n"
-        "b[0] = measure $1;\n"
-        "b[1] = measure $2;"
+        "}"
     )
 
 
@@ -799,7 +795,7 @@ def test_backend_run_default_options_with_nonstandard_supported_operation():
     }
     gate_names = {
         instruction.operator.name.lower()
-        for instruction in submitted.instructions
+        for instruction in Circuit.from_ir(submitted).instructions
         if isinstance(instruction.operator, Gate)
     }
     assert all(name in supported for name in gate_names)
@@ -868,7 +864,7 @@ def test_aws_backend_run_on_simulator_submits_unwrapped_program():
     BraketAwsBackend(device=device).run(circuit, shots=10)
 
     (submitted,) = device.run_batch.call_args.args[0]
-    assert _submitted_source(submitted) == (
+    assert submitted.source == (
         "OPENQASM 3.0;\n"
         "bit[2] b;\n"
         "qubit[2] q;\n"
