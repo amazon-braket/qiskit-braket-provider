@@ -1,5 +1,6 @@
 """Amazon Braket task."""
 
+from collections import Counter
 from datetime import UTC, datetime
 from itertools import starmap
 
@@ -58,7 +59,24 @@ def _result_from_circuit_task(
     if not result:
         return None
 
-    if result.task_metadata.shots == 0:
+    header = None
+    # Older SDK versions have no ``outputs`` field.
+    if outputs := getattr(result, "outputs", None):
+        creg_sizes = [[name, len(bits)] for name, bits in outputs[0].items()]
+        header = {"creg_sizes": creg_sizes, "memory_slots": sum(size for _, size in creg_sizes)}
+        memory = [
+            hex(
+                int(
+                    "".join(
+                        str(int(b)) for bits in reversed(shot.values()) for b in reversed(bits)
+                    ),
+                    2,
+                )
+            )
+            for shot in outputs
+        ]
+        data = ExperimentResultData(counts=dict(Counter(memory)), memory=memory)
+    elif result.task_metadata.shots == 0:
         braket_statevector = result.values[
             result._result_types_indices["{'type': <Type.statevector: 'statevector'>}"]
         ]
@@ -85,6 +103,7 @@ def _result_from_circuit_task(
             task.state() if isinstance(task, LocalQuantumTask) else result.task_metadata.status
         ),
         data=data,
+        header=header,
     )
 
 
