@@ -340,7 +340,12 @@ def _qpu_target(device: AwsDevice, description: str) -> Target:
                         )
             qubit_properties.append(QubitProperties(t1=props.T1.value, t2=props.T2.value))
         instruction_props_2q.update(
-            _build_instruction_props_2q(standardized, indices, default_instruction_props)
+            _build_instruction_props_2q(
+                standardized,
+                {edge for u, v in topology.edges for edge in ((u, v), (v, u))},
+                indices,
+                default_instruction_props,
+            )
         )
 
     default_props_1q: dict[tuple[int, ...], None] = {(i,): None for i in indices.values()}
@@ -389,6 +394,7 @@ def _qpu_target(device: AwsDevice, description: str) -> Target:
 
 def _build_instruction_props_2q(
     standardized: StandardizedPropertiesV1 | StandardizedPropertiesV2,
+    topology_edges: set[tuple[int, int]],
     indices: Mapping[int, int],
     default_properties: InstructionProperties,
 ) -> dict[str, dict[tuple[int, ...], InstructionProperties]]:
@@ -403,6 +409,16 @@ def _build_instruction_props_2q(
             warnings.warn(
                 f"Edge {k} contains qubits {missing_qubits} not found in topology. "
                 f"Skipping edge {k} and its associated properties.",
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+        # Standardized properties can be calibrated for an edge the topology no longer has.
+        # qbp ignores the 2q `direction` field and treats edges as bidirectional,
+        # so topology_edges holds both orientations.
+        if tuple(qubits) not in topology_edges:
+            warnings.warn(
+                f"Edge {k} not found in topology. Skipping edge {k} and its associated properties.",
                 UserWarning,
                 stacklevel=2,
             )
