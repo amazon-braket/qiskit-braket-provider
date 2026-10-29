@@ -874,13 +874,14 @@ def test_to_oq3_writes_global_phase(
     assert "global_phase" not in oq3
 
 
-def test_to_oq3_omits_global_phase_outside_basis() -> None:
-    """The global phase is dropped when the basis gates don't include global_phase."""
+@pytest.mark.parametrize("basis_gates", [["rz"], None], ids=["without_global_phase", "default"])
+def test_to_oq3_omits_global_phase_outside_basis(basis_gates: list[str] | None) -> None:
+    """The global phase is dropped unless the given basis gates include global_phase."""
     circuit = QuantumCircuit(1)
     circuit.rz(0.4, 0)
     circuit.global_phase = 0.2
 
-    assert "gphase" not in to_oq3(circuit, basis_gates=["rz"])
+    assert "gphase" not in to_oq3(circuit, basis_gates=basis_gates)
 
 
 def test_compile_to_oq3_on_local_simulator_keeps_global_phase(sim: LocalSimulator) -> None:
