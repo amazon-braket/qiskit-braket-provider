@@ -15,6 +15,7 @@ from qiskit_braket_provider.providers.braket_annotations import (
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_VERBATIM_PRAGMA_LINE,
     _CONTROL_MODIFIER_PLACEHOLDER,
+    _GPHASE_PLACEHOLDER,
     _OUTPUT_VARIABLES_KEY,
     _QISKIT_TO_BRAKET_SHIM,
     _SHIM_CLASSES,
@@ -24,6 +25,7 @@ _QUBIT_DECL_RE = re.compile(r"^qubit\[(\d+)\]\s+(\w+);\n?", re.MULTILINE)
 
 _PHYSICAL_QUBIT_RE = re.compile(r"\$(\d+)")
 _CONTROL_PLACEHOLDER_RE = re.compile(rf"\b{_CONTROL_MODIFIER_PLACEHOLDER}(\d+)_(\w+)")
+_GPHASE_PLACEHOLDER_RE = re.compile(rf"^{_GPHASE_PLACEHOLDER}\((.*)\) ;$")
 _LOOSE_QUBIT_DECL_RE = re.compile(r"^qubit\s+_qubit\d+;\n?", re.MULTILINE)
 _LOOSE_QUBIT_RE = re.compile(r"\b_qubit(\d+)\b")
 
@@ -101,7 +103,13 @@ class WrapInVerbatimBox(TransformationPass):
         for instr in circuit.data[:split]:
             inner.append(instr.operation, instr.qubits, instr.clbits)
 
-        result = QuantumCircuit(circuit.qubits, circuit.clbits, *circuit.qregs, *circuit.cregs)
+        result = QuantumCircuit(
+            circuit.qubits,
+            circuit.clbits,
+            *circuit.qregs,
+            *circuit.cregs,
+            global_phase=circuit.global_phase,
+        )
         result.append(BraketVerbatimBox(inner), result.qubits, result.clbits)
         for instr in circuit.data[split:]:
             result.append(instr.operation, instr.qubits, instr.clbits)
@@ -265,6 +273,7 @@ def _normalize_formatting(oq3_source: str, output_names: Iterable[str] = ()) -> 
     - Restores ``output`` keyword on registers listed in ``output_names``
     - Rewrites the controlled-gate placeholders written for Braket's ``ctrl``
       modifier, such as ``_braket_ctrl1_h``, as ``ctrl @ h``
+    - Rewrites the ``gphase`` placeholder, ``_braket_gphase(θ) ;``, as ``gphase(θ);``
     - Removes empty lines
     """
     output_set = set(output_names)
@@ -272,6 +281,7 @@ def _normalize_formatting(oq3_source: str, output_names: Iterable[str] = ()) -> 
     for raw_line in oq3_source.split("\n"):
         line = raw_line.lstrip().replace("float[64]", "float")
         line = _CONTROL_PLACEHOLDER_RE.sub(_control_modifier, line)
+        line = _GPHASE_PLACEHOLDER_RE.sub(r"gphase(\1);", line)
         if _BRAKET_VERBATIM_ANNOTATION_LINE.match(line):
             lines.append(_BRAKET_VERBATIM_PRAGMA_LINE)
             continue
