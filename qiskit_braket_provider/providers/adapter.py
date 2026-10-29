@@ -55,10 +55,12 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _CONTROLLED_GATES_BY_QUBIT_COUNT,  # ruff:ignore[unused-import]
     _EPS,
     _NON_GATE_TARGET_OPS,
+    _OQ3_TO_QISKIT_NAMES,
     _PAULI_MAP,
     _QISKIT_CONTROL_FLOW_OPS,
     _QISKIT_CONTROLLED_GATE_NAMES_TO_BRAKET_GATES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
+    _QISKIT_GLOBAL_PHASE,
     _QISKIT_TO_BRAKET_NAMES,
     _QISKIT_TO_OQ3_NAMES,
     BraketGPhaseGate,
@@ -460,7 +462,9 @@ def _translate_to_braket(
     global_phase = circuit.global_phase
     has_nonzero_phase = isinstance(global_phase, ParameterExpression) or abs(global_phase) > _EPS
     if has_nonzero_phase:
-        if (target and "global_phase" in target) or (basis_gates and "global_phase" in basis_gates):
+        if (target and _QISKIT_GLOBAL_PHASE in target) or (
+            basis_gates and _QISKIT_GLOBAL_PHASE in basis_gates
+        ):
             if isinstance(global_phase, ParameterExpression):
                 global_phase = FreeParameterExpression(rename_parameter(global_phase))
             braket_circuit.gphase(global_phase)
@@ -865,9 +869,9 @@ def to_oq3(
     pm.append(RenameGates())
     circuit = pm.run(circuit)
 
-    writes_global_phase = basis_gates is not None and "global_phase" in basis_gates
+    writes_global_phase = basis_gates is not None and _QISKIT_GLOBAL_PHASE in basis_gates
     if basis_gates is None:
-        basis_gates = _QISKIT_TO_BRAKET_NAMES.values()
+        basis_gates = _QISKIT_TO_BRAKET_NAMES.keys()
 
     # basis_gates arrives as Qiskit names; RenameGates has already substituted
     # shims for renameable gates, so translate to the names the shims carry.
@@ -882,8 +886,9 @@ def to_oq3(
         circuit.global_phase = 0
 
     if unsupported := _gate_names(circuit) - set(basis_gates) - _NON_GATE_TARGET_OPS:
+        unsupported_names = sorted(_OQ3_TO_QISKIT_NAMES.get(name, name) for name in unsupported)
         raise ValueError(
-            f"Gates {sorted(unsupported)} are not in the basis gate set and cannot be "
+            f"Gates {unsupported_names} are not in the basis gate set and cannot be "
             "serialized for Braket. Transpile the circuit to the basis gates first."
         )
 
