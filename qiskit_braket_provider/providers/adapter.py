@@ -835,7 +835,6 @@ def to_oq3(
     pm.append(RenameGates())
     circuit = pm.run(circuit)
 
-    # As in to_braket, the global phase is only written when the basis gates name it.
     writes_global_phase = basis_gates is not None and "global_phase" in basis_gates
     if basis_gates is None:
         basis_gates = _QISKIT_TO_BRAKET_NAMES.values()
