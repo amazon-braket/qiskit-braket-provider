@@ -553,3 +553,12 @@ def test_estimator_run_binds_parameter_vector_elements():
     ])
 
     assert np.allclose(result.result()[0].data.evs, [-1, 1])
+
+
+def test_translate_parameters_keeps_parameter_the_program_does_not_declare():
+    """A parameter missing from the compiled program is passed under its Braket name."""
+    bindings = BindingsArray({(Parameter("phi"),): np.array([0.5])})
+
+    parameter_sets = BraketEstimator._translate_parameters([bindings], {})
+
+    assert parameter_sets.as_dict() == {"phi": [0.5]}

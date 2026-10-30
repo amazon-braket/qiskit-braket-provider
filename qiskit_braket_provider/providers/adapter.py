@@ -160,6 +160,7 @@ def _physical_qubits(circuit: QuantumCircuit) -> list[int] | None:
     return (circuit.metadata or {}).get("braket_physical_qubits")
 
 
+# Matches the input declarations Qiskit's exporter writes, as in ``input float theta;``.
 _OQ3_INPUT_RE = re.compile(r"^input float (\S+);$", re.MULTILINE)
 
 

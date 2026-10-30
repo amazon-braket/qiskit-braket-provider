@@ -164,3 +164,18 @@ def test_sampler_run_binds_parameter_vector_elements():
     meas = result.result()[0].data.meas
     assert meas[0].get_counts() == {"01": 10}
     assert meas[1].get_counts() == {"10": 10}
+
+
+def test_sampler_run_binds_parameter_removed_by_transpilation():
+    """A parameter that transpilation removes doesn't stop the pub from running."""
+    circuit = QuantumCircuit(1, 1)
+    circuit.h(0)
+    circuit.rz(Parameter("theta"), 0)
+    circuit.measure(0, 0)
+
+    result = BraketSampler(BraketLocalBackend(), optimization_level=2).run(
+        [(circuit, [[0.5], [1.0]])], shots=10
+    )
+
+    counts = result.result()[0].data.c
+    assert [sum(counts[i].get_counts().values()) for i in range(2)] == [10, 10]
