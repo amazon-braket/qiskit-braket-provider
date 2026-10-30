@@ -930,11 +930,29 @@ def _has_global_phase(circuit: QuantumCircuit) -> bool:
     )
 
 
+def _contains_global_phase_gate(circuit: QuantumCircuit, recurse: bool) -> bool:
+    """Return whether ``circuit`` has a ``GlobalPhaseGate``, or, with ``recurse``, a block does."""
+    for instruction in circuit.data:
+        operation = instruction.operation
+        if isinstance(operation, qiskit_gates.GlobalPhaseGate):
+            return True
+        if (
+            recurse
+            and isinstance(operation, ControlFlowOp)
+            and any(_contains_global_phase_gate(block, recurse) for block in operation.blocks)
+        ):
+            return True
+    return False
+
+
 def _fold_global_phase_gates(circuit: QuantumCircuit, recurse: bool) -> QuantumCircuit:
     """Return a copy of ``circuit`` with each ``GlobalPhaseGate`` added to its global phase.
 
     With ``recurse``, the gates in control-flow blocks are folded into their block's phase.
+    Returns ``circuit`` itself when it has no ``GlobalPhaseGate`` to fold.
     """
+    if not _contains_global_phase_gate(circuit, recurse):
+        return circuit
     folded = circuit.copy_empty_like()
     for instruction in circuit.data:
         operation = instruction.operation

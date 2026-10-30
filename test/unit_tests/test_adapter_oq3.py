@@ -34,6 +34,7 @@ from braket.devices import LocalSimulator
 from braket.ir.openqasm import Program
 from qiskit_braket_provider.providers.adapter import (
     _compile_to_oq3,
+    _fold_global_phase_gates,
     _has_control_flow,
     compile_to_oq3,
     to_braket,
@@ -934,6 +935,18 @@ def test_to_oq3_drops_global_phase_outside_basis_with_warning(
         oq3 = to_oq3(circuit_factory(), basis_gates=basis_gates)
 
     assert "gphase" not in oq3
+
+
+@pytest.mark.parametrize(
+    "circuit_factory", [_rz_with_circuit_phase, _rccx_in_if_else_circuit], ids=["flat", "if_else"]
+)
+def test_fold_global_phase_gates_returns_circuit_without_phase_gates_unchanged(
+    circuit_factory: Callable[[], QuantumCircuit],
+) -> None:
+    """A circuit with no GlobalPhaseGate is returned as is, without being rebuilt."""
+    circuit = circuit_factory()
+
+    assert _fold_global_phase_gates(circuit, recurse=True) is circuit
 
 
 def test_compile_to_oq3_on_local_simulator_keeps_global_phase(sim: LocalSimulator) -> None:
