@@ -365,18 +365,23 @@ class _QiskitProgramContext(AbstractProgramContext):
         if name not in self._clbit_offset:
             raise ValueError(f"Classical bit register {name!r} is not declared")
         self._ensure_qubit_capacity(target)
-        self._add_measure_into_register(target, classical_targets, self._clbit_offset[name])
+        self._add_measure_into_register(target, classical_targets, name)
 
     def _add_measure_into_register(
         self,
         target: tuple[int, ...],
         classical_targets: Sequence[int] | None,
-        offset: int,
+        name: str,
     ) -> None:
-        """Measure into a declared bit register at the given flat-clbit offset."""
+        """Measure into the declared bit register ``name``, bounds-checking explicit indices."""
         active = self._active_circuit
+        offset = self._clbit_offset[name]
         for idx, qubit in enumerate(target):
-            local_index = classical_targets[idx] if classical_targets else idx
+            local_index = (
+                self.resolve_index(name, IntegerLiteral(classical_targets[idx]))
+                if classical_targets
+                else idx
+            )
             active.measure(qubit, offset + local_index)
 
     def add_barrier(self, target: list[int] | None = None) -> None:
@@ -690,7 +695,15 @@ class _QiskitProgramContext(AbstractProgramContext):
         """Resolve an identifier or indexed identifier to a classical bit index."""
         if isinstance(node, IndexExpression):
             name = node.collection.name
-            index = node.index[0].value
+            index = self.resolve_index(name, self._evaluate_expression(node.index[0]))
+            if not isinstance(index, int):
+                # Qiskit can only index a condition with a concrete clbit or a Uint expr over a
+                # ClassicalRegister, and a ForLoopOp parameter cannot appear in a classical expr.
+                raise NotImplementedError(
+                    f"Index into '{name}' in a branching condition does not evaluate to an "
+                    "integer when the circuit is built; symbolic indices in branching "
+                    "conditions are not supported yet."
+                )
         elif isinstance(node, Identifier):
             name = node.name
             var_type = self.get_type(name)

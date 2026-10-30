@@ -17,6 +17,7 @@ import qiskit.quantum_info as qiskit_qi
 from qiskit import QuantumCircuit, qasm3
 from qiskit.circuit import (
     BoxOp,
+    CircuitInstruction,
     ControlFlowOp,
     ControlledGate,
     Gate,
@@ -862,6 +863,17 @@ def to_oq3(
             stacklevel=2,
         )
 
+    # A global phase is either the circuit's or a GlobalPhaseGate; treat both the same.
+    writes_global_phase = basis_gates is not None and _QISKIT_GLOBAL_PHASE in basis_gates
+    circuit = _fold_global_phase_gates(circuit, recurse=not writes_global_phase)
+    if not writes_global_phase and _has_global_phase(circuit):
+        warnings.warn(
+            "The basis gates don't include global_phase, so the circuit's global phase "
+            "will not be included in the OpenQASM program.",
+            UserWarning,
+            stacklevel=2,
+        )
+
     pm = PassManager()
     pm.append(ConsolidateClbits())
     if should_wrap_verbatim:
@@ -869,7 +881,6 @@ def to_oq3(
     pm.append(RenameGates())
     circuit = pm.run(circuit)
 
-    writes_global_phase = basis_gates is not None and _QISKIT_GLOBAL_PHASE in basis_gates
     if basis_gates is None:
         basis_gates = _QISKIT_TO_BRAKET_NAMES.keys()
 
@@ -881,8 +892,8 @@ def to_oq3(
         if (translated := _QISKIT_TO_OQ3_NAMES.get(g, g)) not in _NON_GATE_TARGET_OPS
     ]
 
-    if writes_global_phase and _has_global_phase(circuit):
-        circuit.append(BraketGPhaseGate(circuit.global_phase), [])
+    if writes_global_phase and _is_nonzero_phase(circuit.global_phase):
+        circuit.data.insert(0, CircuitInstruction(BraketGPhaseGate(circuit.global_phase)))
         circuit.global_phase = 0
 
     if unsupported := _gate_names(circuit) - set(basis_gates) - _NON_GATE_TARGET_OPS:
@@ -905,10 +916,36 @@ def to_oq3(
     return _normalize_formatting(oq3_source, output_names)
 
 
-def _has_global_phase(circuit: QuantumCircuit) -> bool:
-    """Return whether ``circuit`` has a parameterized or nonzero global phase."""
-    phase = circuit.global_phase
+def _is_nonzero_phase(phase: float | ParameterExpression) -> bool:
+    """Return whether ``phase`` is parameterized or nonzero."""
     return isinstance(phase, ParameterExpression) or abs(phase) > _EPS
+
+
+def _has_global_phase(circuit: QuantumCircuit) -> bool:
+    """Return whether ``circuit``, or a control-flow block in it, has a global phase."""
+    return _is_nonzero_phase(circuit.global_phase) or any(
+        _has_global_phase(block)
+        for instruction in circuit.data
+        for block in getattr(instruction.operation, "blocks", ())
+    )
+
+
+def _fold_global_phase_gates(circuit: QuantumCircuit, recurse: bool) -> QuantumCircuit:
+    """Return a copy of ``circuit`` with each ``GlobalPhaseGate`` added to its global phase.
+
+    With ``recurse``, the gates in control-flow blocks are folded into their block's phase.
+    """
+    folded = circuit.copy_empty_like()
+    for instruction in circuit.data:
+        operation = instruction.operation
+        if isinstance(operation, qiskit_gates.GlobalPhaseGate):
+            folded.global_phase += operation.params[0]
+        elif recurse and isinstance(operation, ControlFlowOp):
+            blocks = [_fold_global_phase_gates(block, recurse=True) for block in operation.blocks]
+            folded.append(operation.replace_blocks(blocks), instruction.qubits, instruction.clbits)
+        else:
+            folded.append(instruction)
+    return folded
 
 
 def _compile_to_oq3(
