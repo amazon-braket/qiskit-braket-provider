@@ -7,6 +7,7 @@ from math import pi
 from qiskit.circuit import (
     ClassicalRegister,
     ControlledGate,
+    Gate,
     Instruction,
     Measure,
     QuantumCircuit,
@@ -135,6 +136,9 @@ class RenameGates(TransformationPass):
     ``CXGate`` with its shim (same semantics, ``name = "cnot"``) makes the
     serializer emit the Braket-native gate name. Recurses into
     ``.blocks``-carrying ops so nested gates are renamed too.
+
+    qiskit-ionq gates become opaque gates with their angles in radians, as Braket
+    expects. The output is only meant for Braket OpenQASM serialization.
     """
 
     def run(self, dag: DAGCircuit) -> DAGCircuit:
@@ -153,9 +157,8 @@ def _braket_op(op: Instruction) -> Instruction | None:
     qiskit-ionq gates take angles in turns, while Braket's IonQ gates take radians.
     """
     if isinstance(op, _IONQ_GATES):
-        gate = op.copy()
-        gate.params = [2 * pi * param for param in op.params]
-        return gate
+        params = [2 * pi * param for param in op.params]
+        return Gate(op.name, op.num_qubits, params, label=op.label)
     shim_cls = _shim_class_for(op)
     return _construct_shim(op, shim_cls) if shim_cls is not None else None
 

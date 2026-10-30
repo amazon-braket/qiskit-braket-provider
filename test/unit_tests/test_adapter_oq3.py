@@ -41,6 +41,7 @@ from qiskit_braket_provider.providers.adapter import (
     to_qiskit,
 )
 from qiskit_braket_provider.providers.gate_mappings import _BRAKET_VERBATIM_BOX_NAME
+from qiskit_braket_provider.providers.passes import RenameGates
 from qiskit_braket_provider.providers.target import aws_device_to_target, native_gate_set
 
 from .mocks import mock_calibrated_rigetti_device, mock_iqm_device
@@ -915,3 +916,12 @@ def test_to_oq3_ionq_gate_free_parameter_in_radians() -> None:
     oq3 = to_oq3(circuit, basis_gates={"gpi"})
 
     assert Circuit.from_ir(oq3).make_bound_circuit({"a": 0.25}) == Circuit().gpi(0, np.pi / 2)
+
+
+def test_to_oq3_after_rename_gates_converts_ionq_angles_once() -> None:
+    circuit = QuantumCircuit(1)
+    circuit.append(ionq_gates.GPIGate(0.25), [0])
+
+    oq3 = to_oq3(RenameGates()(circuit), basis_gates={"gpi"})
+
+    assert Circuit.from_ir(oq3) == Circuit().gpi(0, np.pi / 2)
