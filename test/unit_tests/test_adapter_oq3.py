@@ -1,9 +1,11 @@
 """Tests for the adapter OQ3 output path: ``to_oq3`` and ``compile_to_oq3``."""
 
+import re
 import warnings
 from collections.abc import Callable
 from unittest.mock import Mock
 
+import numpy as np
 import pytest
 from qiskit import QuantumCircuit, QuantumRegister
 from qiskit.circuit import (
@@ -12,9 +14,11 @@ from qiskit.circuit import (
     Clbit,
     IfElseOp,
     Measure,
+    Parameter,
     Qubit,
 )
-from qiskit.circuit.library import CXGate, HGate, XGate
+from qiskit.circuit.library import C3SXGate, CXGate, GlobalPhaseGate, HGate, XGate
+from qiskit.quantum_info import Statevector
 from qiskit.transpiler import Target
 
 import qiskit_braket_provider
@@ -27,6 +31,7 @@ from braket.circuits.serialization import (
 from braket.devices import LocalSimulator
 from braket.ir.openqasm import Program
 from qiskit_braket_provider.providers.adapter import (
+    _fold_global_phase_gates,
     _has_control_flow,
     compile_to_oq3,
     to_braket,
@@ -96,6 +101,49 @@ def _rccx_in_if_else_circuit() -> QuantumCircuit:
     qc.measure(0, 0)
     with qc.if_test((qc.clbits[0], 1)):
         qc.rccx(0, 1, 2)
+    return qc
+
+
+def _ch_and_u_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit(2)
+    qc.ch(0, 1)
+    qc.u(0.1, 0.2, 0.3, 0)
+    return qc
+
+
+def _rz_with_circuit_phase() -> QuantumCircuit:
+    qc = QuantumCircuit(1)
+    qc.rz(0.4, 0)
+    qc.global_phase = 0.2
+    return qc
+
+
+def _rz_with_global_phase_gate() -> QuantumCircuit:
+    qc = QuantumCircuit(1)
+    qc.rz(0.4, 0)
+    qc.append(GlobalPhaseGate(0.2), [])
+    return qc
+
+
+def _rz_with_both_global_phases() -> QuantumCircuit:
+    qc = _rz_with_global_phase_gate()
+    qc.global_phase = 0.2
+    return qc
+
+
+def _rz_with_parameter_phase() -> QuantumCircuit:
+    qc = QuantumCircuit(1)
+    qc.rz(0.4, 0)
+    qc.global_phase = Parameter("p")
+    return qc
+
+
+def _rz_with_global_phase_gate_in_if() -> QuantumCircuit:
+    qc = QuantumCircuit(1, 1)
+    qc.measure(0, 0)
+    with qc.if_test((qc.clbits[0], 1)):
+        qc.rz(0.4, 0)
+        qc.append(GlobalPhaseGate(0.2), [])
     return qc
 
 
@@ -239,18 +287,27 @@ def test_to_oq3_auto_basis_gates() -> None:
 
 
 @pytest.mark.parametrize(
-    ("circuit_factory", "basis_gates"),
+    ("circuit_factory", "basis_gates", "unsupported"),
     [
-        (_rccx_circuit, None),
-        (_rccx_in_if_else_circuit, None),
-        (_bell_circuit, ["h"]),
+        (_rccx_circuit, None, ["rccx"]),
+        (_rccx_in_if_else_circuit, None, ["rccx"]),
+        (_bell_circuit, ["h"], ["cx"]),
+        (_ch_and_u_circuit, ["h"], ["ch", "u"]),
     ],
-    ids=["default_basis", "nested_in_if_else", "explicit_basis"],
+    ids=[
+        "default_basis",
+        "nested_in_if_else",
+        "explicit_basis",
+        "placeholder_names",
+    ],
 )
 def test_to_oq3_raises_on_gates_outside_basis(
-    circuit_factory: Callable[[], QuantumCircuit], basis_gates: list[str] | None
+    circuit_factory: Callable[[], QuantumCircuit],
+    basis_gates: list[str] | None,
+    unsupported: list[str],
 ) -> None:
-    with pytest.raises(ValueError, match="not in the basis gate set"):
+    """The error names the unsupported gates as Qiskit names them."""
+    with pytest.raises(ValueError, match=re.escape(f"Gates {unsupported} are not in the basis")):
         to_oq3(circuit_factory(), basis_gates=basis_gates)
 
 
@@ -705,3 +762,121 @@ def test_to_oq3_keeps_hand_built_loose_qubits_virtual() -> None:
 def test_to_oq3_register_with_loose_qubit_and_labels_raises() -> None:
     with pytest.raises(ValueError, match="does not match the circuit's qubit count"):
         to_oq3(_register_and_loose_qubit_circuit(), qubit_labels=[5, 6, 7])
+
+
+@pytest.mark.parametrize(
+    ("gate_name", "add_gate", "expected"),
+    [
+        ("ch", lambda qc: qc.ch(0, 1), "ctrl @ h q[0], q[1];"),
+        ("cs", lambda qc: qc.cs(0, 1), "ctrl @ s q[0], q[1];"),
+        ("csdg", lambda qc: qc.csdg(0, 1), "ctrl @ si q[0], q[1];"),
+        ("csx", lambda qc: qc.csx(0, 1), "ctrl @ v q[0], q[1];"),
+        ("crx", lambda qc: qc.crx(0.5, 0, 1), "ctrl @ rx(0.5) q[0], q[1];"),
+        ("cry", lambda qc: qc.cry(0.5, 0, 1), "ctrl @ ry(0.5) q[0], q[1];"),
+        ("crz", lambda qc: qc.crz(0.5, 0, 1), "ctrl @ rz(0.5) q[0], q[1];"),
+        ("ccz", lambda qc: qc.ccz(0, 1, 2), "ctrl @ cz q[0], q[1], q[2];"),
+        (
+            "c3sx",
+            lambda qc: qc.append(C3SXGate(), [0, 1, 2, 3]),
+            "ctrl(3) @ v q[0], q[1], q[2], q[3];",
+        ),
+        ("u", lambda qc: qc.u(0.1, 0.2, 0.3, 0), "U(0.1, 0.2, 0.3) q[0];"),
+    ],
+    ids=["ch", "cs", "csdg", "csx", "crx", "cry", "crz", "ccz", "c3sx", "u"],
+)
+def test_to_oq3_writes_gates_braket_defines(
+    sim: LocalSimulator,
+    gate_name: str,
+    add_gate: Callable[[QuantumCircuit], object],
+    expected: str,
+) -> None:
+    """Controlled gates use Braket's ctrl modifier and u is Braket's U, so the program runs."""
+    circuit = QuantumCircuit(4)
+    add_gate(circuit)
+
+    oq3 = to_oq3(circuit, basis_gates=[gate_name])
+
+    assert expected in oq3
+    sim.run(Program(source=oq3), shots=1).result()
+
+
+def test_compile_to_oq3_on_local_simulator_target_matches_to_braket() -> None:
+    """Compiling against the local simulator's target gives the program to_braket builds."""
+    circuit = QuantumCircuit(4)
+    circuit.ch(0, 1)
+    circuit.ccz(0, 1, 2)
+    circuit.append(C3SXGate(), [0, 1, 2, 3])
+    circuit.u(0.1, 0.2, 0.3, 0)
+    device = LocalSimulator()
+
+    oq3 = compile_to_oq3(circuit, braket_device=device, verbatim=False)
+
+    assert np.allclose(
+        Circuit.from_ir(oq3).to_unitary(), to_braket(circuit, braket_device=device).to_unitary()
+    )
+
+
+@pytest.mark.parametrize(
+    ("circuit_factory", "expected"),
+    [
+        (_rz_with_circuit_phase, "gphase(0.2);"),
+        (_rz_with_global_phase_gate, "gphase(0.2);"),
+        (_rz_with_both_global_phases, "gphase(0.4);"),
+        (_rz_with_parameter_phase, "gphase(p);"),
+    ],
+    ids=["circuit_phase", "gate", "both", "parameter"],
+)
+def test_to_oq3_writes_global_phase(
+    circuit_factory: Callable[[], QuantumCircuit], expected: str
+) -> None:
+    """Either form of global phase is written as one gphase before the gates."""
+    oq3 = to_oq3(circuit_factory(), basis_gates=["rz", "global_phase"])
+
+    lines = oq3.splitlines()
+    assert [line for line in lines if "gphase" in line] == [expected]
+    assert lines.index(expected) < lines.index("rz(0.4) q[0];")
+    assert "global_phase" not in oq3
+
+
+@pytest.mark.parametrize(
+    ("circuit_factory", "basis_gates"),
+    [
+        (_rz_with_circuit_phase, ["rz"]),
+        (_rz_with_circuit_phase, None),
+        (_rz_with_global_phase_gate, ["rz"]),
+        (_rz_with_global_phase_gate_in_if, ["rz", "if_else", "measure"]),
+    ],
+    ids=["circuit_phase", "default_basis", "gate", "gate_in_if"],
+)
+def test_to_oq3_drops_global_phase_outside_basis_with_warning(
+    circuit_factory: Callable[[], QuantumCircuit], basis_gates: list[str] | None
+) -> None:
+    """Either form of global phase is dropped with a warning unless the basis names global_phase."""
+    with pytest.warns(UserWarning, match="global phase"):
+        oq3 = to_oq3(circuit_factory(), basis_gates=basis_gates)
+
+    assert "gphase" not in oq3
+
+
+@pytest.mark.parametrize(
+    "circuit_factory", [_rz_with_circuit_phase, _rccx_in_if_else_circuit], ids=["flat", "if_else"]
+)
+def test_fold_global_phase_gates_returns_circuit_without_phase_gates_unchanged(
+    circuit_factory: Callable[[], QuantumCircuit],
+) -> None:
+    """A circuit with no GlobalPhaseGate is returned as is, without being rebuilt."""
+    circuit = circuit_factory()
+
+    assert _fold_global_phase_gates(circuit, recurse=True) is circuit
+
+
+def test_compile_to_oq3_on_local_simulator_keeps_global_phase(sim: LocalSimulator) -> None:
+    """The local simulator's state vector matches Qiskit's, global phase included."""
+    circuit = QuantumCircuit(1)
+    circuit.rz(0.4, 0)
+    circuit.global_phase = 0.2
+
+    oq3 = compile_to_oq3(circuit, braket_device=sim, verbatim=False)
+    result = sim.run(Program(source=f"{oq3}\n#pragma braket result state_vector"), shots=0).result()
+
+    assert np.allclose(result.values[0], Statevector(circuit).data)

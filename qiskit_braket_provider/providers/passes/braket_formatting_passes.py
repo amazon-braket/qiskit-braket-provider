@@ -3,7 +3,13 @@
 import re
 from collections.abc import Iterable, Sequence
 
-from qiskit.circuit import ClassicalRegister, Instruction, Measure, QuantumCircuit
+from qiskit.circuit import (
+    ClassicalRegister,
+    ControlledGate,
+    Instruction,
+    Measure,
+    QuantumCircuit,
+)
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.dagcircuit import DAGCircuit
 from qiskit.transpiler.basepasses import TransformationPass
@@ -14,6 +20,8 @@ from qiskit_braket_provider.providers.braket_annotations import (
 )
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_VERBATIM_PRAGMA_LINE,
+    _CONTROL_MODIFIER_PLACEHOLDER,
+    _GPHASE_PLACEHOLDER,
     _OUTPUT_VARIABLES_KEY,
     _QISKIT_TO_BRAKET_SHIM,
     _SHIM_CLASSES,
@@ -22,6 +30,8 @@ from qiskit_braket_provider.providers.gate_mappings import (
 _QUBIT_DECL_RE = re.compile(r"^qubit\[(\d+)\]\s+(\w+);\n?", re.MULTILINE)
 
 _PHYSICAL_QUBIT_RE = re.compile(r"\$(\d+)")
+_CONTROL_PLACEHOLDER_RE = re.compile(rf"\b{_CONTROL_MODIFIER_PLACEHOLDER}(\d+)_(\w+)")
+_GPHASE_PLACEHOLDER_RE = re.compile(rf"^{_GPHASE_PLACEHOLDER}\((.*)\) ;$")
 _LOOSE_QUBIT_DECL_RE = re.compile(r"^qubit\s+_qubit\d+;\n?", re.MULTILINE)
 _LOOSE_QUBIT_RE = re.compile(r"\b_qubit(\d+)\b")
 
@@ -99,7 +109,13 @@ class WrapInVerbatimBox(TransformationPass):
         for instr in circuit.data[:split]:
             inner.append(instr.operation, instr.qubits, instr.clbits)
 
-        result = QuantumCircuit(circuit.qubits, circuit.clbits, *circuit.qregs, *circuit.cregs)
+        result = QuantumCircuit(
+            circuit.qubits,
+            circuit.clbits,
+            *circuit.qregs,
+            *circuit.cregs,
+            global_phase=circuit.global_phase,
+        )
         result.append(BraketVerbatimBox(inner), result.qubits, result.clbits)
         for instr in circuit.data[split:]:
             result.append(instr.operation, instr.qubits, instr.clbits)
@@ -133,8 +149,11 @@ def _shim_class_for(op: Instruction) -> type | None:
 
     Walks ``type(op).__mro__`` so ops that are Qiskit-generated singleton
     subclasses (e.g. ``_SingletonCXGate`` for ``CXGate``) match their mapped
-    parent. Returns ``None`` if ``op`` is already a shim instance.
+    parent. Returns ``None`` if ``op`` is already a shim instance, or if it has
+    an open control, since the shims only write closed controls.
     """
+    if isinstance(op, ControlledGate) and op.ctrl_state != 2**op.num_ctrl_qubits - 1:
+        return None
     for cls in type(op).__mro__:
         if cls in _SHIM_CLASSES:
             return None
@@ -261,17 +280,29 @@ def _normalize_formatting(oq3_source: str, output_names: Iterable[str] = ()) -> 
     - Rewrites the Braket-verbatim annotation prefix emitted by ``qasm3.dumps``
       to Braket's canonical ``#pragma braket verbatim`` directive.
     - Restores ``output`` keyword on registers listed in ``output_names``
+    - Rewrites the controlled-gate placeholders written for Braket's ``ctrl``
+      modifier, such as ``_braket_ctrl1_h``, as ``ctrl @ h``
+    - Rewrites the ``gphase`` placeholder, ``_braket_gphase(θ) ;``, as ``gphase(θ);``
     - Removes empty lines
     """
     output_set = set(output_names)
     lines: list[str] = []
     for raw_line in oq3_source.split("\n"):
         line = raw_line.lstrip().replace("float[64]", "float")
+        line = _CONTROL_PLACEHOLDER_RE.sub(_control_modifier, line)
+        line = _GPHASE_PLACEHOLDER_RE.sub(r"gphase(\1);", line)
         if _BRAKET_VERBATIM_ANNOTATION_LINE.match(line):
             lines.append(_BRAKET_VERBATIM_PRAGMA_LINE)
             continue
         lines.append(_restore_output_declaration(line, output_set))
     return "\n".join(line for line in lines if line != "")
+
+
+def _control_modifier(placeholder: re.Match) -> str:
+    """Rewrite a controlled-gate placeholder as Braket's ``ctrl`` modifier on its base gate."""
+    num_controls, base_name = placeholder.groups()
+    modifier = "ctrl" if num_controls == "1" else f"ctrl({num_controls})"
+    return f"{modifier} @ {base_name}"
 
 
 def _restore_output_declaration(line: str, output_names: set[str]) -> str:
