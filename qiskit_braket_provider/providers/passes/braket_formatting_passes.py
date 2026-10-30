@@ -50,8 +50,8 @@ class ConsolidateClbits(TransformationPass):
     of ``"b"``. ``qasm3.dumps`` then emits ``bit[N] b;`` plus ``b[i]``
     references automatically.
 
-    If ``"b"`` collides with an output variable name, the fallback is
-    ``"b0"``, ``"b1"``, ... — whichever is first not shadowed.
+    If ``"b"`` collides with an output variable or quantum register name, the
+    fallback is ``"b0"``, ``"b1"``, ... — whichever is first not shadowed.
     """
 
     def run(self, dag: DAGCircuit) -> DAGCircuit:
@@ -68,12 +68,13 @@ class ConsolidateClbits(TransformationPass):
                 dag.remove_cregs(creg)
         plain = [bit for bit in dag.clbits if bit not in kept_bits]
         if plain:
-            dag.add_creg(ClassicalRegister(name=_plain_register_name(output_names), bits=plain))
+            taken = output_names | set(dag.qregs)
+            dag.add_creg(ClassicalRegister(name=_plain_register_name(taken), bits=plain))
         return dag
 
 
 def _plain_register_name(taken: set) -> str:
-    """Return ``"b"``, or the first ``"b<i>"`` not shadowed by an output variable name."""
+    """Return ``"b"``, or the first ``"b<i>"`` not in ``taken``."""
     if "b" not in taken:
         return "b"
     i = 0
