@@ -268,13 +268,6 @@ def _output_circuit(output_names: tuple[str, ...], sizes: tuple[int, ...]) -> Qu
     return qc
 
 
-def _rx_circuit() -> QuantumCircuit:
-    circuit = QuantumCircuit(2, 1)
-    circuit.rx(0.3, 0)
-    circuit.measure(0, 0)
-    return circuit
-
-
 def _rx_in_if_circuit() -> QuantumCircuit:
     circuit = QuantumCircuit(2, 1)
     circuit.measure(0, 0)
@@ -820,18 +813,15 @@ def test_compile_to_oq3_wrap_qubit_specific_targets_only_keeps_iqm_measurements_
     assert oq3.endswith("b[1] = measure $2;\n}")
 
 
-@pytest.mark.parametrize(
-    "circuit_factory", [_rx_circuit, _rx_in_if_circuit], ids=["top_level", "in_if"]
-)
-def test_compile_to_oq3_angle_restrictions_rejects_disallowed_angle(
-    circuit_factory: Callable[[], QuantumCircuit],
-) -> None:
-    circuit = circuit_factory()
+def test_compile_to_oq3_angle_restrictions_rejects_disallowed_angle_in_if() -> None:
+    """Angle restrictions also apply to gates inside control-flow blocks."""
     restrictions = native_angle_restrictions(mock_calibrated_rigetti_device().properties)
 
     with pytest.raises(ValueError, match=r"Angle 0\.3 for rx parameter 0 is not supported"):
         _compile_to_oq3(
-            circuit, pass_manager=PassManager([RemoveBarriers()]), angle_restrictions=restrictions
+            _rx_in_if_circuit(),
+            pass_manager=PassManager([RemoveBarriers()]),
+            angle_restrictions=restrictions,
         )
 
 

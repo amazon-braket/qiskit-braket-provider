@@ -2,6 +2,7 @@
 
 import copy
 import unittest
+from collections.abc import Callable
 from unittest import TestCase
 from unittest.mock import MagicMock, Mock, patch
 
@@ -78,6 +79,21 @@ def combine_dicts(dict1: dict[str, float], dict2: dict[str, float]) -> dict[str,
         else:
             combined_dict[key] = [value]
     return combined_dict
+
+
+def _two_register_circuit() -> QuantumCircuit:
+    circuit = QuantumCircuit(QuantumRegister(1, "a"), QuantumRegister(1, "b"))
+    circuit.h(0)
+    circuit.cx(0, 1)
+    circuit.measure_all()
+    return circuit
+
+
+def _measured_circuit() -> QuantumCircuit:
+    circuit = QuantumCircuit(1, 1)
+    circuit.h(0)
+    circuit.measure(0, 0)
+    return circuit
 
 
 class TestBraketBackend(TestCase):
@@ -814,25 +830,20 @@ def test_local_backend_run_writes_each_measurement_to_its_clbit():
     assert counts == {"100": 10}
 
 
-def test_local_backend_run_rejects_multiple_quantum_registers() -> None:
-    """A circuit with more than one quantum register is rejected."""
-    circuit = QuantumCircuit(QuantumRegister(1, "a"), QuantumRegister(1, "b"))
-    circuit.h(0)
-    circuit.cx(0, 1)
-    circuit.measure_all()
-
-    with pytest.raises(ValueError, match="Braket does not support multiple quantum registers"):
-        BraketLocalBackend().run(circuit, shots=10)
-
-
-def test_local_backend_run_with_measurements_and_zero_shots_raises():
-    """A measured circuit can't return a state vector, so shots=0 is rejected."""
-    circuit = QuantumCircuit(1, 1)
-    circuit.h(0)
-    circuit.measure(0, 0)
-
-    with pytest.raises(ValueError):
-        BraketLocalBackend().run(circuit, shots=0)
+@pytest.mark.parametrize(
+    ("circuit_factory", "shots", "match"),
+    [
+        (_two_register_circuit, 10, "Braket does not support multiple quantum registers"),
+        (_measured_circuit, 0, "can't return a state vector"),
+    ],
+    ids=["multiple_quantum_registers", "measurements_with_zero_shots"],
+)
+def test_local_backend_run_rejects_unsupported_circuits(
+    circuit_factory: Callable[[], QuantumCircuit], shots: int, match: str
+) -> None:
+    """Circuits the local backend can't run raise before any task is created."""
+    with pytest.raises(ValueError, match=match):
+        BraketLocalBackend().run(circuit_factory(), shots=shots)
 
 
 def test_aws_backend_native_run_rejects_disallowed_native_angle():
