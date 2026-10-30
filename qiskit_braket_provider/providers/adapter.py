@@ -6,6 +6,7 @@ converted to Qiskit BoxOp operations, which treat blocks of gates atomically to 
 sequences that should not be optimized.
 """
 
+import re
 import warnings
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from typing import Any, TypeAlias, TypeVar, overload
@@ -157,6 +158,10 @@ def _physical_qubits(circuit: QuantumCircuit) -> list[int] | None:
     if circuit.qregs:
         return None
     return (circuit.metadata or {}).get("braket_physical_qubits")
+
+
+# Matches the input declarations Qiskit's exporter writes, as in ``input float theta;``.
+_OQ3_INPUT_RE = re.compile(r"^input float (\S+);$", re.MULTILINE)
 
 
 def _has_control_flow(circuit: QuantumCircuit) -> bool:
@@ -498,6 +503,32 @@ def _create_free_parameters(operation: QiskitInstruction) -> list[Any]:
             case ParameterExpression():
                 params[i] = FreeParameterExpression(rename_parameter(param))
     return params
+
+
+def _oq3_input_names(circuit: QuantumCircuit, oq3_source: str) -> dict[str, str]:
+    """Map each parameter name of ``circuit`` to its ``input`` name in ``oq3_source``.
+
+    Qiskit's exporter declares one ``input`` per entry of ``circuit.parameters``, in that
+    order, renaming any that aren't valid, unused OpenQASM identifiers. ``zip`` raises
+    ``ValueError`` if the counts differ.
+    """
+    names = [parameter.name for parameter in circuit.parameters]
+    return dict(zip(names, _OQ3_INPUT_RE.findall(oq3_source), strict=True))
+
+
+def _validate_circuit_angles(
+    circuit: QuantumCircuit,
+    angle_restrictions: Mapping[str, Mapping[int, set[float] | tuple[float, float]]] | None,
+) -> None:
+    """Validate the numeric angles of every gate in ``circuit``, including nested blocks."""
+    if not angle_restrictions:
+        return
+    for instruction in circuit.data:
+        operation = instruction.operation
+        if isinstance(operation, Gate):
+            _validate_angle_restrictions(operation.name, operation.params, angle_restrictions)
+        for block in getattr(operation, "blocks", ()):
+            _validate_circuit_angles(block, angle_restrictions)
 
 
 def _validate_angle_restrictions(
@@ -952,8 +983,22 @@ def _compile_to_oq3(
     layout_method: str | None = None,
     routing_method: str | None = None,
     seed_transpiler: int | None = None,
+    angle_restrictions: Mapping[str, Mapping[int, set[float] | tuple[float, float]]] | None = None,
+    wrap_qubit_specific_targets_only: bool = False,
+    input_names: list[dict[str, str]] | None = None,
 ) -> str | list[str]:
-    """Internal implementation of :func:`compile_to_oq3`. Signature may change."""
+    """Internal implementation of :func:`compile_to_oq3`. Signature may change.
+
+    Three options aren't in the public API:
+
+    - ``angle_restrictions`` validates numeric gate angles after compilation.
+    - ``wrap_qubit_specific_targets_only`` wraps in a verbatim box only for ``verbatim``,
+      a target that lists gates per qubit, or a non-empty ``pass_manager``, so that a
+      simulator target doesn't cause wrapping.
+    - ``input_names``, if given, gets a map from each Qiskit parameter name to its
+      OpenQASM ``input`` name appended for every circuit, because the exporter renames
+      parameters that aren't valid, unused OpenQASM identifiers.
+    """
     qiskit_circuits, single_instance = _get_circuits(circuits, None, add_measurements=True)
 
     result = _compile(
@@ -973,7 +1018,13 @@ def _compile_to_oq3(
         seed_transpiler=seed_transpiler,
     )
 
-    native_path = pass_manager is not None or target is not None or braket_device is not None
+    if wrap_qubit_specific_targets_only:
+        target_lists_qubits = result.target is not None and any(
+            properties != {None: None} for properties in result.target.values()
+        )
+        native_path = target_lists_qubits or bool(pass_manager)
+    else:
+        native_path = pass_manager is not None or target is not None or braket_device is not None
     is_iqm = _is_iqm_target(result.target)
     effective_basis_gates = result.basis_gates
     if effective_basis_gates is None and result.target is not None:
@@ -983,6 +1034,7 @@ def _compile_to_oq3(
 
     oq3_strings: list[str] = []
     for circ in result.circuits:
+        _validate_circuit_angles(circ, angle_restrictions)
         if verbatim:
             should_wrap = True
         elif not native_path:
@@ -1005,15 +1057,16 @@ def _compile_to_oq3(
         if circ_qubit_labels is not None and len(circ_qubit_labels) > circ.num_qubits:
             circ_qubit_labels = circ_qubit_labels[: circ.num_qubits]
 
-        oq3_strings.append(
-            to_oq3(
-                circ,
-                basis_gates=effective_basis_gates,
-                qubit_labels=circ_qubit_labels,
-                should_wrap_verbatim=should_wrap,
-                include_measurement_in_verbatim=is_iqm,
-            )
+        oq3_source = to_oq3(
+            circ,
+            basis_gates=effective_basis_gates,
+            qubit_labels=circ_qubit_labels,
+            should_wrap_verbatim=should_wrap,
+            include_measurement_in_verbatim=is_iqm,
         )
+        if input_names is not None:
+            input_names.append(_oq3_input_names(circ, oq3_source))
+        oq3_strings.append(oq3_source)
 
     return oq3_strings[0] if single_instance else oq3_strings
 

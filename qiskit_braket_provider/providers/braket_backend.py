@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import enum
 import logging
+import re
 import warnings
 from abc import ABC
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
@@ -19,18 +20,19 @@ from braket.circuits import Circuit
 from braket.device_schema import DeviceActionType
 from braket.devices import Device, LocalSimulator
 from braket.emulation.emulator import Emulator
+from braket.ir.openqasm import Program
 from braket.program_sets import ProgramSet
 from braket.tasks.local_quantum_task import LocalQuantumTask
 
 from .._version import __version__
 from ..exception import QiskitBraketException
 from .adapter import (
+    _compile_to_oq3,
     aws_device_to_target,
     gateset_from_properties,
     local_simulator_to_target,
     native_angle_restrictions,
     native_gate_set,
-    to_braket,
 )
 from .braket_quantum_task import BraketQuantumTask
 
@@ -54,6 +56,24 @@ def _device_max_program_set_executables(device: Device) -> int | None:
         if DeviceActionType.OPENQASM_PROGRAM_SET in action
         else None
     )
+
+
+_MEASURE_RE = re.compile(r"\bmeasure\b")
+
+
+def _compile_programs(circuits: list[QuantumCircuit], **compile_kwargs) -> list[Program]:
+    """Compile Qiskit circuits to the OpenQASM programs a run endpoint submits."""
+    sources = _compile_to_oq3(circuits, wrap_qubit_specific_targets_only=True, **compile_kwargs)
+    return [Program(source=source) for source in sources]
+
+
+def _with_state_vector_result(program: Program) -> Program:
+    """Request the state vector, as a run with ``shots=0`` returns it instead of counts."""
+    if _MEASURE_RE.search(program.source):
+        raise ValueError(
+            "A circuit with measurements can't return a state vector, so it can't run with shots=0."
+        )
+    return Program(source=f"{program.source}\n#pragma braket result state_vector")
 
 
 class BraketBackend(BackendV2, ABC, Generic[T]):
@@ -102,11 +122,11 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
 
     def _run_program_set(
         self,
-        braket_circuits: list[Circuit],
+        programs: list[Program],
         shots: int | None,
         **options,
     ) -> BraketQuantumTask:
-        program_set = ProgramSet(braket_circuits, shots_per_executable=shots)
+        program_set = ProgramSet(programs, shots_per_executable=shots)
         task = self._device.run(program_set, **options)
         return BraketQuantumTask(
             task_id=task.id, tasks=task, backend=self, shots=program_set.total_shots
@@ -211,25 +231,30 @@ class BraketLocalBackend(BraketBackend[Device]):
     ) -> BraketQuantumTask:
         convert_input = [run_input] if isinstance(run_input, QuantumCircuit) else list(run_input)
         verbatim = options.pop("verbatim", False)
-        circuits: list[Circuit] = [
-            to_braket(
-                circ,
-                target=self._target,
-                qubit_labels=self._qubit_labels,
-                verbatim=verbatim,
-            )
-            for circ in convert_input
-        ]
+        programs = _compile_programs(
+            convert_input,
+            target=self._target,
+            qubit_labels=self._qubit_labels,
+            verbatim=verbatim,
+        )
 
-        if shots == 0 and not self._is_emulator:
-            circuits = [x.state_vector() for x in circuits]
+        # Emulators only accept Braket circuits, so they get the programs as circuits.
+        specifications: list[Program] | list[Circuit]
+        if self._is_emulator:
+            specifications = [Circuit.from_ir(program) for program in programs]
+        elif shots == 0:
+            specifications = [_with_state_vector_result(program) for program in programs]
+        else:
+            specifications = programs
         if "meas_level" in options:
             self._validate_meas_level(options["meas_level"])
             del options["meas_level"]
         tasks = []
         try:
-            for circuit in circuits:
-                task: LocalQuantumTask = self._device.run(task_specification=circuit, shots=shots)
+            for specification in specifications:
+                task: LocalQuantumTask = self._device.run(
+                    task_specification=specification, shots=shots
+                )
                 tasks.append(task)
 
         except Exception as ex:
@@ -463,10 +488,12 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
 
         # Always use target for simulator
         target, basis_gates, qubit_labels = self._resolve_compilation_args(native, pass_manager)
-        braket_circuits = (
-            to_braket(circuits, qubit_labels=self._qubit_labels, target=self._target, verbatim=True)
+        programs = (
+            _compile_programs(
+                circuits, qubit_labels=self._qubit_labels, target=self._target, verbatim=True
+            )
             if verbatim
-            else to_braket(
+            else _compile_programs(
                 circuits,
                 qubit_labels=qubit_labels,
                 target=target,
@@ -481,11 +508,9 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
             )
         )
         return (
-            self._run_program_set(braket_circuits, shots, **options)
-            if self._max_program_set_executables is not None
-            and shots != 0
-            and len(braket_circuits) > 1
-            else self._run_batch(braket_circuits, shots, **options)
+            self._run_program_set(programs, shots, **options)
+            if self._max_program_set_executables is not None and shots != 0 and len(programs) > 1
+            else self._run_batch(programs, shots, **options)
         )
 
     def _resolve_compilation_args(
@@ -501,11 +526,11 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
 
     def _run_batch(
         self,
-        braket_circuits: list[Circuit],
+        programs: list[Program],
         shots: int,
         **options,
     ) -> BraketQuantumTask:
-        batch_task = self._device.run_batch(braket_circuits, shots=shots, **options)
+        batch_task = self._device.run_batch(programs, shots=shots, **options)
         tasks: list[AwsQuantumTask] = batch_task.tasks
         task_id = _TASK_ID_DIVIDER.join(task.id for task in tasks)
         return BraketQuantumTask(task_id=task_id, tasks=tasks, backend=self, shots=shots)

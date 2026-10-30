@@ -15,11 +15,13 @@ from qiskit.circuit import (
     IfElseOp,
     Measure,
     Parameter,
+    ParameterVector,
     Qubit,
 )
 from qiskit.circuit.library import C3SXGate, CXGate, GlobalPhaseGate, HGate, XGate
 from qiskit.quantum_info import Statevector
-from qiskit.transpiler import Target
+from qiskit.transpiler import PassManager, Target
+from qiskit.transpiler.passes import RemoveBarriers
 
 import qiskit_braket_provider
 from braket.circuits import Circuit, Gate
@@ -31,6 +33,7 @@ from braket.circuits.serialization import (
 from braket.devices import LocalSimulator
 from braket.ir.openqasm import Program
 from qiskit_braket_provider.providers.adapter import (
+    _compile_to_oq3,
     _fold_global_phase_gates,
     _has_control_flow,
     compile_to_oq3,
@@ -39,7 +42,11 @@ from qiskit_braket_provider.providers.adapter import (
     to_qiskit,
 )
 from qiskit_braket_provider.providers.gate_mappings import _BRAKET_VERBATIM_BOX_NAME
-from qiskit_braket_provider.providers.target import aws_device_to_target, native_gate_set
+from qiskit_braket_provider.providers.target import (
+    aws_device_to_target,
+    native_angle_restrictions,
+    native_gate_set,
+)
 
 from .mocks import mock_calibrated_rigetti_device, mock_iqm_device
 
@@ -260,6 +267,14 @@ def _output_circuit(output_names: tuple[str, ...], sizes: tuple[int, ...]) -> Qu
             q_idx += 1
     qc.metadata = {"braket_output_variables": dict.fromkeys(output_names)}
     return qc
+
+
+def _rx_in_if_circuit() -> QuantumCircuit:
+    circuit = QuantumCircuit(2, 1)
+    circuit.measure(0, 0)
+    with circuit.if_test((circuit.clbits[0], 1)):
+        circuit.rx(0.3, 1)
+    return circuit
 
 
 def _bell_circuit_target() -> Target:
@@ -762,6 +777,70 @@ def test_to_oq3_keeps_hand_built_loose_qubits_virtual() -> None:
 def test_to_oq3_register_with_loose_qubit_and_labels_raises() -> None:
     with pytest.raises(ValueError, match="does not match the circuit's qubit count"):
         to_oq3(_register_and_loose_qubit_circuit(), qubit_labels=[5, 6, 7])
+
+
+@pytest.mark.parametrize(
+    "compile_kwargs",
+    [
+        {"target": _bell_circuit_target()},
+        {"target": aws_device_to_target(mock_calibrated_rigetti_device()), "qubit_labels": (1, 2)},
+        {"verbatim": True, "qubit_labels": (0, 1)},
+        {"pass_manager": PassManager([RemoveBarriers()]), "qubit_labels": (0, 1)},
+        {"pass_manager": PassManager(), "target": _bell_circuit_target()},
+    ],
+    ids=[
+        "target_without_qubits",
+        "target_with_qubits",
+        "verbatim",
+        "pass_manager",
+        "empty_pass_manager",
+    ],
+)
+def test_compile_to_oq3_wrap_qubit_specific_targets_only_matches_to_braket(
+    compile_kwargs: dict,
+) -> None:
+    """With wrap_qubit_specific_targets_only, the output is the program to_braket would build."""
+    oq3 = _compile_to_oq3(_bell_circuit(), wrap_qubit_specific_targets_only=True, **compile_kwargs)
+
+    assert Circuit.from_ir(oq3) == to_braket(_bell_circuit(), **compile_kwargs)
+
+
+def test_compile_to_oq3_wrap_qubit_specific_targets_only_keeps_iqm_measurements_in_box() -> None:
+    oq3 = _compile_to_oq3(
+        _bell_circuit(), wrap_qubit_specific_targets_only=True, **_iqm_device_kwargs()
+    )
+
+    assert isinstance(oq3, str)
+    assert oq3.endswith("b[1] = measure $2;\n}")
+
+
+def test_compile_to_oq3_angle_restrictions_rejects_disallowed_angle_in_if() -> None:
+    """Angle restrictions also apply to gates inside control-flow blocks."""
+    restrictions = native_angle_restrictions(mock_calibrated_rigetti_device().properties)
+
+    with pytest.raises(ValueError, match=r"Angle 0\.3 for rx parameter 0 is not supported"):
+        _compile_to_oq3(
+            _rx_in_if_circuit(),
+            pass_manager=PassManager([RemoveBarriers()]),
+            angle_restrictions=restrictions,
+        )
+
+
+def test_compile_to_oq3_input_names_maps_parameters_to_emitted_inputs() -> None:
+    """input_names maps each parameter to its OpenQASM input, including renamed ones."""
+    phi = ParameterVector("phi", 2)
+    circuit = QuantumCircuit(1)
+    circuit.rx(phi[0], 0)
+    circuit.ry(phi[1], 0)
+    circuit.rz(Parameter("t"), 0)
+    circuit.rx(Parameter("alpha"), 0)
+
+    input_names: list[dict[str, str]] = []
+    oq3 = _compile_to_oq3(circuit, input_names=input_names)
+
+    assert input_names == [{"alpha": "alpha", "phi[0]": "_phi_0_", "phi[1]": "_phi_1_", "t": "t_0"}]
+    for name in input_names[0].values():
+        assert f"input float {name};" in oq3
 
 
 @pytest.mark.parametrize(

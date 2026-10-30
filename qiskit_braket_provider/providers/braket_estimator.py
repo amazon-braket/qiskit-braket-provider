@@ -1,5 +1,5 @@
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TypeAlias
 
@@ -9,16 +9,14 @@ from qiskit.primitives.containers.bindings_array import BindingsArray
 from qiskit.primitives.containers.estimator_pub import EstimatorPub
 from qiskit.quantum_info import SparsePauliOp
 
-from braket.circuits import Circuit
 from braket.circuits.observables import Sum
 from braket.program_sets import CircuitBinding, ParameterSets, ProgramSet
 from braket.tasks import ProgramSetQuantumTaskResult
 from qiskit_braket_provider.providers.adapter import (
     rename_parameter,
-    to_braket,
     translate_sparse_pauli_op,
 )
-from qiskit_braket_provider.providers.braket_backend import BraketBackend
+from qiskit_braket_provider.providers.braket_backend import BraketBackend, _compile_programs
 from qiskit_braket_provider.providers.braket_primitive_task import (
     BraketPrimitiveTask,
     run_split_program_set,
@@ -189,13 +187,16 @@ class BraketEstimator(BaseEstimatorV2):
             index to measurement column.
         """
         backend = self._backend
-        circuit = to_braket(
-            pub.circuit,
+        input_names: list[dict[str, str]] = []
+        (program,) = _compile_programs(
+            [pub.circuit],
             qubit_labels=backend.qubit_labels,
             target=backend.target,
             verbatim=self._verbatim,
             optimization_level=self._optimization_level,
+            input_names=input_names,
         )
+        source = program.source
 
         observables = np.asarray(pub.observables)
         param_values = pub.parameter_values
@@ -240,14 +241,16 @@ class BraketEstimator(BaseEstimatorV2):
             processed_obs_keys.update(matching_obs_keys)
             param_idx_map = {pk: idx for idx, pk in enumerate(param_indices)}
             parameter_sets = (
-                BraketEstimator._translate_parameters([param_values[pi] for pi in param_indices])
+                BraketEstimator._translate_parameters(
+                    [param_values[pi] for pi in param_indices], input_names[0]
+                )
                 if param_values.data
                 else None
             )
 
             if self._abelian_grouping:
                 self._emit_commuting_groups(
-                    circuit,
+                    source,
                     matching_obs_keys,
                     obs_keys,
                     obs_groups,
@@ -268,7 +271,7 @@ class BraketEstimator(BaseEstimatorV2):
             for ok, observable in zip(matching_obs_keys, braket_observables, strict=True):
                 if isinstance(observable, Sum):
                     bindings.append(
-                        CircuitBinding(circuit, input_sets=parameter_sets, observables=observable)
+                        CircuitBinding(source, input_sets=parameter_sets, observables=observable)
                     )
                     # Map each position in the broadcast to its location in the binding result
                     binding_to_result_map[binding_idx] = [
@@ -282,7 +285,7 @@ class BraketEstimator(BaseEstimatorV2):
             if monomials:
                 bindings.append(
                     CircuitBinding(
-                        circuit,
+                        source,
                         input_sets=parameter_sets,
                         observables=[obs for _, obs in monomials],
                     )
@@ -304,7 +307,7 @@ class BraketEstimator(BaseEstimatorV2):
 
     def _emit_commuting_groups(
         self,
-        circuit: Circuit,
+        source: str,
         matching_obs_keys: list,
         obs_keys: dict,
         obs_groups: dict,
@@ -323,7 +326,7 @@ class BraketEstimator(BaseEstimatorV2):
         expectation values are recovered from the raw measurements during result reconstruction.
 
         Args:
-            circuit: The translated Braket circuit shared by these observables.
+            source: The compiled OpenQASM source shared by these observables.
             matching_obs_keys (list): Observable keys sharing the same parameter sets.
             obs_keys (dict): Map from observable key to the observable (Pauli label -> coefficient).
             obs_groups (dict): Map from observable key to ``(broadcast_position, param_index)`` pairs.
@@ -345,7 +348,7 @@ class BraketEstimator(BaseEstimatorV2):
             basis_support = sorted(BraketEstimator._pauli_support(basis_label))
             binding_idx = len(bindings)
             bindings.append(
-                CircuitBinding(circuit, input_sets=parameter_sets, observables=[representative])
+                CircuitBinding(source, input_sets=parameter_sets, observables=[representative])
             )
             grouped_colmap[binding_idx] = {qubit: col for col, qubit in enumerate(basis_support)}
             grouped_binding_map[binding_idx] = []
@@ -420,12 +423,16 @@ class BraketEstimator(BaseEstimatorV2):
         return str(sorted(obs_val.items())) if isinstance(obs_val, dict) else str(obs_val)
 
     @staticmethod
-    def _translate_parameters(param_list: list[BindingsArray]) -> ParameterSets:
+    def _translate_parameters(
+        param_list: list[BindingsArray], input_names: Mapping[str, str]
+    ) -> ParameterSets:
         """
         Translate parameter values to Braket ParameterSets.
 
         Args:
             param_list (list[BindingsArray]): List of parameter value arrays.
+            input_names (Mapping[str, str]): The ``input`` name the compiled program
+                declares for each parameter name.
 
         Returns:
             ParameterSets: Braket ParameterSets object.
@@ -434,7 +441,7 @@ class BraketEstimator(BaseEstimatorV2):
         for bindings_array in param_list:
             for k, v in bindings_array.data.items():
                 for param, val in zip(k, v, strict=True):
-                    data[rename_parameter(param)].append(val)
+                    data[input_names.get(param, rename_parameter(param))].append(val)
         return ParameterSets(data)
 
     @staticmethod

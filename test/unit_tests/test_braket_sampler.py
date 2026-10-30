@@ -5,12 +5,12 @@ from unittest.mock import Mock
 
 import numpy as np
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
-from qiskit.circuit import Parameter
+from qiskit.circuit import Parameter, ParameterVector
 from qiskit.primitives import BackendSamplerV2
 from qiskit.primitives.containers import BitArray
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 
-from braket.circuits import Circuit
+from braket.ir.openqasm import Program
 from braket.program_sets import CircuitBinding
 from qiskit_braket_provider.providers import BraketLocalBackend
 from qiskit_braket_provider.providers.braket_sampler import BraketSampler
@@ -87,10 +87,9 @@ class TestBraketSampler(TestCase):
         self.assertEqual(device.run_batch.call_args.kwargs, {"shots": -1})
 
     def test_run_local_multiple_registers(self):
-        """Tests that correct results are returned for circuits with multiple registers"""
+        """Tests that correct results are returned for circuits with multiple classical registers"""
         circuit = QuantumCircuit(
-            QuantumRegister(3, "qreg_a"),
-            QuantumRegister(9, "qreg_b"),
+            QuantumRegister(12, "qreg"),
             ClassicalRegister(10, "creg_a"),
             ClassicalRegister(2, "creg_b"),
         )
@@ -141,10 +140,42 @@ class TestBraketSampler(TestCase):
         task = self.sampler.run(pubs)
         program_set = task.program_set
         self.assertEqual(len(program_set), 2)
-        self.assertTrue(isinstance(program_set[0], Circuit))
+        self.assertTrue(isinstance(program_set[0], Program))
         self.assertTrue(isinstance(program_set[1], CircuitBinding))
         self.assertEqual(program_set.total_executables, 2)
         for actual, expected in zip(
             task.result(), self.sampler_backend.run(pubs).result(), strict=True
         ):
             self.assert_correct_results(actual.data.meas, expected.data.meas)
+
+
+def test_sampler_run_binds_parameter_vector_elements():
+    """Values for ParameterVector elements reach the right gates."""
+    phi = ParameterVector("phi", 2)
+    circuit = QuantumCircuit(2)
+    circuit.rx(phi[0], 0)
+    circuit.rx(phi[1], 1)
+    circuit.measure_all()
+
+    result = BraketSampler(BraketLocalBackend()).run(
+        [(circuit, [[np.pi, 0], [0, np.pi]])], shots=10
+    )
+
+    meas = result.result()[0].data.meas
+    assert meas[0].get_counts() == {"01": 10}
+    assert meas[1].get_counts() == {"10": 10}
+
+
+def test_sampler_run_binds_parameter_removed_by_transpilation():
+    """A parameter that transpilation removes doesn't stop the pub from running."""
+    circuit = QuantumCircuit(1, 1)
+    circuit.h(0)
+    circuit.rz(Parameter("theta"), 0)
+    circuit.measure(0, 0)
+
+    result = BraketSampler(BraketLocalBackend(), optimization_level=2).run(
+        [(circuit, [[0.5], [1.0]])], shots=10
+    )
+
+    counts = result.result()[0].data.c
+    assert [sum(counts[i].get_counts().values()) for i in range(2)] == [10, 10]

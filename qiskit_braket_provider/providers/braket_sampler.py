@@ -1,5 +1,5 @@
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 import numpy as np
@@ -14,11 +14,11 @@ from qiskit.primitives import (
 from qiskit.primitives.containers.bindings_array import BindingsArray
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 
-from braket.circuits import Circuit
+from braket.ir.openqasm import Program
 from braket.program_sets import CircuitBinding, ParameterSets, ProgramSet
 from braket.tasks import ProgramSetQuantumTaskResult
-from qiskit_braket_provider.providers.adapter import rename_parameter, to_braket
-from qiskit_braket_provider.providers.braket_backend import BraketBackend
+from qiskit_braket_provider.providers.adapter import rename_parameter
+from qiskit_braket_provider.providers.braket_backend import BraketBackend, _compile_programs
 from qiskit_braket_provider.providers.braket_primitive_task import (
     BraketPrimitiveTask,
     run_split_program_set,
@@ -126,33 +126,39 @@ class BraketSampler(BaseSamplerV2):
             raise ValueError(f"All pubs must have the same shots, got: {shots_values}")
         return next(iter(shots_values))
 
-    def _translate_pub(self, pub: SamplerPub) -> tuple[CircuitBinding | Circuit, np.ndarray | None]:
+    def _translate_pub(self, pub: SamplerPub) -> tuple[CircuitBinding | Program, np.ndarray | None]:
         backend = self._backend
-        circuit = to_braket(
-            pub.circuit,
+        input_names: list[dict[str, str]] = []
+        (program,) = _compile_programs(
+            [pub.circuit],
             qubit_labels=backend.qubit_labels,
             target=backend.target,
             verbatim=self._verbatim,
             optimization_level=self._optimization_level,
+            input_names=input_names,
         )
         param_values = pub.parameter_values
         if not param_values.data:
-            return circuit, None
+            return program, None
         param_indices = np.fromiter(np.ndindex(param_values.shape), dtype=object).flatten()
         return CircuitBinding(
-            circuit,
-            input_sets=BraketSampler._translate_parameters([
-                param_values[pi] for pi in param_indices
-            ]),
+            program.source,
+            input_sets=BraketSampler._translate_parameters(
+                [param_values[pi] for pi in param_indices], input_names[0]
+            ),
         ), param_indices
 
     @staticmethod
-    def _translate_parameters(param_list: list[BindingsArray]) -> ParameterSets:
+    def _translate_parameters(
+        param_list: list[BindingsArray], input_names: Mapping[str, str]
+    ) -> ParameterSets:
         """
         Translate parameter values to Braket ParameterSets.
 
         Args:
             param_list (list[BindingsArray]): List of parameter value arrays.
+            input_names (Mapping[str, str]): The ``input`` name the compiled program
+                declares for each parameter name.
 
         Returns:
             ParameterSets: Braket ParameterSets object.
@@ -161,7 +167,7 @@ class BraketSampler(BaseSamplerV2):
         for bindings_array in param_list:
             for k, v in bindings_array.data.items():
                 for param, val in zip(k, v, strict=True):
-                    data[rename_parameter(param)].append(val)
+                    data[input_names.get(param, rename_parameter(param))].append(val)
         return ParameterSets(data)
 
     @staticmethod
