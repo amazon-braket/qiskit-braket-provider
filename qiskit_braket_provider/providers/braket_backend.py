@@ -38,7 +38,7 @@ from .braket_quantum_task import BraketQuantumTask
 
 if TYPE_CHECKING:
     import datetime as dt
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Sequence
 
     from .braket_provider import BraketProvider
 
@@ -227,6 +227,7 @@ class BraketLocalBackend(BraketBackend[Device]):
         run_input: QuantumCircuit | list[QuantumCircuit],
         *,
         shots: int = 1024,
+        output_registers: Sequence[str] = (),
         **options,
     ) -> BraketQuantumTask:
         convert_input = [run_input] if isinstance(run_input, QuantumCircuit) else list(run_input)
@@ -236,6 +237,7 @@ class BraketLocalBackend(BraketBackend[Device]):
             target=self._target,
             qubit_labels=self._qubit_labels,
             verbatim=verbatim,
+            output_registers=output_registers,
         )
 
         # Emulators only accept Braket circuits, so they get the programs as circuits.
@@ -453,6 +455,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         callback: Callable | None = None,
         num_processes: int | None = None,
         pass_manager: PassManager | None = None,
+        output_registers: Sequence[str] = (),
         **options,
     ) -> BraketQuantumTask:
         """Execute ``QuantumCircuit``s on a ``BraketAwsBackend``
@@ -473,6 +476,9 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
             num_processes (int | None): Allow for parallel transpilation. Default: ``None``.
             pass_manager (PassManager | None): User-specified ``PassManager`` for the
                 Qiskit transpiler (creates verbatim circuits). Default: ``None``.
+            output_registers (Sequence[str]): Names of classical registers to declare as
+                OpenQASM output variables. The result counts then report only these
+                registers. Default: ``()``.
         """
 
         if isinstance(run_input, QuantumCircuit):
@@ -490,7 +496,11 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         target, basis_gates, qubit_labels = self._resolve_compilation_args(native, pass_manager)
         programs = (
             _compile_programs(
-                circuits, qubit_labels=self._qubit_labels, target=self._target, verbatim=True
+                circuits,
+                qubit_labels=self._qubit_labels,
+                target=self._target,
+                verbatim=True,
+                output_registers=output_registers,
             )
             if verbatim
             else _compile_programs(
@@ -505,11 +515,16 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
                 callback=callback,
                 num_processes=num_processes,
                 pass_manager=pass_manager,
+                output_registers=output_registers,
             )
         )
         return (
             self._run_program_set(programs, shots, **options)
-            if self._max_program_set_executables is not None and shots != 0 and len(programs) > 1
+            if self._max_program_set_executables is not None
+            and shots != 0
+            and len(programs) > 1
+            # Program set results don't report output variables.
+            and not output_registers
             else self._run_batch(programs, shots, **options)
         )
 
