@@ -1152,8 +1152,7 @@ def compile_to_oq3(  # type: ignore[misc]
         routing_method: Routing method for the transpiler.
         seed_transpiler: Seed for reproducible transpilation.
         output_registers: Names of classical registers to declare as OpenQASM
-            ``output`` variables in every circuit, for example ``output bit[2] b;``.
-            Default: ``()``.
+            output variables. Default: ``()``.
 
     Returns:
         An OpenQASM 3 string (single circuit) or list of strings (multiple circuits).
