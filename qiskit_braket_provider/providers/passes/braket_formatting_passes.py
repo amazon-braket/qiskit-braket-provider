@@ -2,10 +2,12 @@
 
 import re
 from collections.abc import Iterable, Sequence
+from math import pi
 
 from qiskit.circuit import (
     ClassicalRegister,
     ControlledGate,
+    Gate,
     Instruction,
     Measure,
     QuantumCircuit,
@@ -13,6 +15,7 @@ from qiskit.circuit import (
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.dagcircuit import DAGCircuit
 from qiskit.transpiler.basepasses import TransformationPass
+from qiskit_ionq import ionq_gates
 
 from qiskit_braket_provider.providers.braket_annotations import (
     _BRAKET_VERBATIM_ANNOTATION_LINE,
@@ -34,6 +37,8 @@ _CONTROL_PLACEHOLDER_RE = re.compile(rf"\b{_CONTROL_MODIFIER_PLACEHOLDER}(\d+)_(
 _GPHASE_PLACEHOLDER_RE = re.compile(rf"^{_GPHASE_PLACEHOLDER}\((.*)\) ;$")
 _LOOSE_QUBIT_DECL_RE = re.compile(r"^qubit\s+_qubit\d+;\n?", re.MULTILINE)
 _LOOSE_QUBIT_RE = re.compile(r"\b_qubit(\d+)\b")
+
+_IONQ_GATES = (ionq_gates.GPIGate, ionq_gates.GPI2Gate, ionq_gates.MSGate, ionq_gates.ZZGate)
 
 
 class ConsolidateClbits(TransformationPass):
@@ -131,17 +136,31 @@ class RenameGates(TransformationPass):
     ``CXGate`` with its shim (same semantics, ``name = "cnot"``) makes the
     serializer emit the Braket-native gate name. Recurses into
     ``.blocks``-carrying ops so nested gates are renamed too.
+
+    qiskit-ionq gates become opaque gates with their angles in radians, as Braket
+    expects. The output is only meant for Braket OpenQASM serialization.
     """
 
     def run(self, dag: DAGCircuit) -> DAGCircuit:
-        """Substitute renameable Qiskit gates with their shim subclasses."""
+        """Substitute renameable Qiskit gates with their shims and convert IonQ angles."""
         for node in dag.op_nodes():
-            shim_cls = _shim_class_for(node.op)
-            if shim_cls is not None:
-                dag.substitute_node(node, _construct_shim(node.op, shim_cls))
+            if (braket_op := _braket_op(node.op)) is not None:
+                dag.substitute_node(node, braket_op)
             elif getattr(node.op, "blocks", None):
                 dag.substitute_node(node, _rename_gates_in_block_op(node.op))
         return dag
+
+
+def _braket_op(op: Instruction) -> Instruction | None:
+    """Return ``op`` as Braket's OpenQASM expects it, or ``None`` if it needs no change.
+
+    qiskit-ionq gates take angles in turns, while Braket's IonQ gates take radians.
+    """
+    if isinstance(op, _IONQ_GATES):
+        params = [2 * pi * param for param in op.params]
+        return Gate(op.name, op.num_qubits, params, label=op.label)
+    shim_cls = _shim_class_for(op)
+    return _construct_shim(op, shim_cls) if shim_cls is not None else None
 
 
 def _shim_class_for(op: Instruction) -> type | None:
@@ -184,9 +203,8 @@ def _rename_gates_in_circuit(circuit: QuantumCircuit) -> QuantumCircuit:
     new_circuit = circuit.copy_empty_like()
     for inst in circuit.data:
         op = inst.operation
-        shim_cls = _shim_class_for(op)
-        if shim_cls is not None:
-            new_circuit.append(_construct_shim(op, shim_cls), inst.qubits, inst.clbits)
+        if (braket_op := _braket_op(op)) is not None:
+            new_circuit.append(braket_op, inst.qubits, inst.clbits)
         elif getattr(op, "blocks", None):
             new_circuit.append(_rename_gates_in_block_op(op), inst.qubits, inst.clbits)
         else:

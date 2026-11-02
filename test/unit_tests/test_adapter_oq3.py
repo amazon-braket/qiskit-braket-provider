@@ -17,9 +17,11 @@ from qiskit.circuit import (
     Parameter,
     Qubit,
 )
+from qiskit.circuit import Gate as QiskitGate
 from qiskit.circuit.library import C3SXGate, CXGate, GlobalPhaseGate, HGate, XGate
-from qiskit.quantum_info import Statevector
+from qiskit.quantum_info import Operator, Statevector
 from qiskit.transpiler import Target
+from qiskit_ionq import ionq_gates
 
 import qiskit_braket_provider
 from braket.circuits import Circuit, Gate
@@ -39,6 +41,7 @@ from qiskit_braket_provider.providers.adapter import (
     to_qiskit,
 )
 from qiskit_braket_provider.providers.gate_mappings import _BRAKET_VERBATIM_BOX_NAME
+from qiskit_braket_provider.providers.passes import RenameGates
 from qiskit_braket_provider.providers.target import aws_device_to_target, native_gate_set
 
 from .mocks import mock_calibrated_rigetti_device, mock_iqm_device
@@ -880,3 +883,45 @@ def test_compile_to_oq3_on_local_simulator_keeps_global_phase(sim: LocalSimulato
     result = sim.run(Program(source=f"{oq3}\n#pragma braket result state_vector"), shots=0).result()
 
     assert np.allclose(result.values[0], Statevector(circuit).data)
+
+
+@pytest.mark.parametrize(
+    "gate",
+    [
+        ionq_gates.GPIGate(0.25),
+        ionq_gates.GPI2Gate(0.5),
+        ionq_gates.MSGate(0.25, 0.5, 0.125),
+        ionq_gates.ZZGate(0.125),
+    ],
+    ids=["gpi", "gpi2", "ms", "zz"],
+)
+@pytest.mark.parametrize("verbatim", [False, True], ids=["plain", "verbatim"])
+def test_to_oq3_ionq_gates_in_radians(gate: QiskitGate, verbatim: bool) -> None:
+    """qiskit-ionq gates take angles in turns, and Braket's IonQ gates take radians."""
+    circuit = QuantumCircuit(gate.num_qubits)
+    circuit.append(gate, circuit.qubits)
+
+    oq3 = to_oq3(circuit, basis_gates={gate.name}, should_wrap_verbatim=verbatim)
+
+    assert np.allclose(
+        Operator(circuit).reverse_qargs().to_matrix(), Circuit.from_ir(oq3).to_unitary()
+    )
+
+
+def test_to_oq3_ionq_gate_free_parameter_in_radians() -> None:
+    """Free parameters in qiskit-ionq gates are scaled from turns to radians too."""
+    circuit = QuantumCircuit(1)
+    circuit.append(ionq_gates.GPIGate(Parameter("a")), [0])
+
+    oq3 = to_oq3(circuit, basis_gates={"gpi"})
+
+    assert Circuit.from_ir(oq3).make_bound_circuit({"a": 0.25}) == Circuit().gpi(0, np.pi / 2)
+
+
+def test_to_oq3_after_rename_gates_converts_ionq_angles_once() -> None:
+    circuit = QuantumCircuit(1)
+    circuit.append(ionq_gates.GPIGate(0.25), [0])
+
+    oq3 = to_oq3(RenameGates()(circuit), basis_gates={"gpi"})
+
+    assert Circuit.from_ir(oq3) == Circuit().gpi(0, np.pi / 2)
