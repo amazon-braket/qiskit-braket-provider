@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.27.4 (2026-11-02)
+
+### Bug Fixes and Other Changes
+
+ * convert IonQ angles to radians in OpenQASM output
+ * compile_to_oq3 writes controlled gates, U and global phase as Braket defines them
+ * Support negative bit indices in branching conditions
+
 ## v0.27.3 (2026-10-29)
 
 ### Bug Fixes and Other Changes
