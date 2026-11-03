@@ -17,8 +17,11 @@ from qiskit.primitives.containers.sampler_pub import SamplerPub
 from braket.ir.openqasm import Program
 from braket.program_sets import CircuitBinding, ParameterSets, ProgramSet
 from braket.tasks import ProgramSetQuantumTaskResult
-from qiskit_braket_provider.providers.adapter import rename_parameter
-from qiskit_braket_provider.providers.braket_backend import BraketBackend, _compile_programs
+from qiskit_braket_provider.providers.braket_backend import (
+    BraketBackend,
+    _compile_programs,
+    _with_input_names,
+)
 from qiskit_braket_provider.providers.braket_primitive_task import (
     BraketPrimitiveTask,
     run_split_program_set,
@@ -128,14 +131,13 @@ class BraketSampler(BaseSamplerV2):
 
     def _translate_pub(self, pub: SamplerPub) -> tuple[CircuitBinding | Program, np.ndarray | None]:
         backend = self._backend
-        input_names: list[dict[str, str]] = []
+        circuit, input_names = _with_input_names(pub.circuit)
         (program,) = _compile_programs(
-            [pub.circuit],
+            [circuit],
             qubit_labels=backend.qubit_labels,
             target=backend.target,
             verbatim=self._verbatim,
             optimization_level=self._optimization_level,
-            input_names=input_names,
         )
         param_values = pub.parameter_values
         if not param_values.data:
@@ -144,7 +146,7 @@ class BraketSampler(BaseSamplerV2):
         return CircuitBinding(
             program.source,
             input_sets=BraketSampler._translate_parameters(
-                [param_values[pi] for pi in param_indices], input_names[0]
+                [param_values[pi] for pi in param_indices], input_names
             ),
         ), param_indices
 
@@ -157,8 +159,7 @@ class BraketSampler(BaseSamplerV2):
 
         Args:
             param_list (list[BindingsArray]): List of parameter value arrays.
-            input_names (Mapping[str, str]): The ``input`` name the compiled program
-                declares for each parameter name.
+            input_names (Mapping[str, str]): The ``input`` name for each parameter name.
 
         Returns:
             ParameterSets: Braket ParameterSets object.
@@ -167,7 +168,7 @@ class BraketSampler(BaseSamplerV2):
         for bindings_array in param_list:
             for k, v in bindings_array.data.items():
                 for param, val in zip(k, v, strict=True):
-                    data[input_names.get(param, rename_parameter(param))].append(val)
+                    data[input_names[param]].append(val)
         return ParameterSets(data)
 
     @staticmethod

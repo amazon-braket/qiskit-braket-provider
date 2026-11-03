@@ -11,6 +11,7 @@ from abc import ABC
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from qiskit import QuantumCircuit
+from qiskit.circuit import Parameter
 from qiskit.providers import BackendV2, Options, QubitProperties
 from qiskit.transpiler import PassManager, Target
 
@@ -63,8 +64,15 @@ _MEASURE_RE = re.compile(r"\bmeasure\b")
 
 def _compile_programs(circuits: list[QuantumCircuit], **compile_kwargs) -> list[Program]:
     """Compile Qiskit circuits to the OpenQASM programs a run endpoint submits."""
-    sources = _compile_to_oq3(circuits, wrap_qubit_specific_targets_only=True, **compile_kwargs)
+    sources = _compile_to_oq3(circuits, **compile_kwargs)
     return [Program(source=source) for source in sources]
+
+
+def _with_input_names(circuit: QuantumCircuit) -> tuple[QuantumCircuit, dict[str, str]]:
+    """Rename each parameter to an input name the exporter keeps unchanged."""
+    renamed = {p: Parameter(f"_qbp_in_{i}") for i, p in enumerate(circuit.parameters)}
+    input_names = {p.name: new.name for p, new in renamed.items()}
+    return circuit.assign_parameters(renamed), input_names
 
 
 def _with_state_vector_result(program: Program) -> Program:

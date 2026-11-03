@@ -4,8 +4,9 @@ from unittest import TestCase
 from unittest.mock import Mock
 
 import numpy as np
+import pytest
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
-from qiskit.circuit import Parameter, ParameterVector
+from qiskit.circuit import Parameter, ParameterVector, ParameterVectorElement
 from qiskit.primitives import BackendSamplerV2
 from qiskit.primitives.containers import BitArray
 from qiskit.primitives.containers.sampler_pub import SamplerPub
@@ -149,21 +150,38 @@ class TestBraketSampler(TestCase):
             self.assert_correct_results(actual.data.meas, expected.data.meas)
 
 
-def test_sampler_run_binds_parameter_vector_elements():
-    """Values for ParameterVector elements reach the right gates."""
-    phi = ParameterVector("phi", 2)
-    circuit = QuantumCircuit(2)
-    circuit.rx(phi[0], 0)
-    circuit.rx(phi[1], 1)
+@pytest.mark.parametrize(
+    ("parameters", "values", "expected_counts"),
+    [
+        ([Parameter("b")], [[np.pi], [0.0]], [{"1": 10}, {"0": 10}]),
+        ([Parameter("q")], [[np.pi], [0.0]], [{"1": 10}, {"0": 10}]),
+        ([Parameter("pi")], [[np.pi], [0.0]], [{"1": 10}, {"0": 10}]),
+        ([Parameter("input")], [[np.pi], [0.0]], [{"1": 10}, {"0": 10}]),
+        ([Parameter("a b")], [[np.pi], [0.0]], [{"1": 10}, {"0": 10}]),
+        (
+            [Parameter("theta_1"), ParameterVector("theta", 2)[1]],
+            [[np.pi, np.pi], [0.0, 0.0]],
+            [{"11": 10}, {"00": 10}],
+        ),
+        (list(ParameterVector("phi", 2)), [[np.pi, 0.0], [0.0, np.pi]], [{"01": 10}, {"10": 10}]),
+    ],
+    ids=["b", "q", "pi", "input", "space", "theta_1_and_theta[1]", "parameter_vector"],
+)
+def test_sampler_run_binds_parameters(
+    parameters: list[Parameter | ParameterVectorElement],
+    values: list[list[float]],
+    expected_counts: list[dict[str, int]],
+) -> None:
+    """Each parameter gets its own value, including ones the exporter must rename."""
+    circuit = QuantumCircuit(len(parameters))
+    for qubit, parameter in enumerate(parameters):
+        circuit.rx(parameter, qubit)
     circuit.measure_all()
 
-    result = BraketSampler(BraketLocalBackend()).run(
-        [(circuit, [[np.pi, 0], [0, np.pi]])], shots=10
-    )
+    result = BraketSampler(BraketLocalBackend()).run([(circuit, values)], shots=10)
 
     meas = result.result()[0].data.meas
-    assert meas[0].get_counts() == {"01": 10}
-    assert meas[1].get_counts() == {"10": 10}
+    assert [meas[i].get_counts() for i in range(len(values))] == expected_counts
 
 
 def test_sampler_run_binds_parameter_removed_by_transpilation():

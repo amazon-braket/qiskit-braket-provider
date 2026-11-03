@@ -15,7 +15,6 @@ from qiskit.circuit import (
     IfElseOp,
     Measure,
     Parameter,
-    ParameterVector,
     Qubit,
 )
 from qiskit.circuit.library import C3SXGate, CXGate, GlobalPhaseGate, HGate, XGate
@@ -509,8 +508,8 @@ def test_compile_to_oq3_accepts_oq3_string_input() -> None:
         (
             _bell_circuit,
             {"target": _bell_circuit_target(), "qubit_labels": [0, 1]},
-            ["OPENQASM 3.0;", "h ", "cnot ", "#pragma braket verbatim", "box {"],
-            [],
+            ["OPENQASM 3.0;", "h ", "cnot "],
+            ["#pragma braket verbatim", "box {"],
         ),
         (
             _bell_with_verbatim_boxop,
@@ -590,11 +589,8 @@ def test_compile_to_oq3_output(
             (
                 "OPENQASM 3.0;\n"
                 "bit[2] b;\n"
-                "#pragma braket verbatim\n"
-                "box {\n"
                 "h $0;\n"
                 "cnot $0, $1;\n"
-                "}\n"
                 "b[0] = measure $0;\n"
                 "b[1] = measure $1;"
             ),
@@ -796,19 +792,15 @@ def test_to_oq3_register_with_loose_qubit_and_labels_raises() -> None:
         "empty_pass_manager",
     ],
 )
-def test_compile_to_oq3_wrap_qubit_specific_targets_only_matches_to_braket(
-    compile_kwargs: dict,
-) -> None:
-    """With wrap_qubit_specific_targets_only, the output is the program to_braket would build."""
-    oq3 = _compile_to_oq3(_bell_circuit(), wrap_qubit_specific_targets_only=True, **compile_kwargs)
+def test_compile_to_oq3_matches_to_braket(compile_kwargs: dict) -> None:
+    """The output is the program to_braket would build, including its verbatim box."""
+    oq3 = compile_to_oq3(_bell_circuit(), **compile_kwargs)
 
     assert Circuit.from_ir(oq3) == to_braket(_bell_circuit(), **compile_kwargs)
 
 
-def test_compile_to_oq3_wrap_qubit_specific_targets_only_keeps_iqm_measurements_in_box() -> None:
-    oq3 = _compile_to_oq3(
-        _bell_circuit(), wrap_qubit_specific_targets_only=True, **_iqm_device_kwargs()
-    )
+def test_compile_to_oq3_keeps_iqm_measurements_in_box() -> None:
+    oq3 = compile_to_oq3(_bell_circuit(), **_iqm_device_kwargs())
 
     assert isinstance(oq3, str)
     assert oq3.endswith("b[1] = measure $2;\n}")
@@ -824,23 +816,6 @@ def test_compile_to_oq3_angle_restrictions_rejects_disallowed_angle_in_if() -> N
             pass_manager=PassManager([RemoveBarriers()]),
             angle_restrictions=restrictions,
         )
-
-
-def test_compile_to_oq3_input_names_maps_parameters_to_emitted_inputs() -> None:
-    """input_names maps each parameter to its OpenQASM input, including renamed ones."""
-    phi = ParameterVector("phi", 2)
-    circuit = QuantumCircuit(1)
-    circuit.rx(phi[0], 0)
-    circuit.ry(phi[1], 0)
-    circuit.rz(Parameter("t"), 0)
-    circuit.rx(Parameter("alpha"), 0)
-
-    input_names: list[dict[str, str]] = []
-    oq3 = _compile_to_oq3(circuit, input_names=input_names)
-
-    assert input_names == [{"alpha": "alpha", "phi[0]": "_phi_0_", "phi[1]": "_phi_1_", "t": "t_0"}]
-    for name in input_names[0].values():
-        assert f"input float {name};" in oq3
 
 
 @pytest.mark.parametrize(
