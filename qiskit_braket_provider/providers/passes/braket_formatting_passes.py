@@ -1,11 +1,13 @@
 """Transpiler passes and string post-processing helpers for Braket-compatible OQ3 emission."""
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 
+import numpy as np
 from qiskit.circuit import (
     ClassicalRegister,
     ControlledGate,
+    Gate,
     Instruction,
     Measure,
     QuantumCircuit,
@@ -14,6 +16,7 @@ from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.dagcircuit import DAGCircuit
 from qiskit.transpiler.basepasses import TransformationPass
 
+from braket.circuits.gates import format_complex
 from qiskit_braket_provider.providers.braket_annotations import (
     _BRAKET_VERBATIM_ANNOTATION_LINE,
     BraketVerbatimBox,
@@ -23,6 +26,7 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _CONTROL_MODIFIER_PLACEHOLDER,
     _GPHASE_PLACEHOLDER,
     _OUTPUT_VARIABLES_KEY,
+    _PRAGMA_PLACEHOLDER,
     _QISKIT_TO_BRAKET_SHIM,
     _SHIM_CLASSES,
 )
@@ -32,6 +36,7 @@ _QUBIT_DECL_RE = re.compile(r"^qubit\[(\d+)\]\s+(\w+);\n?", re.MULTILINE)
 _PHYSICAL_QUBIT_RE = re.compile(r"\$(\d+)")
 _CONTROL_PLACEHOLDER_RE = re.compile(rf"\b{_CONTROL_MODIFIER_PLACEHOLDER}(\d+)_(\w+)")
 _GPHASE_PLACEHOLDER_RE = re.compile(rf"^{_GPHASE_PLACEHOLDER}\((.*)\) ;$")
+_PRAGMA_PLACEHOLDER_RE = re.compile(rf"^{_PRAGMA_PLACEHOLDER}(\d+) (.*);$")
 _LOOSE_QUBIT_DECL_RE = re.compile(r"^qubit\s+_qubit\d+;\n?", re.MULTILINE)
 _LOOSE_QUBIT_RE = re.compile(r"\b_qubit(\d+)\b")
 
@@ -273,7 +278,47 @@ def _remap_qubits(
     return _PHYSICAL_QUBIT_RE.sub(lambda m: f"${qubit_labels[int(m.group(1))]}", oq3_source)
 
 
-def _normalize_formatting(oq3_source: str, output_names: Iterable[str] = ()) -> str:
+def _replace_pragma_ops(
+    circuit: QuantumCircuit, names: Collection[str]
+) -> tuple[QuantumCircuit, list[str]]:
+    """Replace each ``unitary`` or ``kraus`` named in ``names`` with a placeholder gate.
+
+    Returns the new circuit and, by placeholder index, the pragma each one stands for.
+    """
+    if not any(instruction.operation.name in names for instruction in circuit.data):
+        return circuit, []
+    replaced = circuit.copy_empty_like()
+    pragmas: list[str] = []
+    for instruction in circuit.data:
+        operation = instruction.operation
+        if operation.name in names:
+            placeholder = Gate(f"{_PRAGMA_PLACEHOLDER}{len(pragmas)}", operation.num_qubits, [])
+            replaced.append(placeholder, instruction.qubits)
+            pragmas.append(_pragma(operation))
+        else:
+            replaced.append(instruction)
+    return replaced, pragmas
+
+
+def _pragma(operation: Instruction) -> str:
+    """Return Braket's pragma for a ``unitary`` or ``kraus`` operation, without its qubits."""
+    matrices = ", ".join(
+        np.array2string(
+            np.asarray(matrix, dtype=complex),
+            separator=", ",
+            formatter={"all": format_complex},
+            threshold=float("inf"),
+        ).replace("\n", "")
+        for matrix in operation.params
+    )
+    if operation.name == "unitary":
+        return f"#pragma braket unitary({matrices})"
+    return f"#pragma braket noise kraus({matrices})"
+
+
+def _normalize_formatting(
+    oq3_source: str, output_names: Iterable[str] = (), pragmas: Sequence[str] = ()
+) -> str:
     """Normalize OQ3 formatting to match Braket service conventions.
 
     - Strips leading indentation from all lines
@@ -284,6 +329,7 @@ def _normalize_formatting(oq3_source: str, output_names: Iterable[str] = ()) -> 
     - Rewrites the controlled-gate placeholders written for Braket's ``ctrl``
       modifier, such as ``_braket_ctrl1_h``, as ``ctrl @ h``
     - Rewrites the ``gphase`` placeholder, ``_braket_gphase(θ) ;``, as ``gphase(θ);``
+    - Rewrites each pragma placeholder, ``_braket_pragma<i>``, as ``pragmas[i]``
     - Removes empty lines
     """
     output_set = set(output_names)
@@ -292,6 +338,7 @@ def _normalize_formatting(oq3_source: str, output_names: Iterable[str] = ()) -> 
         line = raw_line.lstrip().replace("float[64]", "float")
         line = _CONTROL_PLACEHOLDER_RE.sub(_control_modifier, line)
         line = _GPHASE_PLACEHOLDER_RE.sub(r"gphase(\1);", line)
+        line = _PRAGMA_PLACEHOLDER_RE.sub(lambda match: _pragma_line(match, pragmas), line)
         if _BRAKET_VERBATIM_ANNOTATION_LINE.match(line):
             lines.append(_BRAKET_VERBATIM_PRAGMA_LINE)
             continue
@@ -304,6 +351,13 @@ def _control_modifier(placeholder: re.Match) -> str:
     num_controls, base_name = placeholder.groups()
     modifier = "ctrl" if num_controls == "1" else f"ctrl({num_controls})"
     return f"{modifier} @ {base_name}"
+
+
+def _pragma_line(placeholder: re.Match, pragmas: Sequence[str]) -> str:
+    """Rewrite a pragma placeholder as its pragma on the same qubits."""
+    index, qubits = placeholder.groups()
+    # Braket orders a matrix's qubits big-endian, Qiskit little-endian.
+    return f"{pragmas[int(index)]} {', '.join(reversed(qubits.split(', ')))}"
 
 
 def _restore_output_declaration(line: str, output_names: set[str]) -> str:

@@ -17,8 +17,8 @@ from qiskit.circuit import (
     Parameter,
     Qubit,
 )
-from qiskit.circuit.library import C3SXGate, CXGate, GlobalPhaseGate, HGate, XGate
-from qiskit.quantum_info import Statevector
+from qiskit.circuit.library import C3SXGate, CXGate, GlobalPhaseGate, HGate, UnitaryGate, XGate
+from qiskit.quantum_info import Kraus, Statevector
 from qiskit.transpiler import PassManager, Target
 from qiskit.transpiler.passes import RemoveBarriers
 
@@ -75,6 +75,40 @@ def _bell_circuit() -> QuantumCircuit:
     qc.h(0)
     qc.cx(0, 1)
     qc.measure([0, 1], [0, 1])
+    return qc
+
+
+def _unitary_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit(2, 2)
+    qc.append(UnitaryGate(np.kron(np.eye(2), [[0, 1], [1, 0]])), [0, 1])
+    qc.measure([0, 1], [0, 1])
+    return qc
+
+
+def _kraus_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit(1, 1)
+    qc.h(0)
+    qc.append(Kraus([np.sqrt(0.9) * np.eye(2), np.sqrt(0.1) * np.array([[0, 1], [1, 0]])]), [0])
+    qc.measure(0, 0)
+    return qc
+
+
+def _barrier_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit(2, 2)
+    qc.h(0)
+    qc.barrier()
+    qc.cx(0, 1)
+    qc.measure([0, 1], [0, 1])
+    return qc
+
+
+def _barrier_in_if_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit(1, 1)
+    qc.measure(0, 0)
+    with qc.if_test((qc.clbits[0], 1)):
+        qc.h(0)
+        qc.barrier()
+        qc.h(0)
     return qc
 
 
@@ -398,7 +432,7 @@ def test_compile_to_oq3_verbatim_keeps_mid_circuit_measurement_in_box() -> None:
 
     oq3 = compile_to_oq3(qc, verbatim=True)
 
-    assert "box {\nb[0] = measure q[0];\nx q[0];\n}\nb[1] = measure q[0];" in oq3
+    assert "box {\nb[0] = measure $0;\nx $0;\n}\nb[1] = measure $0;" in oq3
 
 
 def test_compile_to_oq3_verbatim_with_device_wider_than_circuit() -> None:
@@ -506,12 +540,6 @@ def test_compile_to_oq3_accepts_oq3_string_input() -> None:
             [],
         ),
         (
-            _bell_circuit,
-            {"target": _bell_circuit_target(), "qubit_labels": [0, 1]},
-            ["OPENQASM 3.0;", "h ", "cnot "],
-            ["#pragma braket verbatim", "box {"],
-        ),
-        (
             _bell_with_verbatim_boxop,
             {"qubit_labels": [0, 1]},
             ["h ", "cnot "],
@@ -524,7 +552,7 @@ def test_compile_to_oq3_accepts_oq3_string_input() -> None:
             ["q["],
         ),
     ],
-    ids=["verbatim_flag", "target", "existing_verbatim_box", "non_contiguous_labels"],
+    ids=["verbatim_flag", "existing_verbatim_box", "non_contiguous_labels"],
 )
 def test_compile_to_oq3_output(
     circuit_factory: Callable[[], QuantumCircuit],
@@ -557,7 +585,7 @@ def test_compile_to_oq3_output(
         ),
         (
             _bell_circuit,
-            {"verbatim": True, "qubit_labels": [0, 1]},
+            {"verbatim": True},
             (
                 "OPENQASM 3.0;\n"
                 "bit[2] b;\n"
@@ -776,27 +804,64 @@ def test_to_oq3_register_with_loose_qubit_and_labels_raises() -> None:
 
 
 @pytest.mark.parametrize(
-    "compile_kwargs",
+    ("circuit_factory", "compile_kwargs"),
     [
-        {"target": _bell_circuit_target()},
-        {"target": aws_device_to_target(mock_calibrated_rigetti_device()), "qubit_labels": (1, 2)},
-        {"verbatim": True, "qubit_labels": (0, 1)},
-        {"pass_manager": PassManager([RemoveBarriers()]), "qubit_labels": (0, 1)},
-        {"pass_manager": PassManager(), "target": _bell_circuit_target()},
+        (_bell_circuit, {"verbatim": True, "qubit_labels": (0, 1)}),
+        (_bell_circuit, {"pass_manager": PassManager([RemoveBarriers()]), "qubit_labels": (0, 1)}),
+        (_bell_circuit, {"pass_manager": PassManager(), "target": _bell_circuit_target()}),
+        (_unitary_circuit, {}),
+        (_kraus_circuit, {}),
+        (_barrier_circuit, {}),
+        (_barrier_circuit, {"basis_gates": ["h", "cx"]}),
+        (_barrier_circuit, {"target": _bell_circuit_target()}),
+        (
+            _barrier_circuit,
+            {
+                "target": aws_device_to_target(mock_calibrated_rigetti_device()),
+                "qubit_labels": (1, 2),
+            },
+        ),
     ],
     ids=[
-        "target_without_qubits",
-        "target_with_qubits",
         "verbatim",
         "pass_manager",
         "empty_pass_manager",
+        "unitary",
+        "kraus",
+        "barrier_in_target",
+        "barrier_not_in_basis",
+        "target_without_qubits",
+        "target_with_qubits",
     ],
 )
-def test_compile_to_oq3_matches_to_braket(compile_kwargs: dict) -> None:
+def test_compile_to_oq3_matches_to_braket(
+    circuit_factory: Callable[[], QuantumCircuit], compile_kwargs: dict
+) -> None:
     """The output is the program to_braket would build, including its verbatim box."""
-    oq3 = compile_to_oq3(_bell_circuit(), **compile_kwargs)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        oq3 = compile_to_oq3(circuit_factory(), **compile_kwargs)
+        expected = to_braket(circuit_factory(), **compile_kwargs)
 
-    assert Circuit.from_ir(oq3) == to_braket(_bell_circuit(), **compile_kwargs)
+    assert Circuit.from_ir(oq3) == expected
+
+
+@pytest.mark.parametrize(
+    ("circuit_factory", "compile_kwargs"),
+    [
+        (_barrier_circuit, {"target": _bell_circuit_target()}),
+        (_barrier_in_if_circuit, {"basis_gates": ["h", "measure", "if_else"]}),
+    ],
+    ids=["top_level", "in_if_block"],
+)
+def test_compile_to_oq3_warns_when_dropping_barriers(
+    circuit_factory: Callable[[], QuantumCircuit], compile_kwargs: dict
+) -> None:
+    """Barriers the target doesn't include are dropped with to_braket's warning."""
+    with pytest.warns(UserWarning, match="Barrier is not included in the current Target"):
+        oq3 = compile_to_oq3(circuit_factory(), **compile_kwargs)
+
+    assert "barrier" not in oq3
 
 
 def test_compile_to_oq3_keeps_iqm_measurements_in_box() -> None:

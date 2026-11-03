@@ -306,6 +306,13 @@ _QISKIT_GLOBAL_PHASE = "global_phase"
 """
 _GPHASE_PLACEHOLDER = "_braket_gphase"
 
+"""Prefix of the placeholder gate names that stand for Braket's ``unitary`` and ``kraus`` pragmas.
+
+Qiskit's exporter can't write either, so each is exported as ``_braket_pragma<i>`` and
+:func:`_normalize_formatting` rewrites it to the pragma.
+"""
+_PRAGMA_PLACEHOLDER = "_braket_pragma"
+
 """Prefix of the placeholder names that stand for Braket's ``ctrl`` modifier.
 
 Qiskit's exporter only accepts identifiers as gate names, so a controlled gate is
