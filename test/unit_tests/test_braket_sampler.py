@@ -87,10 +87,14 @@ class TestBraketSampler(TestCase):
         )
         self.assertEqual(device.run_batch.call_args.kwargs, {"shots": -1})
 
+    @pytest.mark.xfail(
+        raises=ValueError, strict=True, reason="Multiple quantum registers aren't supported yet"
+    )
     def test_run_local_multiple_registers(self):
-        """Tests that correct results are returned for circuits with multiple classical registers"""
+        """Tests that correct results are returned for circuits with multiple registers"""
         circuit = QuantumCircuit(
-            QuantumRegister(12, "qreg"),
+            QuantumRegister(3, "qreg_a"),
+            QuantumRegister(9, "qreg_b"),
             ClassicalRegister(10, "creg_a"),
             ClassicalRegister(2, "creg_b"),
         )

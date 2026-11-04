@@ -6,6 +6,7 @@ from math import pi
 
 import numpy as np
 from qiskit.circuit import (
+    CONTROL_FLOW_OP_NAMES,
     ClassicalRegister,
     ControlledGate,
     Gate,
@@ -301,8 +302,16 @@ def _replace_pragma_ops(
     """Replace each ``unitary`` or ``kraus`` named in ``names`` with a placeholder gate.
 
     Returns the new circuit and, by placeholder index, the pragma each one stands for.
+
+    Raises:
+        ValueError: If a ``unitary`` or ``kraus`` is inside a control-flow block, because
+            Braket only allows pragmas at the top level.
     """
-    if not any(instruction.operation.name in names for instruction in circuit.data):
+    ops = circuit.count_ops()
+    # Scanning the instructions is slow, so only do it when there are blocks to check.
+    if not CONTROL_FLOW_OP_NAMES.isdisjoint(ops):
+        _reject_pragma_ops_in_blocks(circuit)
+    if ops.keys().isdisjoint(names):
         return circuit, []
     replaced = circuit.copy_empty_like()
     pragmas: list[str] = []
@@ -315,6 +324,18 @@ def _replace_pragma_ops(
         else:
             replaced.append(instruction)
     return replaced, pragmas
+
+
+def _reject_pragma_ops_in_blocks(circuit: QuantumCircuit) -> None:
+    """Raise if a control-flow block in ``circuit`` has a ``unitary`` or ``kraus``."""
+    for instruction in circuit.data:
+        for block in getattr(instruction.operation, "blocks", ()):
+            if nested := {"unitary", "kraus"} & set(block.count_ops()):
+                raise ValueError(
+                    f"{sorted(nested)} can't be inside control flow, because Braket writes "
+                    "them as pragmas, which are only allowed at the top level."
+                )
+            _reject_pragma_ops_in_blocks(block)
 
 
 def _pragma(operation: Instruction) -> str:

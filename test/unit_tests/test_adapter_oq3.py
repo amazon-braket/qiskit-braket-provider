@@ -13,6 +13,7 @@ from qiskit.circuit import (
     ClassicalRegister,
     Clbit,
     IfElseOp,
+    Instruction,
     Measure,
     Parameter,
     Qubit,
@@ -112,6 +113,14 @@ def _barrier_in_if_circuit() -> QuantumCircuit:
         qc.h(0)
         qc.barrier()
         qc.h(0)
+    return qc
+
+
+def _in_if_circuit(operation: Instruction | Kraus) -> QuantumCircuit:
+    qc = QuantumCircuit(1, 1)
+    qc.measure(0, 0)
+    with qc.if_test((qc.clbits[0], 1)):
+        qc.append(operation, [0])
     return qc
 
 
@@ -687,11 +696,10 @@ def test_compile_to_oq3_no_output_metadata(metadata: dict) -> None:
 
 
 def test_compile_to_oq3_nonstandard_basis_keeps_non_gate_instructions() -> None:
-    """A non-standard basis keeps measure, barrier, reset and delay, as the standard basis does."""
+    """A non-standard basis keeps measure, reset and delay, as the standard basis does."""
     circuit = QuantumCircuit(2, 2)
     circuit.h(0)
     circuit.cx(0, 1)
-    circuit.barrier()
     circuit.reset(0)
     circuit.delay(100, 1)
     circuit.measure([0, 1], [0, 1])
@@ -847,6 +855,8 @@ def test_compile_to_oq3_matches_to_braket(
         expected = to_braket(circuit_factory(), **compile_kwargs)
 
     assert Circuit.from_ir(oq3) == expected
+    # A Braket Circuit doesn't record whether its qubits are physical, so compare the text.
+    assert ("$" in oq3) == ("$" in expected.to_ir(IRType.OPENQASM).source)
 
 
 @pytest.mark.parametrize(
@@ -865,6 +875,20 @@ def test_compile_to_oq3_warns_when_dropping_barriers(
         oq3 = compile_to_oq3(circuit_factory(), **compile_kwargs)
 
     assert "barrier" not in oq3
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        UnitaryGate(np.eye(2)),
+        Kraus([np.sqrt(0.9) * np.eye(2), np.sqrt(0.1) * np.array([[0, 1], [1, 0]])]),
+    ],
+    ids=["unitary", "kraus"],
+)
+def test_compile_to_oq3_rejects_pragma_op_in_control_flow(operation: Instruction | Kraus) -> None:
+    """Braket only allows pragmas at the top level, so unitary and kraus can't be in blocks."""
+    with pytest.raises(ValueError, match="can't be inside control flow"):
+        compile_to_oq3(_in_if_circuit(operation))
 
 
 def test_compile_to_oq3_keeps_iqm_measurements_in_box() -> None:

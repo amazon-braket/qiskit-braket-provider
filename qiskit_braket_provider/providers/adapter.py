@@ -863,10 +863,11 @@ def to_oq3(
             stacklevel=2,
         )
 
-    # Kraus isn't a gate, so it has no basis entry; to_braket converts it regardless.
-    pragma_ops = {"kraus"} | (
-        {"unitary"} & set(_QISKIT_TO_BRAKET_NAMES if basis_gates is None else basis_gates)
-    )
+    if basis_gates is None:
+        basis_gates = _QISKIT_TO_BRAKET_NAMES.keys()
+
+    # Kraus isn't a gate, so callers don't list it in basis_gates; to_braket converts it regardless.
+    pragma_ops = {"kraus", "unitary"} if "unitary" in basis_gates else {"kraus"}
     circuit, pragmas = _replace_pragma_ops(circuit, pragma_ops)
 
     pm = PassManager()
@@ -876,19 +877,14 @@ def to_oq3(
     pm.append(RenameGates())
     circuit = pm.run(circuit)
 
-    if basis_gates is None:
-        basis_gates = _QISKIT_TO_BRAKET_NAMES.keys()
-
     # basis_gates arrives as Qiskit names; RenameGates has already substituted
     # shims for renameable gates, so translate to the names the shims carry.
     basis_gates = [
-        *(
-            translated
-            for g in basis_gates
-            if (translated := _QISKIT_TO_OQ3_NAMES.get(g, g)) not in _NON_GATE_TARGET_OPS
-        ),
-        *(f"{_PRAGMA_PLACEHOLDER}{i}" for i in range(len(pragmas))),
+        translated
+        for g in basis_gates
+        if (translated := _QISKIT_TO_OQ3_NAMES.get(g, g)) not in _NON_GATE_TARGET_OPS
     ]
+    basis_gates += [f"{_PRAGMA_PLACEHOLDER}{i}" for i in range(len(pragmas))]
 
     if writes_global_phase and _is_nonzero_phase(circuit.global_phase):
         circuit.data.insert(0, CircuitInstruction(BraketGPhaseGate(circuit.global_phase)))
@@ -1133,9 +1129,8 @@ def compile_to_oq3(  # type: ignore[misc]
 
             When ``False`` (default), the output is wrapped in a verbatim box if the
             ``target`` or ``braket_device`` lists gates per qubit, as QPU targets do,
-            or a non-empty ``pass_manager`` is given, as with ``to_braket``. Circuits
-            containing control-flow ops on an IQM target raise instead, because the
-            service must post-process them.
+            or a non-empty ``pass_manager`` is given. Circuits containing control-flow
+            ops on an IQM target raise instead, because the service must post-process them.
         basis_gates: Gate names supported by the target device (Qiskit names).
         coupling_map: Qubit connectivity as ``[control, target]`` pairs.
         optimization_level: Transpiler optimization level (0-3). Default: 0.
