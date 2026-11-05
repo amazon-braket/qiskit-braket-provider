@@ -59,6 +59,19 @@ def test_backend_run_reports_output_registers() -> None:
     assert result.get_memory() == ["1 01"] * 100
 
 
+def test_backend_run_unassigned_output_bit_is_zero() -> None:
+    """The simulator reports None for an output bit nothing writes to, which counts as 0."""
+    circuit = QuantumCircuit(
+        QuantumRegister(1, "q"), ClassicalRegister(1, "m"), ClassicalRegister(1, "u")
+    )
+    circuit.x(0)
+    circuit.measure(0, 0)  # u is never written
+
+    result = BraketLocalBackend().run(circuit, shots=10, output_registers=["m", "u"]).result()
+
+    assert result.get_counts() == {"0 1": 10}
+
+
 def test_output_registers_unknown_register_raises() -> None:
     """Naming a register the circuit does not have raises."""
     circuit = QuantumCircuit(QuantumRegister(1, "q"), ClassicalRegister(1, "c"))

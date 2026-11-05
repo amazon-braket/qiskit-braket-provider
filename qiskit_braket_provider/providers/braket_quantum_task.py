@@ -67,7 +67,9 @@ def _result_from_circuit_task(
             hex(
                 int(
                     "".join(
-                        str(int(b)) for bits in reversed(shot.values()) for b in reversed(bits)
+                        "1" if b else "0" # unassigned bit is 0
+                        for bits in reversed(shot.values())
+                        for b in reversed(bits)
                     ),
                     2,
                 )
