@@ -47,6 +47,8 @@ logger = logging.getLogger(__name__)
 
 _TASK_ID_DIVIDER = ";"
 
+_OUTPUT_DECL_RE = re.compile(r"^output\b", re.MULTILINE)
+
 T = TypeVar("T", bound=Device, covariant=True)  # ruff:ignore[type-name-incorrect-variance]
 
 
@@ -534,7 +536,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
             and shots != 0
             and len(programs) > 1
             # Program set results don't report output variables.
-            and not output_registers
+            and not any(_OUTPUT_DECL_RE.search(program.source) for program in programs)
             else self._run_batch(programs, shots, **options)
         )
 

@@ -46,6 +46,7 @@ from qiskit_braket_provider import (
     BraketProvider,
     __version__,
     exception,
+    to_qiskit,
 )
 from qiskit_braket_provider.providers.adapter import native_gate_connectivity
 from qiskit_braket_provider.providers.braket_sampler import BraketSampler
@@ -920,4 +921,25 @@ def test_aws_run_output_registers_uses_batch_not_program_set():
     assert device.run_batch.call_args.kwargs == {"shots": 5}
     assert len(programs) == 2
     assert all(isinstance(program, Program) for program in programs)
+    assert all("output bit[1] res;" in program.source for program in programs)
+
+
+def test_aws_run_outputs_from_to_qiskit_use_batch_not_program_set():
+    """Outputs recorded by to_qiskit also skip program sets, without output_registers."""
+    device = Mock()
+    device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
+    device.gate_calibrations = None
+    device.type = "QPU"
+    device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+    device.run_batch.return_value.tasks = [Mock(id="0"), Mock(id="1")]
+    backend = BraketAwsBackend(device=device)
+    backend._max_program_set_executables = 500
+    circuit = to_qiskit(
+        "OPENQASM 3.0;\noutput bit[1] res;\nqubit[1] q;\nh q[0];\nres[0] = measure q[0];"
+    )
+
+    backend.run([circuit, circuit], shots=5)
+
+    device.run.assert_not_called()
+    (programs,) = device.run_batch.call_args.args
     assert all("output bit[1] res;" in program.source for program in programs)
