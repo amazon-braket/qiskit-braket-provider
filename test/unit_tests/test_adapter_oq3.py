@@ -975,6 +975,20 @@ def test_to_oq3_writes_gates_braket_defines(
     sim.run(Program(source=oq3), shots=1).result()
 
 
+@pytest.mark.parametrize(
+    ("gate", "basis_gates"),
+    [(U3Gate(0.2, 0.3, 0.4), ["u1"]), (U1Gate(0.3), ["h"])],
+    ids=["other_u_gate_in_basis", "no_u_gate_in_basis"],
+)
+def test_to_oq3_rejects_u_gate_outside_basis(gate: QiskitGate, basis_gates: list[str]) -> None:
+    """u, u1, u2 and u3 are all written as U, but each needs its own name or u in the basis."""
+    circuit = QuantumCircuit(1)
+    circuit.append(gate, [0])
+
+    with pytest.raises(ValueError, match=rf"Gates \['{gate.name}'\] are not in the basis"):
+        to_oq3(circuit, basis_gates=basis_gates)
+
+
 def test_compile_to_oq3_on_local_simulator_target_matches_to_braket() -> None:
     """Compiling against the local simulator's target gives the program to_braket builds."""
     circuit = QuantumCircuit(4)

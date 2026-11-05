@@ -52,6 +52,7 @@ from qiskit_braket_provider.providers.compilation import (
     _default_target,  # ruff:ignore[unused-import]
 )
 from qiskit_braket_provider.providers.gate_mappings import (
+    _ADDITIONAL_U_GATES,
     _BRAKET_SUPPORTED_NOISES,  # ruff:ignore[unused-import]
     _BRAKET_VERBATIM_BOX_NAME,
     _CONTROLLED_GATES_BY_QUBIT_COUNT,  # ruff:ignore[unused-import]
@@ -65,6 +66,7 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
     _QISKIT_GLOBAL_PHASE,
     _QISKIT_TO_OQ3_NAMES,
+    _U_GATE_NAMES,
     BraketGPhaseGate,
     _reverse_endianness,
 )
@@ -869,6 +871,11 @@ def to_oq3(
     pragma_ops = {"kraus", "unitary"} if "unitary" in basis_gates else {"kraus"}
     circuit, pragmas = _replace_pragma_ops(circuit, pragma_ops)
 
+    # RenameGates writes all of these as U, so check them under their own names first.
+    # u1, u2 and u3 are special cases of U, so they're also allowed when u is.
+    allowed_u_gates = set(basis_gates) | (_ADDITIONAL_U_GATES if "u" in basis_gates else set())
+    unsupported_u_gates = _u_gate_names(circuit) - allowed_u_gates
+
     pm = PassManager()
     pm.append(ConsolidateClbits())
     if should_wrap_verbatim:
@@ -884,13 +891,17 @@ def to_oq3(
         if (translated := _QISKIT_TO_OQ3_NAMES.get(g, g)) not in _NON_GATE_TARGET_OPS
     ]
     basis_gates += [f"{_PRAGMA_PLACEHOLDER}{i}" for i in range(len(pragmas))]
+    basis_gates.append("U")  # Each gate written as U was checked above.
 
     if writes_global_phase and _is_nonzero_phase(circuit.global_phase):
         circuit.data.insert(0, CircuitInstruction(BraketGPhaseGate(circuit.global_phase)))
         circuit.global_phase = 0
 
-    if unsupported := _gate_names(circuit) - set(basis_gates) - _NON_GATE_TARGET_OPS:
-        unsupported_names = sorted(_OQ3_TO_QISKIT_NAMES.get(name, name) for name in unsupported)
+    unsupported = {
+        _OQ3_TO_QISKIT_NAMES.get(name, name)
+        for name in _gate_names(circuit) - set(basis_gates) - _NON_GATE_TARGET_OPS
+    }
+    if unsupported_names := sorted(unsupported | unsupported_u_gates):
         raise ValueError(
             f"Gates {unsupported_names} are not in the basis gate set and cannot be "
             "serialized for Braket. Transpile the circuit to the basis gates first."
@@ -907,6 +918,15 @@ def to_oq3(
     output_names = (circuit.metadata or {}).get("braket_output_variables", {})
     oq3_source = _remap_qubits(oq3_source, qubit_labels, physical_qubits)
     return _normalize_formatting(oq3_source, output_names, pragmas)
+
+
+def _u_gate_names(circuit: QuantumCircuit) -> set[str]:
+    """Return which of u, u1, u2 and u3 ``circuit`` uses, including in control-flow blocks."""
+    ops = circuit.count_ops()
+    # Scanning the instructions is slow, so only do it when there are blocks to check.
+    if CONTROL_FLOW_OP_NAMES.isdisjoint(ops):
+        return set(ops.keys() & _U_GATE_NAMES)
+    return _gate_names(circuit) & _U_GATE_NAMES
 
 
 def _is_nonzero_phase(phase: float | ParameterExpression) -> bool:
