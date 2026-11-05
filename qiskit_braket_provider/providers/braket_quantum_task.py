@@ -53,6 +53,16 @@ def retry_if_result_none(result: object) -> bool:
     return result is None
 
 
+def _outputs_to_hex(shot: dict[str, list[int | bool | None]]) -> str:
+    """Convert one shot of Braket output variables to a Qiskit memory hex string.
+    An unwritten bit is ``None``, which counts as 0.
+    """
+    bitstring = "".join(
+        "1" if bit else "0" for bits in reversed(shot.values()) for bit in reversed(bits)
+    )
+    return hex(int(bitstring, 2))
+
+
 def _result_from_circuit_task(
     task: QuantumTask, result: GateModelQuantumTaskResult
 ) -> ExperimentResult | None:
@@ -63,19 +73,7 @@ def _result_from_circuit_task(
     if outputs := result.outputs:
         creg_sizes = [[name, len(bits)] for name, bits in outputs[0].items()]
         header = {"creg_sizes": creg_sizes, "memory_slots": sum(size for _, size in creg_sizes)}
-        memory = [
-            hex(
-                int(
-                    "".join(
-                        "1" if b else "0" # unassigned bit is 0
-                        for bits in reversed(shot.values())
-                        for b in reversed(bits)
-                    ),
-                    2,
-                )
-            )
-            for shot in outputs
-        ]
+        memory = [_outputs_to_hex(shot) for shot in outputs]
         data = ExperimentResultData(counts=dict(Counter(memory)), memory=memory)
     elif result.task_metadata.shots == 0:
         braket_statevector = result.values[

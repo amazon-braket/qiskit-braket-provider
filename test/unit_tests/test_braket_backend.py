@@ -897,3 +897,27 @@ def test_aws_backend_run_on_simulator_submits_unwrapped_program():
         "b[0] = measure q[0];\n"
         "b[1] = measure q[1];"
     )
+
+
+def test_aws_run_output_registers_uses_batch_not_program_set():
+    """Program set results don't report outputs, so output runs are submitted as a batch."""
+    device = Mock()
+    device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
+    device.gate_calibrations = None
+    device.type = "QPU"
+    device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+    device.run_batch.return_value.tasks = [Mock(id="0"), Mock(id="1")]
+    backend = BraketAwsBackend(device=device)
+    backend._max_program_set_executables = 500
+    circuit = QuantumCircuit(QuantumRegister(1, "q"), ClassicalRegister(1, "res"))
+    circuit.h(0)
+    circuit.measure(0, 0)
+
+    backend.run([circuit, circuit], shots=5, output_registers=["res"])
+
+    device.run.assert_not_called()
+    (programs,) = device.run_batch.call_args.args
+    assert device.run_batch.call_args.kwargs == {"shots": 5}
+    assert len(programs) == 2
+    assert all(isinstance(program, Program) for program in programs)
+    assert all("output bit[1] res;" in program.source for program in programs)

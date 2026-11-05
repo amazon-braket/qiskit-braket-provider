@@ -847,7 +847,13 @@ def to_oq3(
             Braket cannot run; transpile the circuit to the basis gates first.
             Also raised if the circuit has no classical register named in
             ``output_registers``.
+        TypeError: If ``output_registers`` is a single string instead of a sequence.
     """
+    if isinstance(output_registers, str):
+        raise TypeError(
+            f"output_registers must be a sequence of register names, not a string. "
+            f"Use [{output_registers!r}]."
+        )
     if output_registers:
         if missing := set(output_registers) - {creg.name for creg in circuit.cregs}:
             raise ValueError(f"Circuit has no classical register named {sorted(missing)}.")
