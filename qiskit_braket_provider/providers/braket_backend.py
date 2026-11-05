@@ -238,6 +238,8 @@ class BraketLocalBackend(BraketBackend[Device]):
         output_registers: Sequence[str] = (),
         **options,
     ) -> BraketQuantumTask:
+        if self._is_emulator and output_registers:
+            raise ValueError("output_registers is not supported on emulators.")
         convert_input = [run_input] if isinstance(run_input, QuantumCircuit) else list(run_input)
         verbatim = options.pop("verbatim", False)
         programs = _compile_programs(

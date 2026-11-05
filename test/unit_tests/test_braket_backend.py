@@ -10,7 +10,13 @@ import numpy as np
 import pytest
 from botocore import errorfactory
 from networkx import DiGraph, complete_graph
-from qiskit import QuantumCircuit, QuantumRegister, generate_preset_pass_manager, transpile
+from qiskit import (
+    ClassicalRegister,
+    QuantumCircuit,
+    QuantumRegister,
+    generate_preset_pass_manager,
+    transpile,
+)
 from qiskit.circuit import Instruction as QiskitInstruction
 from qiskit.circuit.library import n_local
 from qiskit.circuit.random import random_circuit
@@ -681,6 +687,13 @@ class TestEmulatorBackend(TestCase):
         self.assertTrue(backend.emulator)
         self.assertEqual(backend.qubit_labels, (1, 2))
         self.assertIn("Emulator for AWS Device", backend.description)
+
+    def test_emulator_backend_rejects_output_registers(self):
+        """Emulators run Braket circuits, which cannot declare OpenQASM outputs."""
+        circuit = QuantumCircuit(QuantumRegister(1, "q"), ClassicalRegister(1, "res"))
+        circuit.measure(0, 0)
+        with self.assertRaisesRegex(ValueError, "not supported on emulators"):
+            self._emulator_backend().run(circuit, shots=10, output_registers=["res"])
 
     def test_emulator_backend_program_set_support(self):
         """Tests that program-set support tracks the emulated device."""
