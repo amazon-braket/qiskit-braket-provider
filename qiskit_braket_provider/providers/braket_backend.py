@@ -240,8 +240,6 @@ class BraketLocalBackend(BraketBackend[Device]):
         output_registers: Sequence[str] = (),
         **options,
     ) -> BraketQuantumTask:
-        if self._is_emulator and output_registers:
-            raise ValueError("output_registers is not supported on emulators.")
         convert_input = [run_input] if isinstance(run_input, QuantumCircuit) else list(run_input)
         verbatim = options.pop("verbatim", False)
         programs = _compile_programs(
@@ -251,6 +249,9 @@ class BraketLocalBackend(BraketBackend[Device]):
             verbatim=verbatim,
             output_registers=output_registers,
         )
+
+        if self._is_emulator and any(_OUTPUT_DECL_RE.search(p.source) for p in programs):
+            raise ValueError("OpenQASM output variables are not supported on emulators.")
 
         # Emulators only accept Braket circuits, so they get the programs as circuits.
         specifications: list[Program] | list[Circuit]

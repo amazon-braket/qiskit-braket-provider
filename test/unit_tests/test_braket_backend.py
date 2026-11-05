@@ -696,6 +696,14 @@ class TestEmulatorBackend(TestCase):
         with self.assertRaisesRegex(ValueError, "not supported on emulators"):
             self._emulator_backend().run(circuit, shots=10, output_registers=["res"])
 
+    def test_emulator_backend_rejects_outputs_from_to_qiskit(self):
+        """Outputs recorded by to_qiskit are rejected too, without output_registers."""
+        circuit = to_qiskit(
+            "OPENQASM 3.0;\noutput bit[1] res;\nqubit[1] q;\nh q[0];\nres[0] = measure q[0];"
+        )
+        with self.assertRaisesRegex(ValueError, "not supported on emulators"):
+            self._emulator_backend().run(circuit, shots=10)
+
     def test_emulator_backend_program_set_support(self):
         """Tests that program-set support tracks the emulated device."""
         self.assertIsNone(self._emulator_backend()._max_program_set_executables)
