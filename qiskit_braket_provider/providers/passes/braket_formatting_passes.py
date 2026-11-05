@@ -48,7 +48,7 @@ _IONQ_GATES = (ionq_gates.GPIGate, ionq_gates.GPI2Gate, ionq_gates.MSGate, ionq_
 
 # Braket's OpenQASM has no u1, u2 or u3; each is U with these (theta, phi, lambda).
 _U_GATE_PARAMS: dict[str, Callable[..., tuple]] = {
-    "u1": lambda lam: (0, 0, lam),
+    "u1": lambda lam: (0.0, 0.0, lam),
     "u2": lambda phi, lam: (pi / 2, phi, lam),
     "u3": lambda theta, phi, lam: (theta, phi, lam),
 }
