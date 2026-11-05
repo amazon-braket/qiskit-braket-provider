@@ -893,7 +893,7 @@ def to_oq3(
         for g in basis_gates
         if (translated := _QISKIT_TO_OQ3_NAMES.get(g, g)) not in _NON_GATE_TARGET_OPS
     ]
-    basis_gates += [*placeholders, "U"]
+    basis_gates += placeholders
 
     if writes_global_phase and _is_nonzero_phase(circuit.global_phase):
         circuit.data.insert(0, CircuitInstruction(BraketGPhaseGate(circuit.global_phase)))
