@@ -12,11 +12,12 @@ from qiskit.quantum_info import SparsePauliOp
 from braket.circuits.observables import Sum
 from braket.program_sets import CircuitBinding, ParameterSets, ProgramSet
 from braket.tasks import ProgramSetQuantumTaskResult
-from qiskit_braket_provider.providers.adapter import (
-    rename_parameter,
-    translate_sparse_pauli_op,
+from qiskit_braket_provider.providers.adapter import translate_sparse_pauli_op
+from qiskit_braket_provider.providers.braket_backend import (
+    BraketBackend,
+    _compile_programs,
+    _with_input_names,
 )
-from qiskit_braket_provider.providers.braket_backend import BraketBackend, _compile_programs
 from qiskit_braket_provider.providers.braket_primitive_task import (
     BraketPrimitiveTask,
     run_split_program_set,
@@ -187,14 +188,13 @@ class BraketEstimator(BaseEstimatorV2):
             index to measurement column.
         """
         backend = self._backend
-        input_names: list[dict[str, str]] = []
+        circuit, input_names = _with_input_names(pub.circuit)
         (program,) = _compile_programs(
-            [pub.circuit],
+            [circuit],
             qubit_labels=backend.qubit_labels,
             target=backend.target,
             verbatim=self._verbatim,
             optimization_level=self._optimization_level,
-            input_names=input_names,
         )
         source = program.source
 
@@ -242,7 +242,7 @@ class BraketEstimator(BaseEstimatorV2):
             param_idx_map = {pk: idx for idx, pk in enumerate(param_indices)}
             parameter_sets = (
                 BraketEstimator._translate_parameters(
-                    [param_values[pi] for pi in param_indices], input_names[0]
+                    [param_values[pi] for pi in param_indices], input_names
                 )
                 if param_values.data
                 else None
@@ -431,8 +431,7 @@ class BraketEstimator(BaseEstimatorV2):
 
         Args:
             param_list (list[BindingsArray]): List of parameter value arrays.
-            input_names (Mapping[str, str]): The ``input`` name the compiled program
-                declares for each parameter name.
+            input_names (Mapping[str, str]): The ``input`` name for each parameter name.
 
         Returns:
             ParameterSets: Braket ParameterSets object.
@@ -441,7 +440,7 @@ class BraketEstimator(BaseEstimatorV2):
         for bindings_array in param_list:
             for k, v in bindings_array.data.items():
                 for param, val in zip(k, v, strict=True):
-                    data[input_names.get(param, rename_parameter(param))].append(val)
+                    data[input_names[param]].append(val)
         return ParameterSets(data)
 
     @staticmethod

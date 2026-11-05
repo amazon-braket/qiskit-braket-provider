@@ -518,7 +518,7 @@ MOCK_IQM_CAPABILITIES_JSON = {
     },
     "paradigm": {
         "qubitCount": _MOCK_IQM_NUM_QUBITS,
-        "nativeGateSet": ["prx", "cz"],
+        "nativeGateSet": ["prx", "cz", "barrier"],
         "connectivity": {
             "fullyConnected": False,
             "connectivityGraph": {str(q): [str(q + 1)] for q in range(1, _MOCK_IQM_NUM_QUBITS)},
