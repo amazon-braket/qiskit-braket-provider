@@ -267,9 +267,6 @@ _PAULI_MAP = {
 
 _ADDITIONAL_U_GATES = {"u1", "u2", "u3"}
 
-"""Qiskit's gates that RenameGates writes as Braket's ``U``."""
-_U_GATE_NAMES = frozenset({"u", *_ADDITIONAL_U_GATES})
-
 _SYMPY_FUNCTION_TO_QISKIT_METHOD = {
     sin: "sin",
     cos: "cos",
@@ -340,11 +337,6 @@ _QISKIT_TO_OQ3_NAMES: dict[str, str] = {
     **_QISKIT_TO_CONTROL_PLACEHOLDER,
     "u": "U",
     _QISKIT_GLOBAL_PHASE: _GPHASE_PLACEHOLDER,
-}
-
-"""Reverse of :data:`_QISKIT_TO_OQ3_NAMES`, to report gates by the names users wrote."""
-_OQ3_TO_QISKIT_NAMES: dict[str, str] = {
-    oq3_name: qiskit_name for qiskit_name, oq3_name in _QISKIT_TO_OQ3_NAMES.items()
 }
 
 
