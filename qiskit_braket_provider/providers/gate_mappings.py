@@ -335,13 +335,17 @@ _QISKIT_TO_CONTROL_PLACEHOLDER: dict[str, str] = {
 _QISKIT_TO_OQ3_NAMES: dict[str, str] = {
     **_QISKIT_TO_BRAKET_NAMES,
     **_QISKIT_TO_CONTROL_PLACEHOLDER,
+    # RenameGates writes u1, u2 and u3 as U, which Braket defines and they're special cases of.
+    **dict.fromkeys(_ADDITIONAL_U_GATES, "U"),
     "u": "U",
     _QISKIT_GLOBAL_PHASE: _GPHASE_PLACEHOLDER,
 }
 
 """Reverse of :data:`_QISKIT_TO_OQ3_NAMES`, to report gates by the names users wrote."""
 _OQ3_TO_QISKIT_NAMES: dict[str, str] = {
-    oq3_name: qiskit_name for qiskit_name, oq3_name in _QISKIT_TO_OQ3_NAMES.items()
+    oq3_name: qiskit_name
+    for qiskit_name, oq3_name in _QISKIT_TO_OQ3_NAMES.items()
+    if qiskit_name not in _ADDITIONAL_U_GATES
 }
 
 

@@ -64,7 +64,6 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _QISKIT_CONTROLLED_GATE_NAMES_TO_BRAKET_GATES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
     _QISKIT_GLOBAL_PHASE,
-    _QISKIT_TO_BRAKET_NAMES,
     _QISKIT_TO_OQ3_NAMES,
     BraketGPhaseGate,
     _reverse_endianness,
@@ -864,7 +863,7 @@ def to_oq3(
         )
 
     if basis_gates is None:
-        basis_gates = _QISKIT_TO_BRAKET_NAMES.keys()
+        basis_gates = _QISKIT_TO_OQ3_NAMES.keys() - {_QISKIT_GLOBAL_PHASE}
 
     # Kraus isn't a gate, so callers don't list it in basis_gates; to_braket converts it regardless.
     pragma_ops = {"kraus", "unitary"} if "unitary" in basis_gates else {"kraus"}
