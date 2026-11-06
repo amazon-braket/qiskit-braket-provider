@@ -19,7 +19,17 @@ from qiskit.circuit import (
     Qubit,
 )
 from qiskit.circuit import Gate as QiskitGate
-from qiskit.circuit.library import C3SXGate, CXGate, GlobalPhaseGate, HGate, UnitaryGate, XGate
+from qiskit.circuit.library import (
+    C3SXGate,
+    CXGate,
+    GlobalPhaseGate,
+    HGate,
+    U1Gate,
+    U2Gate,
+    U3Gate,
+    UnitaryGate,
+    XGate,
+)
 from qiskit.quantum_info import Kraus, Operator, Statevector
 from qiskit.transpiler import PassManager, Target
 from qiskit.transpiler.passes import RemoveBarriers
@@ -93,6 +103,14 @@ def _kraus_circuit() -> QuantumCircuit:
     qc = QuantumCircuit(1, 1)
     qc.h(0)
     qc.append(Kraus([np.sqrt(0.9) * np.eye(2), np.sqrt(0.1) * np.array([[0, 1], [1, 0]])]), [0])
+    qc.measure(0, 0)
+    return qc
+
+
+def _u1_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit(1, 1)
+    qc.h(0)
+    qc.append(U1Gate(0.3), [0])
     qc.measure(0, 0)
     return qc
 
@@ -822,6 +840,7 @@ def test_to_oq3_register_with_loose_qubit_and_labels_raises() -> None:
         (_bell_circuit, {"pass_manager": PassManager(), "target": _bell_circuit_target()}),
         (_unitary_circuit, {}),
         (_kraus_circuit, {}),
+        (_u1_circuit, {"braket_device": LocalSimulator(), "verbatim": True}),
         (_barrier_circuit, {}),
         (_barrier_circuit, {"basis_gates": ["h", "cx"]}),
         (_barrier_circuit, {"target": _bell_circuit_target()}),
@@ -839,6 +858,7 @@ def test_to_oq3_register_with_loose_qubit_and_labels_raises() -> None:
         "empty_pass_manager",
         "unitary",
         "kraus",
+        "u1_verbatim_on_local_simulator",
         "barrier_in_target",
         "barrier_not_in_basis",
         "target_without_qubits",
@@ -927,23 +947,46 @@ def test_compile_to_oq3_angle_restrictions_rejects_disallowed_angle_in_if() -> N
             "ctrl(3) @ v q[0], q[1], q[2], q[3];",
         ),
         ("u", lambda qc: qc.u(0.1, 0.2, 0.3, 0), "U(0.1, 0.2, 0.3) q[0];"),
+        ("u1", lambda qc: qc.append(U1Gate(0.3), [0]), "U(0.0, 0.0, 0.3) q[0];"),
+        (
+            "u2",
+            lambda qc: qc.append(U2Gate(0.3, 0.4), [0]),
+            "U(1.5707963267948966, 0.3, 0.4) q[0];",
+        ),
+        ("u3", lambda qc: qc.append(U3Gate(0.2, 0.3, 0.4), [0]), "U(0.2, 0.3, 0.4) q[0];"),
     ],
-    ids=["ch", "cs", "csdg", "csx", "crx", "cry", "crz", "ccz", "c3sx", "u"],
+    ids=["ch", "cs", "csdg", "csx", "crx", "cry", "crz", "ccz", "c3sx", "u", "u1", "u2", "u3"],
 )
+@pytest.mark.parametrize("default_basis", [False, True], ids=["basis", "default_basis"])
 def test_to_oq3_writes_gates_braket_defines(
     sim: LocalSimulator,
     gate_name: str,
     add_gate: Callable[[QuantumCircuit], object],
     expected: str,
+    default_basis: bool,
 ) -> None:
-    """Controlled gates use Braket's ctrl modifier and u is Braket's U, so the program runs."""
+    """Controlled gates use Braket's ctrl modifier and u, u1, u2 and u3 are Braket's U."""
     circuit = QuantumCircuit(4)
     add_gate(circuit)
 
-    oq3 = to_oq3(circuit, basis_gates=[gate_name])
+    oq3 = to_oq3(circuit, basis_gates=None if default_basis else [gate_name])
 
     assert expected in oq3
     sim.run(Program(source=oq3), shots=1).result()
+
+
+@pytest.mark.parametrize(
+    ("gate", "basis_gates"),
+    [(U3Gate(0.2, 0.3, 0.4), ["u1"]), (U1Gate(0.3), ["h"])],
+    ids=["other_u_gate_in_basis", "no_u_gate_in_basis"],
+)
+def test_to_oq3_rejects_u_gate_outside_basis(gate: QiskitGate, basis_gates: list[str]) -> None:
+    """u, u1, u2 and u3 are all written as U, but each needs its own name or u in the basis."""
+    circuit = QuantumCircuit(1)
+    circuit.append(gate, [0])
+
+    with pytest.raises(ValueError, match=rf"Gates \['{gate.name}'\] are not in the basis"):
+        to_oq3(circuit, basis_gates=basis_gates)
 
 
 def test_compile_to_oq3_on_local_simulator_target_matches_to_braket() -> None:

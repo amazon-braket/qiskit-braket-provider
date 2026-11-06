@@ -52,19 +52,18 @@ from qiskit_braket_provider.providers.compilation import (
     _default_target,  # ruff:ignore[unused-import]
 )
 from qiskit_braket_provider.providers.gate_mappings import (
+    _ADDITIONAL_U_GATES,
     _BRAKET_SUPPORTED_NOISES,  # ruff:ignore[unused-import]
     _BRAKET_VERBATIM_BOX_NAME,
     _CONTROLLED_GATES_BY_QUBIT_COUNT,  # ruff:ignore[unused-import]
     _EPS,
     _NON_GATE_TARGET_OPS,
-    _OQ3_TO_QISKIT_NAMES,
     _PAULI_MAP,
     _PRAGMA_PLACEHOLDER,
     _QISKIT_CONTROL_FLOW_OPS,
     _QISKIT_CONTROLLED_GATE_NAMES_TO_BRAKET_GATES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
     _QISKIT_GLOBAL_PHASE,
-    _QISKIT_TO_BRAKET_NAMES,
     _QISKIT_TO_OQ3_NAMES,
     BraketGPhaseGate,
     _reverse_endianness,
@@ -884,11 +883,21 @@ def to_oq3(
         )
 
     if basis_gates is None:
-        basis_gates = _QISKIT_TO_BRAKET_NAMES.keys()
+        basis_gates = _QISKIT_TO_OQ3_NAMES.keys() - {_QISKIT_GLOBAL_PHASE}
 
     # Kraus isn't a gate, so callers don't list it in basis_gates; to_braket converts it regardless.
     pragma_ops = {"kraus", "unitary"} if "unitary" in basis_gates else {"kraus"}
     circuit, pragmas = _replace_pragma_ops(circuit, pragma_ops)
+
+    # Check before RenameGates, while every gate still has its Qiskit name. u1, u2 and u3
+    # are allowed when u is, because RenameGates writes all four as U.
+    placeholders = [f"{_PRAGMA_PLACEHOLDER}{i}" for i in range(len(pragmas))]
+    allowed = {*basis_gates, *placeholders, *(_ADDITIONAL_U_GATES if "u" in basis_gates else ())}
+    if unsupported := sorted(_gate_names(circuit) - allowed - _NON_GATE_TARGET_OPS):
+        raise ValueError(
+            f"Gates {unsupported} are not in the basis gate set and cannot be "
+            "serialized for Braket. Transpile the circuit to the basis gates first."
+        )
 
     pm = PassManager()
     pm.append(ConsolidateClbits())
@@ -904,18 +913,11 @@ def to_oq3(
         for g in basis_gates
         if (translated := _QISKIT_TO_OQ3_NAMES.get(g, g)) not in _NON_GATE_TARGET_OPS
     ]
-    basis_gates += [f"{_PRAGMA_PLACEHOLDER}{i}" for i in range(len(pragmas))]
+    basis_gates += placeholders
 
     if writes_global_phase and _is_nonzero_phase(circuit.global_phase):
         circuit.data.insert(0, CircuitInstruction(BraketGPhaseGate(circuit.global_phase)))
         circuit.global_phase = 0
-
-    if unsupported := _gate_names(circuit) - set(basis_gates) - _NON_GATE_TARGET_OPS:
-        unsupported_names = sorted(_OQ3_TO_QISKIT_NAMES.get(name, name) for name in unsupported)
-        raise ValueError(
-            f"Gates {unsupported_names} are not in the basis gate set and cannot be "
-            "serialized for Braket. Transpile the circuit to the basis gates first."
-        )
 
     oq3_source = qasm3.dumps(
         circuit,

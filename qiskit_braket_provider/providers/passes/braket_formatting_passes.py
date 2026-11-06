@@ -1,7 +1,7 @@
 """Transpiler passes and string post-processing helpers for Braket-compatible OQ3 emission."""
 
 import re
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from math import pi
 
 import numpy as np
@@ -32,6 +32,7 @@ from qiskit_braket_provider.providers.gate_mappings import (
     _PRAGMA_PLACEHOLDER,
     _QISKIT_TO_BRAKET_SHIM,
     _SHIM_CLASSES,
+    BraketUGate,
 )
 
 _QUBIT_DECL_RE = re.compile(r"^qubit\[(\d+)\]\s+(\w+);\n?", re.MULTILINE)
@@ -44,6 +45,13 @@ _LOOSE_QUBIT_DECL_RE = re.compile(r"^qubit\s+_qubit\d+;\n?", re.MULTILINE)
 _LOOSE_QUBIT_RE = re.compile(r"\b_qubit(\d+)\b")
 
 _IONQ_GATES = (ionq_gates.GPIGate, ionq_gates.GPI2Gate, ionq_gates.MSGate, ionq_gates.ZZGate)
+
+# Braket's OpenQASM has no u1, u2 or u3; each is U with these (theta, phi, lambda).
+_U_GATE_PARAMS: dict[str, Callable[..., tuple]] = {
+    "u1": lambda lam: (0.0, 0.0, lam),
+    "u2": lambda phi, lam: (pi / 2, phi, lam),
+    "u3": lambda theta, phi, lam: (theta, phi, lam),
+}
 
 
 class ConsolidateClbits(TransformationPass):
@@ -160,8 +168,11 @@ class RenameGates(TransformationPass):
 def _braket_op(op: Instruction) -> Instruction | None:
     """Return ``op`` as Braket's OpenQASM expects it, or ``None`` if it needs no change.
 
-    qiskit-ionq gates take angles in turns, while Braket's IonQ gates take radians.
+    qiskit-ionq gates take angles in turns, while Braket's IonQ gates take radians. u1, u2
+    and u3 become Braket's ``U``, as ``to_braket`` converts them.
     """
+    if op.name in _U_GATE_PARAMS:
+        return BraketUGate(*_U_GATE_PARAMS[op.name](*op.params), label=op.label)
     if isinstance(op, _IONQ_GATES):
         params = [2 * pi * param for param in op.params]
         return Gate(op.name, op.num_qubits, params, label=op.label)

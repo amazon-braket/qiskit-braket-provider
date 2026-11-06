@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.28.0 (2026-11-06)
+
+### Features
+
+ * run via oq3
+
+### Bug Fixes and Other Changes
+
+ * Require numpy 1.23.2, the first release with Python 3.11 wheels
+
 ## v0.27.4 (2026-11-02)
 
 ### Bug Fixes and Other Changes

@@ -339,11 +339,6 @@ _QISKIT_TO_OQ3_NAMES: dict[str, str] = {
     _QISKIT_GLOBAL_PHASE: _GPHASE_PLACEHOLDER,
 }
 
-"""Reverse of :data:`_QISKIT_TO_OQ3_NAMES`, to report gates by the names users wrote."""
-_OQ3_TO_QISKIT_NAMES: dict[str, str] = {
-    oq3_name: qiskit_name for qiskit_name, oq3_name in _QISKIT_TO_OQ3_NAMES.items()
-}
-
 
 def _reverse_endianness(matrix: np.ndarray) -> np.ndarray:
     """Reverse qubit endianness of a matrix (Braket big-endian ↔ Qiskit little-endian).
