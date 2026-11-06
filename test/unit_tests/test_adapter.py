@@ -2291,3 +2291,21 @@ def test_to_qiskit_openqasm_ionq_gates(qasm: str, expected_turns: list[float]):
     assert np.allclose(
         Operator(circuit).reverse_qargs().to_matrix(), Circuit.from_ir(qasm).to_unitary()
     )
+
+
+@pytest.mark.parametrize(
+    ("qasm", "lowercase_qasm"),
+    [
+        ("PRx(0.1, 0.2) $0;", "prx(0.1, 0.2) $0;"),
+        ("RZ(0.3) $0;", "rz(0.3) $0;"),
+        ("ZZ(0.4) $0, $1;", "zz(0.4) $0, $1;"),
+        ("gate g q { Rz(0.3) q; } g $0;", "rz(0.3) $0;"),
+        ("gate RZ(t) q { x q; } RZ(0.3) $0;", "x $0;"),
+    ],
+    ids=["prx", "rz", "zz", "in_user_gate", "user_gate_shadows_builtin"],
+)
+def test_to_qiskit_openqasm_gate_name_case(qasm: str, lowercase_qasm: str):
+    """Builtin gates match in any case, as some devices list native gates as PRx, Rz, ZZ."""
+    assert to_qiskit(qasm, add_measurements=False) == to_qiskit(
+        lowercase_qasm, add_measurements=False
+    )
