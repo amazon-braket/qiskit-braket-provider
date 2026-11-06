@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
 from qiskit import QuantumCircuit
-from qiskit.circuit import Parameter
+from qiskit.circuit import Parameter, ParameterVector
 from qiskit.primitives import BackendEstimatorV2, BasePrimitiveJob
 from qiskit.primitives.containers.bindings_array import BindingsArray
 from qiskit.primitives.containers.estimator_pub import EstimatorPub, EstimatorPubLike
@@ -538,3 +538,18 @@ class TestBraketEstimator(TestCase):
 
         evs = BraketEstimator._translate_result(task_result, metadata)[0].data.evs
         np.testing.assert_allclose(evs, [0.0, 0.5, -0.5, 0.5])
+
+
+def test_estimator_run_binds_parameter_vector_elements():
+    """Values for ParameterVector elements reach the right gates."""
+    phi = ParameterVector("phi", 2)
+    circuit = QuantumCircuit(2)
+    circuit.ry(phi[0], 0)
+    circuit.ry(phi[1], 1)
+    observable = SparsePauliOp("ZI")
+
+    result = BraketEstimator(BraketLocalBackend()).run([
+        (circuit, observable, [[0, np.pi], [np.pi, 0]])
+    ])
+
+    assert np.allclose(result.result()[0].data.evs, [-1, 1])

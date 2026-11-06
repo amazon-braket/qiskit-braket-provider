@@ -13,14 +13,26 @@ from qiskit.circuit import (
     ClassicalRegister,
     Clbit,
     IfElseOp,
+    Instruction,
     Measure,
     Parameter,
     Qubit,
 )
 from qiskit.circuit import Gate as QiskitGate
-from qiskit.circuit.library import C3SXGate, CXGate, GlobalPhaseGate, HGate, XGate
-from qiskit.quantum_info import Operator, Statevector
-from qiskit.transpiler import Target
+from qiskit.circuit.library import (
+    C3SXGate,
+    CXGate,
+    GlobalPhaseGate,
+    HGate,
+    U1Gate,
+    U2Gate,
+    U3Gate,
+    UnitaryGate,
+    XGate,
+)
+from qiskit.quantum_info import Kraus, Operator, Statevector
+from qiskit.transpiler import PassManager, Target
+from qiskit.transpiler.passes import RemoveBarriers
 from qiskit_ionq import ionq_gates
 
 import qiskit_braket_provider
@@ -33,6 +45,7 @@ from braket.circuits.serialization import (
 from braket.devices import LocalSimulator
 from braket.ir.openqasm import Program
 from qiskit_braket_provider.providers.adapter import (
+    _compile_to_oq3,
     _fold_global_phase_gates,
     _has_control_flow,
     compile_to_oq3,
@@ -42,7 +55,11 @@ from qiskit_braket_provider.providers.adapter import (
 )
 from qiskit_braket_provider.providers.gate_mappings import _BRAKET_VERBATIM_BOX_NAME
 from qiskit_braket_provider.providers.passes import RenameGates
-from qiskit_braket_provider.providers.target import aws_device_to_target, native_gate_set
+from qiskit_braket_provider.providers.target import (
+    aws_device_to_target,
+    native_angle_restrictions,
+    native_gate_set,
+)
 
 from .mocks import mock_calibrated_rigetti_device, mock_iqm_device
 
@@ -72,6 +89,56 @@ def _bell_circuit() -> QuantumCircuit:
     qc.h(0)
     qc.cx(0, 1)
     qc.measure([0, 1], [0, 1])
+    return qc
+
+
+def _unitary_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit(2, 2)
+    qc.append(UnitaryGate(np.kron(np.eye(2), [[0, 1], [1, 0]])), [0, 1])
+    qc.measure([0, 1], [0, 1])
+    return qc
+
+
+def _kraus_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit(1, 1)
+    qc.h(0)
+    qc.append(Kraus([np.sqrt(0.9) * np.eye(2), np.sqrt(0.1) * np.array([[0, 1], [1, 0]])]), [0])
+    qc.measure(0, 0)
+    return qc
+
+
+def _u1_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit(1, 1)
+    qc.h(0)
+    qc.append(U1Gate(0.3), [0])
+    qc.measure(0, 0)
+    return qc
+
+
+def _barrier_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit(2, 2)
+    qc.h(0)
+    qc.barrier()
+    qc.cx(0, 1)
+    qc.measure([0, 1], [0, 1])
+    return qc
+
+
+def _barrier_in_if_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit(1, 1)
+    qc.measure(0, 0)
+    with qc.if_test((qc.clbits[0], 1)):
+        qc.h(0)
+        qc.barrier()
+        qc.h(0)
+    return qc
+
+
+def _in_if_circuit(operation: Instruction | Kraus) -> QuantumCircuit:
+    qc = QuantumCircuit(1, 1)
+    qc.measure(0, 0)
+    with qc.if_test((qc.clbits[0], 1)):
+        qc.append(operation, [0])
     return qc
 
 
@@ -265,6 +332,14 @@ def _output_circuit(output_names: tuple[str, ...], sizes: tuple[int, ...]) -> Qu
     return qc
 
 
+def _rx_in_if_circuit() -> QuantumCircuit:
+    circuit = QuantumCircuit(2, 1)
+    circuit.measure(0, 0)
+    with circuit.if_test((circuit.clbits[0], 1)):
+        circuit.rx(0.3, 1)
+    return circuit
+
+
 def _bell_circuit_target() -> Target:
     target = Target(num_qubits=2)
     target.add_instruction(HGate(), name="h")
@@ -387,7 +462,7 @@ def test_compile_to_oq3_verbatim_keeps_mid_circuit_measurement_in_box() -> None:
 
     oq3 = compile_to_oq3(qc, verbatim=True)
 
-    assert "box {\nb[0] = measure q[0];\nx q[0];\n}\nb[1] = measure q[0];" in oq3
+    assert "box {\nb[0] = measure $0;\nx $0;\n}\nb[1] = measure $0;" in oq3
 
 
 def test_compile_to_oq3_verbatim_with_device_wider_than_circuit() -> None:
@@ -495,12 +570,6 @@ def test_compile_to_oq3_accepts_oq3_string_input() -> None:
             [],
         ),
         (
-            _bell_circuit,
-            {"target": _bell_circuit_target(), "qubit_labels": [0, 1]},
-            ["OPENQASM 3.0;", "h ", "cnot ", "#pragma braket verbatim", "box {"],
-            [],
-        ),
-        (
             _bell_with_verbatim_boxop,
             {"qubit_labels": [0, 1]},
             ["h ", "cnot "],
@@ -513,7 +582,7 @@ def test_compile_to_oq3_accepts_oq3_string_input() -> None:
             ["q["],
         ),
     ],
-    ids=["verbatim_flag", "target", "existing_verbatim_box", "non_contiguous_labels"],
+    ids=["verbatim_flag", "existing_verbatim_box", "non_contiguous_labels"],
 )
 def test_compile_to_oq3_output(
     circuit_factory: Callable[[], QuantumCircuit],
@@ -546,7 +615,7 @@ def test_compile_to_oq3_output(
         ),
         (
             _bell_circuit,
-            {"verbatim": True, "qubit_labels": [0, 1]},
+            {"verbatim": True},
             (
                 "OPENQASM 3.0;\n"
                 "bit[2] b;\n"
@@ -578,11 +647,8 @@ def test_compile_to_oq3_output(
             (
                 "OPENQASM 3.0;\n"
                 "bit[2] b;\n"
-                "#pragma braket verbatim\n"
-                "box {\n"
                 "h $0;\n"
                 "cnot $0, $1;\n"
-                "}\n"
                 "b[0] = measure $0;\n"
                 "b[1] = measure $1;"
             ),
@@ -648,11 +714,10 @@ def test_compile_to_oq3_no_output_metadata(metadata: dict) -> None:
 
 
 def test_compile_to_oq3_nonstandard_basis_keeps_non_gate_instructions() -> None:
-    """A non-standard basis keeps measure, barrier, reset and delay, as the standard basis does."""
+    """A non-standard basis keeps measure, reset and delay, as the standard basis does."""
     circuit = QuantumCircuit(2, 2)
     circuit.h(0)
     circuit.cx(0, 1)
-    circuit.barrier()
     circuit.reset(0)
     circuit.delay(100, 1)
     circuit.measure([0, 1], [0, 1])
@@ -768,6 +833,104 @@ def test_to_oq3_register_with_loose_qubit_and_labels_raises() -> None:
 
 
 @pytest.mark.parametrize(
+    ("circuit_factory", "compile_kwargs"),
+    [
+        (_bell_circuit, {"verbatim": True, "qubit_labels": (0, 1)}),
+        (_bell_circuit, {"pass_manager": PassManager([RemoveBarriers()]), "qubit_labels": (0, 1)}),
+        (_bell_circuit, {"pass_manager": PassManager(), "target": _bell_circuit_target()}),
+        (_unitary_circuit, {}),
+        (_kraus_circuit, {}),
+        (_u1_circuit, {"braket_device": LocalSimulator(), "verbatim": True}),
+        (_barrier_circuit, {}),
+        (_barrier_circuit, {"basis_gates": ["h", "cx"]}),
+        (_barrier_circuit, {"target": _bell_circuit_target()}),
+        (
+            _barrier_circuit,
+            {
+                "target": aws_device_to_target(mock_calibrated_rigetti_device()),
+                "qubit_labels": (1, 2),
+            },
+        ),
+    ],
+    ids=[
+        "verbatim",
+        "pass_manager",
+        "empty_pass_manager",
+        "unitary",
+        "kraus",
+        "u1_verbatim_on_local_simulator",
+        "barrier_in_target",
+        "barrier_not_in_basis",
+        "target_without_qubits",
+        "target_with_qubits",
+    ],
+)
+def test_compile_to_oq3_matches_to_braket(
+    circuit_factory: Callable[[], QuantumCircuit], compile_kwargs: dict
+) -> None:
+    """The output is the program to_braket would build, including its verbatim box."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        oq3 = compile_to_oq3(circuit_factory(), **compile_kwargs)
+        expected = to_braket(circuit_factory(), **compile_kwargs)
+
+    assert Circuit.from_ir(oq3) == expected
+    # A Braket Circuit doesn't record whether its qubits are physical, so compare the text.
+    assert ("$" in oq3) == ("$" in expected.to_ir(IRType.OPENQASM).source)
+
+
+@pytest.mark.parametrize(
+    ("circuit_factory", "compile_kwargs"),
+    [
+        (_barrier_circuit, {"target": _bell_circuit_target()}),
+        (_barrier_in_if_circuit, {"basis_gates": ["h", "measure", "if_else"]}),
+    ],
+    ids=["top_level", "in_if_block"],
+)
+def test_compile_to_oq3_warns_when_dropping_barriers(
+    circuit_factory: Callable[[], QuantumCircuit], compile_kwargs: dict
+) -> None:
+    """Barriers the target doesn't include are dropped with to_braket's warning."""
+    with pytest.warns(UserWarning, match="Barrier is not included in the current Target"):
+        oq3 = compile_to_oq3(circuit_factory(), **compile_kwargs)
+
+    assert "barrier" not in oq3
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        UnitaryGate(np.eye(2)),
+        Kraus([np.sqrt(0.9) * np.eye(2), np.sqrt(0.1) * np.array([[0, 1], [1, 0]])]),
+    ],
+    ids=["unitary", "kraus"],
+)
+def test_compile_to_oq3_rejects_pragma_op_in_control_flow(operation: Instruction | Kraus) -> None:
+    """Braket only allows pragmas at the top level, so unitary and kraus can't be in blocks."""
+    with pytest.raises(ValueError, match="can't be inside control flow"):
+        compile_to_oq3(_in_if_circuit(operation))
+
+
+def test_compile_to_oq3_keeps_iqm_measurements_in_box() -> None:
+    oq3 = compile_to_oq3(_bell_circuit(), **_iqm_device_kwargs())
+
+    assert isinstance(oq3, str)
+    assert oq3.endswith("b[1] = measure $2;\n}")
+
+
+def test_compile_to_oq3_angle_restrictions_rejects_disallowed_angle_in_if() -> None:
+    """Angle restrictions also apply to gates inside control-flow blocks."""
+    restrictions = native_angle_restrictions(mock_calibrated_rigetti_device().properties)
+
+    with pytest.raises(ValueError, match=r"Angle 0\.3 for rx parameter 0 is not supported"):
+        _compile_to_oq3(
+            _rx_in_if_circuit(),
+            pass_manager=PassManager([RemoveBarriers()]),
+            angle_restrictions=restrictions,
+        )
+
+
+@pytest.mark.parametrize(
     ("gate_name", "add_gate", "expected"),
     [
         ("ch", lambda qc: qc.ch(0, 1), "ctrl @ h q[0], q[1];"),
@@ -784,23 +947,46 @@ def test_to_oq3_register_with_loose_qubit_and_labels_raises() -> None:
             "ctrl(3) @ v q[0], q[1], q[2], q[3];",
         ),
         ("u", lambda qc: qc.u(0.1, 0.2, 0.3, 0), "U(0.1, 0.2, 0.3) q[0];"),
+        ("u1", lambda qc: qc.append(U1Gate(0.3), [0]), "U(0.0, 0.0, 0.3) q[0];"),
+        (
+            "u2",
+            lambda qc: qc.append(U2Gate(0.3, 0.4), [0]),
+            "U(1.5707963267948966, 0.3, 0.4) q[0];",
+        ),
+        ("u3", lambda qc: qc.append(U3Gate(0.2, 0.3, 0.4), [0]), "U(0.2, 0.3, 0.4) q[0];"),
     ],
-    ids=["ch", "cs", "csdg", "csx", "crx", "cry", "crz", "ccz", "c3sx", "u"],
+    ids=["ch", "cs", "csdg", "csx", "crx", "cry", "crz", "ccz", "c3sx", "u", "u1", "u2", "u3"],
 )
+@pytest.mark.parametrize("default_basis", [False, True], ids=["basis", "default_basis"])
 def test_to_oq3_writes_gates_braket_defines(
     sim: LocalSimulator,
     gate_name: str,
     add_gate: Callable[[QuantumCircuit], object],
     expected: str,
+    default_basis: bool,
 ) -> None:
-    """Controlled gates use Braket's ctrl modifier and u is Braket's U, so the program runs."""
+    """Controlled gates use Braket's ctrl modifier and u, u1, u2 and u3 are Braket's U."""
     circuit = QuantumCircuit(4)
     add_gate(circuit)
 
-    oq3 = to_oq3(circuit, basis_gates=[gate_name])
+    oq3 = to_oq3(circuit, basis_gates=None if default_basis else [gate_name])
 
     assert expected in oq3
     sim.run(Program(source=oq3), shots=1).result()
+
+
+@pytest.mark.parametrize(
+    ("gate", "basis_gates"),
+    [(U3Gate(0.2, 0.3, 0.4), ["u1"]), (U1Gate(0.3), ["h"])],
+    ids=["other_u_gate_in_basis", "no_u_gate_in_basis"],
+)
+def test_to_oq3_rejects_u_gate_outside_basis(gate: QiskitGate, basis_gates: list[str]) -> None:
+    """u, u1, u2 and u3 are all written as U, but each needs its own name or u in the basis."""
+    circuit = QuantumCircuit(1)
+    circuit.append(gate, [0])
+
+    with pytest.raises(ValueError, match=rf"Gates \['{gate.name}'\] are not in the basis"):
+        to_oq3(circuit, basis_gates=basis_gates)
 
 
 def test_compile_to_oq3_on_local_simulator_target_matches_to_braket() -> None:

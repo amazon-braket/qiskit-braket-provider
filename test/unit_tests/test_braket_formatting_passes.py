@@ -120,6 +120,12 @@ def _shadow_b_and_b0_circuit() -> QuantumCircuit:
     return qc
 
 
+def _quantum_register_named_b_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit(QuantumRegister(1, "b"), ClassicalRegister(1, "c"))
+    qc.measure(0, 0)
+    return qc
+
+
 def _all_output_registers_circuit() -> QuantumCircuit:
     """Every clbit lives in an output-declared register; ``plain`` is empty."""
     a = ClassicalRegister(1, "a")
@@ -311,6 +317,7 @@ def _dumps_with_passes(circuit: QuantumCircuit, *, basis_gates: list[str], verba
         (_shadow_b_circuit, ["b", "b0"], 2),
         (_shadow_b_and_b0_circuit, ["b", "b0", "b1"], 3),
         (_all_output_registers_circuit, ["a", "b"], 2),
+        (_quantum_register_named_b_circuit, ["b0"], 1),
     ],
     ids=[
         "two_regs",
@@ -321,6 +328,7 @@ def _dumps_with_passes(circuit: QuantumCircuit, *, basis_gates: list[str], verba
         "shadow_b_falls_back_to_b0",
         "shadow_b_and_b0_falls_back_to_b1",
         "no_plain_register_when_all_outputs",
+        "quantum_register_named_b_falls_back_to_b0",
     ],
 )
 def test_consolidate_clbits(

@@ -306,6 +306,13 @@ _QISKIT_GLOBAL_PHASE = "global_phase"
 """
 _GPHASE_PLACEHOLDER = "_braket_gphase"
 
+"""Prefix of the placeholder gate names that stand for Braket's ``unitary`` and ``kraus`` pragmas.
+
+Qiskit's exporter can't write either, so each is exported as ``_braket_pragma<i>`` and
+:func:`_normalize_formatting` rewrites it to the pragma.
+"""
+_PRAGMA_PLACEHOLDER = "_braket_pragma"
+
 """Prefix of the placeholder names that stand for Braket's ``ctrl`` modifier.
 
 Qiskit's exporter only accepts identifiers as gate names, so a controlled gate is
@@ -330,11 +337,6 @@ _QISKIT_TO_OQ3_NAMES: dict[str, str] = {
     **_QISKIT_TO_CONTROL_PLACEHOLDER,
     "u": "U",
     _QISKIT_GLOBAL_PHASE: _GPHASE_PLACEHOLDER,
-}
-
-"""Reverse of :data:`_QISKIT_TO_OQ3_NAMES`, to report gates by the names users wrote."""
-_OQ3_TO_QISKIT_NAMES: dict[str, str] = {
-    oq3_name: qiskit_name for qiskit_name, oq3_name in _QISKIT_TO_OQ3_NAMES.items()
 }
 
 

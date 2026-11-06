@@ -15,6 +15,7 @@ import qiskit.circuit.library as qiskit_gates
 import qiskit.quantum_info as qiskit_qi
 from qiskit import QuantumCircuit, qasm3
 from qiskit.circuit import (
+    CONTROL_FLOW_OP_NAMES,
     BoxOp,
     CircuitInstruction,
     ControlFlowOp,
@@ -27,6 +28,7 @@ from qiskit.circuit import (
 from qiskit.circuit import Instruction as QiskitInstruction
 from qiskit.quantum_info import Pauli, SparsePauliOp
 from qiskit.transpiler import PassManager, Target
+from qiskit.transpiler.passes import RemoveBarriers
 from qiskit_ionq import add_equivalences
 
 from braket import experimental_capabilities as braket_expcaps
@@ -50,18 +52,18 @@ from qiskit_braket_provider.providers.compilation import (
     _default_target,  # ruff:ignore[unused-import]
 )
 from qiskit_braket_provider.providers.gate_mappings import (
+    _ADDITIONAL_U_GATES,
     _BRAKET_SUPPORTED_NOISES,  # ruff:ignore[unused-import]
     _BRAKET_VERBATIM_BOX_NAME,
     _CONTROLLED_GATES_BY_QUBIT_COUNT,  # ruff:ignore[unused-import]
     _EPS,
     _NON_GATE_TARGET_OPS,
-    _OQ3_TO_QISKIT_NAMES,
     _PAULI_MAP,
+    _PRAGMA_PLACEHOLDER,
     _QISKIT_CONTROL_FLOW_OPS,
     _QISKIT_CONTROLLED_GATE_NAMES_TO_BRAKET_GATES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
     _QISKIT_GLOBAL_PHASE,
-    _QISKIT_TO_BRAKET_NAMES,
     _QISKIT_TO_OQ3_NAMES,
     BraketGPhaseGate,
     _reverse_endianness,
@@ -74,6 +76,7 @@ from qiskit_braket_provider.providers.passes import (
 from qiskit_braket_provider.providers.passes.braket_formatting_passes import (
     _normalize_formatting,
     _remap_qubits,
+    _replace_pragma_ops,
 )
 from qiskit_braket_provider.providers.qasm_context import (
     _create_qiskit_gate,
@@ -500,6 +503,21 @@ def _create_free_parameters(operation: QiskitInstruction) -> list[Any]:
     return params
 
 
+def _validate_circuit_angles(
+    circuit: QuantumCircuit,
+    angle_restrictions: Mapping[str, Mapping[int, set[float] | tuple[float, float]]] | None,
+) -> None:
+    """Validate the numeric angles of every gate in ``circuit``, including nested blocks."""
+    if not angle_restrictions:
+        return
+    for instruction in circuit.data:
+        operation = instruction.operation
+        if isinstance(operation, Gate):
+            _validate_angle_restrictions(operation.name, operation.params, angle_restrictions)
+        for block in getattr(operation, "blocks", ()):
+            _validate_circuit_angles(block, angle_restrictions)
+
+
 def _validate_angle_restrictions(
     gate_name: str,
     params: Iterable,
@@ -844,15 +862,29 @@ def to_oq3(
             stacklevel=2,
         )
 
+    if basis_gates is None:
+        basis_gates = _QISKIT_TO_OQ3_NAMES.keys() - {_QISKIT_GLOBAL_PHASE}
+
+    # Kraus isn't a gate, so callers don't list it in basis_gates; to_braket converts it regardless.
+    pragma_ops = {"kraus", "unitary"} if "unitary" in basis_gates else {"kraus"}
+    circuit, pragmas = _replace_pragma_ops(circuit, pragma_ops)
+
+    # Check before RenameGates, while every gate still has its Qiskit name. u1, u2 and u3
+    # are allowed when u is, because RenameGates writes all four as U.
+    placeholders = [f"{_PRAGMA_PLACEHOLDER}{i}" for i in range(len(pragmas))]
+    allowed = {*basis_gates, *placeholders, *(_ADDITIONAL_U_GATES if "u" in basis_gates else ())}
+    if unsupported := sorted(_gate_names(circuit) - allowed - _NON_GATE_TARGET_OPS):
+        raise ValueError(
+            f"Gates {unsupported} are not in the basis gate set and cannot be "
+            "serialized for Braket. Transpile the circuit to the basis gates first."
+        )
+
     pm = PassManager()
     pm.append(ConsolidateClbits())
     if should_wrap_verbatim:
         pm.append(WrapInVerbatimBox(include_measurement=include_measurement_in_verbatim))
     pm.append(RenameGates())
     circuit = pm.run(circuit)
-
-    if basis_gates is None:
-        basis_gates = _QISKIT_TO_BRAKET_NAMES.keys()
 
     # basis_gates arrives as Qiskit names; RenameGates has already substituted
     # shims for renameable gates, so translate to the names the shims carry.
@@ -861,17 +893,11 @@ def to_oq3(
         for g in basis_gates
         if (translated := _QISKIT_TO_OQ3_NAMES.get(g, g)) not in _NON_GATE_TARGET_OPS
     ]
+    basis_gates += placeholders
 
     if writes_global_phase and _is_nonzero_phase(circuit.global_phase):
         circuit.data.insert(0, CircuitInstruction(BraketGPhaseGate(circuit.global_phase)))
         circuit.global_phase = 0
-
-    if unsupported := _gate_names(circuit) - set(basis_gates) - _NON_GATE_TARGET_OPS:
-        unsupported_names = sorted(_OQ3_TO_QISKIT_NAMES.get(name, name) for name in unsupported)
-        raise ValueError(
-            f"Gates {unsupported_names} are not in the basis gate set and cannot be "
-            "serialized for Braket. Transpile the circuit to the basis gates first."
-        )
 
     oq3_source = qasm3.dumps(
         circuit,
@@ -883,7 +909,7 @@ def to_oq3(
 
     output_names = (circuit.metadata or {}).get("braket_output_variables", {})
     oq3_source = _remap_qubits(oq3_source, qubit_labels, physical_qubits)
-    return _normalize_formatting(oq3_source, output_names)
+    return _normalize_formatting(oq3_source, output_names, pragmas)
 
 
 def _is_nonzero_phase(phase: float | ParameterExpression) -> bool:
@@ -897,6 +923,20 @@ def _has_global_phase(circuit: QuantumCircuit) -> bool:
         _has_global_phase(block)
         for instruction in circuit.data
         for block in getattr(instruction.operation, "blocks", ())
+    )
+
+
+def _contains_barrier(circuit: QuantumCircuit) -> bool:
+    """Return whether ``circuit``, or a control-flow block in it, has a barrier."""
+    ops = circuit.count_ops()
+    if "barrier" in ops:
+        return True
+    # Scanning the instructions is slow, so only do it when there are blocks to check.
+    return not CONTROL_FLOW_OP_NAMES.isdisjoint(ops) and any(
+        _contains_barrier(block)
+        for instruction in circuit.data
+        if isinstance(instruction.operation, ControlFlowOp)
+        for block in instruction.operation.blocks
     )
 
 
@@ -952,8 +992,13 @@ def _compile_to_oq3(
     layout_method: str | None = None,
     routing_method: str | None = None,
     seed_transpiler: int | None = None,
+    angle_restrictions: Mapping[str, Mapping[int, set[float] | tuple[float, float]]] | None = None,
 ) -> str | list[str]:
-    """Internal implementation of :func:`compile_to_oq3`. Signature may change."""
+    """Internal implementation of :func:`compile_to_oq3`. Signature may change.
+
+    ``angle_restrictions``, which isn't in the public API, validates numeric gate angles
+    after compilation.
+    """
     qiskit_circuits, single_instance = _get_circuits(circuits, None, add_measurements=True)
 
     result = _compile(
@@ -973,7 +1018,11 @@ def _compile_to_oq3(
         seed_transpiler=seed_transpiler,
     )
 
-    native_path = pass_manager is not None or target is not None or braket_device is not None
+    # Simulator targets list every gate as {None: None}; only QPU targets list them per qubit.
+    target_is_qpu = result.target is not None and any(
+        properties != {None: None} for properties in result.target.values()
+    )
+    native_path = target_is_qpu or bool(pass_manager)
     is_iqm = _is_iqm_target(result.target)
     effective_basis_gates = result.basis_gates
     if effective_basis_gates is None and result.target is not None:
@@ -981,8 +1030,18 @@ def _compile_to_oq3(
         if isinstance(result.target, _SubstitutedTarget):
             effective_basis_gates |= result.target.substituted_gate_names()
 
+    circuits = result.circuits
+    keeps_barriers = result.target is not None and "barrier" in result.target.operation_names
+    if not keeps_barriers and any(_contains_barrier(circ) for circ in circuits):
+        warnings.warn(
+            "Barrier is not included in the current Target and will be ignored.",
+            stacklevel=2,
+        )
+        circuits = PassManager(RemoveBarriers()).run(circuits)
+
     oq3_strings: list[str] = []
-    for circ in result.circuits:
+    for circ in circuits:
+        _validate_circuit_angles(circ, angle_restrictions)
         if verbatim:
             should_wrap = True
         elif not native_path:
@@ -1002,6 +1061,9 @@ def _compile_to_oq3(
         if qubit_labels is None and _physical_qubits(circ) is not None:
             # The device's labels don't apply to circuits on physical qubits.
             circ_qubit_labels = None
+        elif circ_qubit_labels is None and should_wrap:
+            # A verbatim box needs physical qubits; to_braket numbers them from 0.
+            circ_qubit_labels = range(circ.num_qubits)
         if circ_qubit_labels is not None and len(circ_qubit_labels) > circ.num_qubits:
             circ_qubit_labels = circ_qubit_labels[: circ.num_qubits]
 
@@ -1067,10 +1129,10 @@ def compile_to_oq3(  # type: ignore[misc]
         verbatim: If ``True``, wrap the circuit in a verbatim box so neither QBP
             nor the service compiles it further. Honored unconditionally.
 
-            When ``False`` (default) and a compilation target is supplied
-            (``target``, ``braket_device``, or ``pass_manager``), the output is
-            wrapped in a verbatim box. Circuits containing control-flow ops on an
-            IQM target raise instead, because the service must post-process them.
+            When ``False`` (default), the output is wrapped in a verbatim box if the
+            ``target`` or ``braket_device`` lists gates per qubit, as QPU targets do,
+            or a non-empty ``pass_manager`` is given. Circuits containing control-flow
+            ops on an IQM target raise instead, because the service must post-process them.
         basis_gates: Gate names supported by the target device (Qiskit names).
         coupling_map: Qubit connectivity as ``[control, target]`` pairs.
         optimization_level: Transpiler optimization level (0-3). Default: 0.
