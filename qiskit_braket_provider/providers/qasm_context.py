@@ -316,7 +316,9 @@ class _QiskitProgramContext(AbstractProgramContext):
         metadata.setdefault(_OUTPUT_VARIABLES_KEY, {})[name] = var_type
 
     def is_builtin_gate(self, name: str) -> bool:
-        return name in _BRAKET_GATE_NAME_TO_QISKIT_GATE
+        return name in _BRAKET_GATE_NAME_TO_QISKIT_GATE or (
+            not self.is_user_defined_gate(name) and name.lower() in _BRAKET_GATE_NAME_TO_QISKIT_GATE
+        )
 
     def add_phase_instruction(self, target: int | list[int], phase_value: float) -> None:  # ruff:ignore[unused-method-argument]
         self._active_circuit.global_phase += phase_value
@@ -334,7 +336,7 @@ class _QiskitProgramContext(AbstractProgramContext):
             if params is not None
             else []
         )
-        gate: Gate = _create_qiskit_gate(gate_name, params, self._param_map)
+        gate: Gate = _create_qiskit_gate(gate_name.lower(), params, self._param_map)
         gate = gate.power(float(power)) if power != 1 else gate
         if ctrl_modifiers:
             gate = gate.control(
