@@ -10,7 +10,13 @@ import numpy as np
 import pytest
 from botocore import errorfactory
 from networkx import DiGraph, complete_graph
-from qiskit import QuantumCircuit, QuantumRegister, generate_preset_pass_manager, transpile
+from qiskit import (
+    ClassicalRegister,
+    QuantumCircuit,
+    QuantumRegister,
+    generate_preset_pass_manager,
+    transpile,
+)
 from qiskit.circuit import Instruction as QiskitInstruction
 from qiskit.circuit.library import n_local
 from qiskit.circuit.random import random_circuit
@@ -40,6 +46,7 @@ from qiskit_braket_provider import (
     BraketProvider,
     __version__,
     exception,
+    to_qiskit,
 )
 from qiskit_braket_provider.providers.adapter import native_gate_connectivity
 from qiskit_braket_provider.providers.braket_sampler import BraketSampler
@@ -682,6 +689,21 @@ class TestEmulatorBackend(TestCase):
         self.assertEqual(backend.qubit_labels, (1, 2))
         self.assertIn("Emulator for AWS Device", backend.description)
 
+    def test_emulator_backend_rejects_output_registers(self):
+        """Emulators run Braket circuits, which cannot declare OpenQASM outputs."""
+        circuit = QuantumCircuit(QuantumRegister(1, "q"), ClassicalRegister(1, "res"))
+        circuit.measure(0, 0)
+        with self.assertRaisesRegex(ValueError, "not supported on emulators"):
+            self._emulator_backend().run(circuit, shots=10, output_registers=["res"])
+
+    def test_emulator_backend_rejects_outputs_from_to_qiskit(self):
+        """Outputs recorded by to_qiskit are rejected too, without output_registers."""
+        circuit = to_qiskit(
+            "OPENQASM 3.0;\noutput bit[1] res;\nqubit[1] q;\nh q[0];\nres[0] = measure q[0];"
+        )
+        with self.assertRaisesRegex(ValueError, "not supported on emulators"):
+            self._emulator_backend().run(circuit, shots=10)
+
     def test_emulator_backend_program_set_support(self):
         """Tests that program-set support tracks the emulated device."""
         self.assertIsNone(self._emulator_backend()._max_program_set_executables)
@@ -884,3 +906,48 @@ def test_aws_backend_run_on_simulator_submits_unwrapped_program():
         "b[0] = measure q[0];\n"
         "b[1] = measure q[1];"
     )
+
+
+def test_aws_run_output_registers_uses_batch_not_program_set():
+    """Program set results don't report outputs, so output runs are submitted as a batch."""
+    device = Mock()
+    device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
+    device.gate_calibrations = None
+    device.type = "QPU"
+    device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+    device.run_batch.return_value.tasks = [Mock(id="0"), Mock(id="1")]
+    backend = BraketAwsBackend(device=device)
+    backend._max_program_set_executables = 500
+    circuit = QuantumCircuit(QuantumRegister(1, "q"), ClassicalRegister(1, "res"))
+    circuit.h(0)
+    circuit.measure(0, 0)
+
+    backend.run([circuit, circuit], shots=5, output_registers=["res"])
+
+    device.run.assert_not_called()
+    (programs,) = device.run_batch.call_args.args
+    assert device.run_batch.call_args.kwargs == {"shots": 5}
+    assert len(programs) == 2
+    assert all(isinstance(program, Program) for program in programs)
+    assert all("output bit[1] res;" in program.source for program in programs)
+
+
+def test_aws_run_outputs_from_to_qiskit_use_batch_not_program_set():
+    """Outputs recorded by to_qiskit also skip program sets, without output_registers."""
+    device = Mock()
+    device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
+    device.gate_calibrations = None
+    device.type = "QPU"
+    device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+    device.run_batch.return_value.tasks = [Mock(id="0"), Mock(id="1")]
+    backend = BraketAwsBackend(device=device)
+    backend._max_program_set_executables = 500
+    circuit = to_qiskit(
+        "OPENQASM 3.0;\noutput bit[1] res;\nqubit[1] q;\nh q[0];\nres[0] = measure q[0];"
+    )
+
+    backend.run([circuit, circuit], shots=5)
+
+    device.run.assert_not_called()
+    (programs,) = device.run_batch.call_args.args
+    assert all("output bit[1] res;" in program.source for program in programs)
