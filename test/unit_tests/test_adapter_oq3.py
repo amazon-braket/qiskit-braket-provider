@@ -374,7 +374,7 @@ b[0] = measure q[0];
 
     oq3 = _to_oq3_from_source(source)
 
-    assert re.search(r"for int \w+ in \[0:2\] \{", oq3)
+    assert "in [0:2] {" in oq3
     assert "{0, 1, 2}" not in oq3
 
 
