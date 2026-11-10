@@ -70,6 +70,7 @@ from qiskit_braket_provider.providers.gate_mappings import (
 )
 from qiskit_braket_provider.providers.passes import (
     ConsolidateClbits,
+    MarkOutputRegisters,
     RenameGates,
     WrapInVerbatimBox,
 )
@@ -848,20 +849,6 @@ def to_oq3(
             ``output_registers``.
         TypeError: If ``output_registers`` is a single string instead of a sequence.
     """
-    if isinstance(output_registers, str):
-        raise TypeError(
-            f"output_registers must be a sequence of register names, not a string. "
-            f"Use [{output_registers!r}]."
-        )
-    if output_registers:
-        if missing := set(output_registers) - {creg.name for creg in circuit.cregs}:
-            raise ValueError(f"Circuit has no classical register named {sorted(missing)}.")
-        circuit = circuit.copy()
-        outputs = (circuit.metadata or {}).get("braket_output_variables", {})
-        circuit.metadata = {
-            **(circuit.metadata or {}),
-            "braket_output_variables": {**dict.fromkeys(output_registers), **outputs},
-        }
     physical_qubits = _physical_qubits(circuit)
     if qubit_labels is not None and physical_qubits is not None:
         warnings.warn(
@@ -900,6 +887,8 @@ def to_oq3(
         )
 
     pm = PassManager()
+    if output_registers:
+        pm.append(MarkOutputRegisters(output_registers))
     pm.append(ConsolidateClbits())
     if should_wrap_verbatim:
         pm.append(WrapInVerbatimBox(include_measurement=include_measurement_in_verbatim))

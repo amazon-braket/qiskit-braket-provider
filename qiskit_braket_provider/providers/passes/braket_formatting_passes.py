@@ -54,6 +54,46 @@ _U_GATE_PARAMS: dict[str, Callable[..., tuple]] = {
 }
 
 
+class MarkOutputRegisters(TransformationPass):
+    """Mark classical registers as OpenQASM ``output`` variables."""
+
+    def __init__(self, output_registers: Sequence[str]) -> None:
+        """Create the pass.
+
+        Args:
+            output_registers (Sequence[str]): Names of classical registers to mark.
+
+        Raises:
+            TypeError: If ``output_registers`` is a single string instead of a sequence.
+        """
+        super().__init__()
+        if isinstance(output_registers, str):
+            raise TypeError(
+                f"output_registers must be a sequence of register names, not a string. "
+                f"Use [{output_registers!r}]."
+            )
+        self._output_registers = tuple(output_registers)
+
+    def run(self, dag: DAGCircuit) -> DAGCircuit:
+        """Add the output register names to the DAG metadata.
+
+        Raises:
+            ValueError: If the circuit has no classical register with one of the names.
+        """
+        if missing := set(self._output_registers) - set(dag.cregs):
+            raise ValueError(f"Circuit has no classical register named {sorted(missing)}.")
+        metadata = dag.metadata or {}
+        # Assign a new dict: the DAG shares its metadata dict with the input circuit.
+        dag.metadata = {
+            **metadata,
+            _OUTPUT_VARIABLES_KEY: {
+                **dict.fromkeys(self._output_registers),
+                **metadata.get(_OUTPUT_VARIABLES_KEY, {}),
+            },
+        }
+        return dag
+
+
 class ConsolidateClbits(TransformationPass):
     """Expose every plain Clbit under a single ClassicalRegister named ``"b"``.
 
