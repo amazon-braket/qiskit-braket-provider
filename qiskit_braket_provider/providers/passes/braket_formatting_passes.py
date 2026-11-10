@@ -55,10 +55,8 @@ _U_GATE_PARAMS: dict[str, Callable[..., tuple]] = {
 
 
 class MarkOutputRegisters(TransformationPass):
-    """Mark classical registers as OpenQASM ``output`` variables."""
-
     def __init__(self, output_registers: Sequence[str]) -> None:
-        """Create the pass.
+        """Mark classical registers as OpenQASM ``output`` variables.
 
         Args:
             output_registers (Sequence[str]): Names of classical registers to mark.
@@ -83,7 +81,7 @@ class MarkOutputRegisters(TransformationPass):
         if missing := set(self._output_registers) - set(dag.cregs):
             raise ValueError(f"Circuit has no classical register named {sorted(missing)}.")
         metadata = dag.metadata or {}
-        # Assign a new dict: the DAG shares its metadata dict with the input circuit.
+
         dag.metadata = {
             **metadata,
             _OUTPUT_VARIABLES_KEY: {
