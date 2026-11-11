@@ -375,7 +375,7 @@ c[0] = measure q[0];
     for_ops = [instr for instr in qc.data if isinstance(instr.operation, ForLoopOp)]
     assert len(for_ops) == 1
     indexset, _, body = for_ops[0].operation.params
-    assert indexset == (0, 1)
+    assert indexset == range(2)
     assert len(body.data) == 1
     assert body.data[0].operation.name == "h"
 
@@ -396,7 +396,7 @@ for int[8] i in [0:1] {
     for_ops = [instr for instr in qc.data if isinstance(instr.operation, ForLoopOp)]
     assert len(for_ops) == 1
     indexset, _, body = for_ops[0].operation.params
-    assert indexset == (0, 1)
+    assert indexset == range(2)
     assert len(body.data) == 1
     assert body.data[0].operation.name == "h"
 
@@ -493,7 +493,7 @@ for int[8] i in [0:1] {
 
     op = for_ops[0].operation
     indexset, _, body = op.params
-    assert indexset == (0, 1)
+    assert indexset == range(2)
 
     # The body should contain the IfElseOp
     if_else_ops = [instr for instr in body.data if isinstance(instr.operation, IfElseOp)]

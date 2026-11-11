@@ -556,9 +556,14 @@ class _QiskitProgramContext(AbstractProgramContext):
         """
         index = self._evaluate_expression(set_declaration)
         if isinstance(index, RangeDefinition):
-            index_values = [IntegerLiteral(x) for x in convert_range_def_to_range(index)]
+            index_range = convert_range_def_to_range(index)
+            index_values = [IntegerLiteral(x) for x in index_range]
+            # Qiskit's exporter writes a range's end as stop - 1, which is wrong for negative steps,
+            # so we fall back to a tuple of the iterated values when the step is negative.
+            indexset = index_range if index_range.step > 0 else tuple(index_range)
         else:
             index_values = index.values
+            indexset = tuple(iv.value for iv in index_values)
 
         if not index_values:
             return
@@ -602,7 +607,6 @@ class _QiskitProgramContext(AbstractProgramContext):
             yield
         self._circuit_stack.pop()
 
-        indexset = tuple(iv.value for iv in index_values)
         loop_param = self._param_map.get(loop_var) or Parameter(loop_var)
         for_op = ForLoopOp(indexset, loop_param, body)
         self._extend_bits(main, body)
