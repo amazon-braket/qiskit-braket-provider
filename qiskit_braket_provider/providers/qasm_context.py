@@ -547,7 +547,8 @@ class _QiskitProgramContext(AbstractProgramContext):
         if isinstance(index, RangeDefinition):
             index_range = convert_range_def_to_range(index)
             index_values = [IntegerLiteral(x) for x in index_range]
-            # Qiskit's exporter writes a range's end as stop - 1, which is wrong for negative steps.
+            # Qiskit's exporter writes a range's end as stop - 1, which is wrong for negative steps,
+            # so we fall back to a tuple of the iterated values when the step is negative.
             indexset = index_range if index_range.step > 0 else tuple(index_range)
         else:
             index_values = index.values
