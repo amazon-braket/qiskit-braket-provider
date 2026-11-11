@@ -492,6 +492,10 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
             output_registers (Sequence[str]): Names of classical registers to declare as
                 OpenQASM output variables. The result counts then report only these
                 registers. Default: ``()``.
+
+        Raises:
+            ValueError: If several circuits with OpenQASM output variables would run as a
+                program set, whose results cannot report outputs.
         """
 
         if isinstance(run_input, QuantumCircuit):
@@ -531,15 +535,16 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
                 output_registers=output_registers,
             )
         )
-        return (
-            self._run_program_set(programs, shots, **options)
-            if self._max_program_set_executables is not None
-            and shots != 0
-            and len(programs) > 1
-            # Program set results don't report output variables.
-            and not any(_OUTPUT_DECL_RE.search(program.source) for program in programs)
-            else self._run_batch(programs, shots, **options)
-        )
+        if self._max_program_set_executables is None or shots == 0 or len(programs) <= 1:
+            return self._run_batch(programs, shots, **options)
+
+        if any(_OUTPUT_DECL_RE.search(program.source) for program in programs):
+            raise ValueError(
+                "OpenQASM output variables are not supported in program sets, which this "
+                "device uses for multiple circuits. Run the circuits one at a time, "
+                "accepting a separate task for each."
+            )
+        return self._run_program_set(programs, shots, **options)
 
     def _resolve_compilation_args(
         self, native: bool, pass_manager: PassManager

@@ -913,29 +913,49 @@ _OUTPUT_CIRCUIT_CASES = [
 ]
 
 
-@pytest.mark.parametrize(("make_circuit", "run_kwargs"), _OUTPUT_CIRCUIT_CASES)
-def test_aws_run_outputs_use_batch_not_program_set(
-    make_circuit: Callable[[], QuantumCircuit], run_kwargs: dict[str, list[str]]
-) -> None:
-    """Program set results don't report outputs, so output runs are submitted as a batch."""
+def _program_set_backend() -> tuple[BraketAwsBackend, Mock]:
+    """A backend on a mocked QPU that runs multiple circuits as a program set."""
     device = Mock()
     device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
     device.gate_calibrations = None
     device.type = "QPU"
     device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
-    device.run_batch.return_value.tasks = [Mock(id="0"), Mock(id="1")]
+    device.run_batch.return_value.tasks = [Mock(id="0")]
     backend = BraketAwsBackend(device=device)
     backend._max_program_set_executables = 500
+    return backend, device
+
+
+@pytest.mark.parametrize(("make_circuit", "run_kwargs"), _OUTPUT_CIRCUIT_CASES)
+def test_aws_run_outputs_reject_program_set(
+    make_circuit: Callable[[], QuantumCircuit], run_kwargs: dict[str, list[str]]
+) -> None:
+    """Program set results can't report outputs, and a batch fallback would cost more."""
+    backend, device = _program_set_backend()
     circuit = make_circuit()
 
-    backend.run([circuit, circuit], shots=5, **run_kwargs)
+    with pytest.raises(ValueError, match="not supported in program sets"):
+        backend.run([circuit, circuit], shots=5, **run_kwargs)
+
+    device.run.assert_not_called()
+    device.run_batch.assert_not_called()
+
+
+@pytest.mark.parametrize(("make_circuit", "run_kwargs"), _OUTPUT_CIRCUIT_CASES)
+def test_aws_run_single_circuit_with_outputs(
+    make_circuit: Callable[[], QuantumCircuit], run_kwargs: dict[str, list[str]]
+) -> None:
+    """A single circuit never uses a program set, so outputs run as one task."""
+    backend, device = _program_set_backend()
+
+    backend.run(make_circuit(), shots=5, **run_kwargs)
 
     device.run.assert_not_called()
     (programs,) = device.run_batch.call_args.args
     assert device.run_batch.call_args.kwargs == {"shots": 5}
-    assert len(programs) == 2
-    assert all(isinstance(program, Program) for program in programs)
-    assert all("output bit[1] res;" in program.source for program in programs)
+    assert len(programs) == 1
+    assert isinstance(programs[0], Program)
+    assert "output bit[1] res;" in programs[0].source
 
 
 @pytest.mark.parametrize(("make_circuit", "run_kwargs"), _OUTPUT_CIRCUIT_CASES)
