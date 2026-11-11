@@ -906,10 +906,11 @@ def _to_qiskit_output_circuit() -> QuantumCircuit:
     )
 
 
-# Outputs requested with output_registers, and outputs recorded by to_qiskit without it.
+# Outputs requested with output_registers, and outputs recorded by to_qiskit without it,
+# where an empty output_registers matches the default.
 _OUTPUT_CIRCUIT_CASES = [
-    pytest.param(_register_output_circuit, {"output_registers": ["res"]}, id="output_registers"),
-    pytest.param(_to_qiskit_output_circuit, {}, id="to_qiskit"),
+    pytest.param(_register_output_circuit, ["res"], id="output_registers"),
+    pytest.param(_to_qiskit_output_circuit, [], id="to_qiskit"),
 ]
 
 
@@ -926,29 +927,29 @@ def _program_set_backend() -> tuple[BraketAwsBackend, Mock]:
     return backend, device
 
 
-@pytest.mark.parametrize(("make_circuit", "run_kwargs"), _OUTPUT_CIRCUIT_CASES)
+@pytest.mark.parametrize(("make_circuit", "output_registers"), _OUTPUT_CIRCUIT_CASES)
 def test_aws_run_outputs_reject_program_set(
-    make_circuit: Callable[[], QuantumCircuit], run_kwargs: dict[str, list[str]]
+    make_circuit: Callable[[], QuantumCircuit], output_registers: list[str]
 ) -> None:
     """Program set results can't report outputs, and a batch fallback would cost more."""
     backend, device = _program_set_backend()
     circuit = make_circuit()
 
     with pytest.raises(ValueError, match="not supported in program sets"):
-        backend.run([circuit, circuit], shots=5, **run_kwargs)
+        backend.run([circuit, circuit], shots=5, output_registers=output_registers)
 
     device.run.assert_not_called()
     device.run_batch.assert_not_called()
 
 
-@pytest.mark.parametrize(("make_circuit", "run_kwargs"), _OUTPUT_CIRCUIT_CASES)
+@pytest.mark.parametrize(("make_circuit", "output_registers"), _OUTPUT_CIRCUIT_CASES)
 def test_aws_run_single_circuit_with_outputs(
-    make_circuit: Callable[[], QuantumCircuit], run_kwargs: dict[str, list[str]]
+    make_circuit: Callable[[], QuantumCircuit], output_registers: list[str]
 ) -> None:
     """A single circuit never uses a program set, so outputs run as one task."""
     backend, device = _program_set_backend()
 
-    backend.run(make_circuit(), shots=5, **run_kwargs)
+    backend.run(make_circuit(), shots=5, output_registers=output_registers)
 
     device.run.assert_not_called()
     (programs,) = device.run_batch.call_args.args
@@ -958,12 +959,12 @@ def test_aws_run_single_circuit_with_outputs(
     assert "output bit[1] res;" in programs[0].source
 
 
-@pytest.mark.parametrize(("make_circuit", "run_kwargs"), _OUTPUT_CIRCUIT_CASES)
+@pytest.mark.parametrize(("make_circuit", "output_registers"), _OUTPUT_CIRCUIT_CASES)
 def test_emulator_run_rejects_outputs(
-    make_circuit: Callable[[], QuantumCircuit], run_kwargs: dict[str, list[str]]
+    make_circuit: Callable[[], QuantumCircuit], output_registers: list[str]
 ) -> None:
     """Emulators run Braket circuits, which cannot declare OpenQASM outputs."""
     backend = BraketAwsBackend(device=_mock_emulator_device()).emulator()
 
     with pytest.raises(ValueError, match="not supported on emulators"):
-        backend.run(make_circuit(), shots=10, **run_kwargs)
+        backend.run(make_circuit(), shots=10, output_registers=output_registers)

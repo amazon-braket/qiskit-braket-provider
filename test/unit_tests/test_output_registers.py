@@ -108,15 +108,20 @@ def _circuit_with_unwritten_output() -> QuantumCircuit:
 
 
 @pytest.mark.parametrize(
-    ("make_circuit", "output_registers", "creg_sizes", "bitstring"),
+    ("make_circuit", "output_registers", "creg_sizes", "memory_slots", "bitstring"),
     [
         # Qiskit bit order: last register first, "flag[0] res[1]res[0]". aux is not reported.
         pytest.param(
-            _circuit_with_outputs, ["res", "flag"], [["res", 2], ["flag", 1]], "1 01", id="named"
+            _circuit_with_outputs, ["res", "flag"], [["res", 2], ["flag", 1]], 3, "1 01", id="named"
         ),
         # An output bit nothing writes to counts as 0.
         pytest.param(
-            _circuit_with_unwritten_output, ["m", "u"], [["m", 1], ["u", 1]], "0 1", id="unwritten"
+            _circuit_with_unwritten_output,
+            ["m", "u"],
+            [["m", 1], ["u", 1]],
+            2,
+            "0 1",
+            id="unwritten",
         ),
     ],
 )
@@ -124,6 +129,7 @@ def test_backend_run_reports_output_registers(
     make_circuit: Callable[[], QuantumCircuit],
     output_registers: list[str],
     creg_sizes: list[list[str | int]],
+    memory_slots: int,
     bitstring: str,
 ) -> None:
     """The local simulator returns outputs, which become named registers in the Qiskit result."""
@@ -136,7 +142,7 @@ def test_backend_run_reports_output_registers(
 
     assert result.results[0].header == {
         "creg_sizes": creg_sizes,
-        "memory_slots": sum(size for _, size in creg_sizes),
+        "memory_slots": memory_slots,
     }
     assert result.get_counts() == {bitstring: shots}
     assert result.get_memory() == [bitstring] * shots
