@@ -131,7 +131,7 @@ for int[8] i in [0:2] {
     body.x(0)
     body.reset(0)
     expected = QuantumCircuit(1)
-    expected.append(ForLoopOp((0, 1, 2), Parameter("i"), body), expected.qubits)
+    expected.append(ForLoopOp(range(3), Parameter("i"), body), expected.qubits)
     assert qc == expected
 
 
@@ -142,7 +142,7 @@ def test_reset_only_for_loop_body_is_kept():
     body = QuantumCircuit(1)
     body.reset(0)
     expected = QuantumCircuit(1)
-    expected.append(ForLoopOp((0, 1), Parameter("i"), body), expected.qubits)
+    expected.append(ForLoopOp(range(2), Parameter("i"), body), expected.qubits)
     assert qc == expected
 
 
