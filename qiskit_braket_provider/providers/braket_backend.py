@@ -36,6 +36,7 @@ from .adapter import (
     native_gate_set,
 )
 from .braket_quantum_task import BraketQuantumTask
+from .passes.braket_formatting_passes import _OUTPUT_DECL_RE
 
 if TYPE_CHECKING:
     import datetime as dt
@@ -47,7 +48,6 @@ logger = logging.getLogger(__name__)
 
 _TASK_ID_DIVIDER = ";"
 
-_OUTPUT_DECL_RE = re.compile(r"^output\b", re.MULTILINE)
 
 T = TypeVar("T", bound=Device, covariant=True)  # ruff:ignore[type-name-incorrect-variance]
 

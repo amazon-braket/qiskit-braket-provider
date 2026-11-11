@@ -846,7 +846,8 @@ def to_oq3(
             gates would otherwise be serialized as ``gate`` definitions that
             Braket cannot run; transpile the circuit to the basis gates first.
             Also raised if the circuit has no classical register named in
-            ``output_registers``.
+            ``output_registers``, or if an output register's name clashes with an
+            OpenQASM gate or keyword, such as ``z``.
         TypeError: If ``output_registers`` is a single string instead of a sequence.
     """
     physical_qubits = _physical_qubits(circuit)

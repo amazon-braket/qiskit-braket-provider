@@ -105,16 +105,6 @@ def _circuit_with_unwritten_output() -> QuantumCircuit:
     return circuit
 
 
-def _circuit_with_gate_named_output() -> QuantumCircuit:
-    """Output register z shares its name with a gate."""
-    circuit = QuantumCircuit(
-        QuantumRegister(2, "q"), ClassicalRegister(1, "z"), ClassicalRegister(1, "m")
-    )
-    circuit.x(0)
-    circuit.measure([0, 1], [0, 1])
-    return circuit
-
-
 @pytest.mark.parametrize(
     ("make_circuit", "output_registers", "creg_sizes", "bitstring"),
     [
@@ -125,18 +115,6 @@ def _circuit_with_gate_named_output() -> QuantumCircuit:
         # An output bit nothing writes to counts as 0.
         pytest.param(
             _circuit_with_unwritten_output, ["m", "u"], [["m", 1], ["u", 1]], "0 1", id="unwritten"
-        ),
-        pytest.param(
-            _circuit_with_gate_named_output,
-            ["z"],
-            [["z", 1]],
-            "1",
-            id="gate_name",
-            marks=pytest.mark.xfail(
-                raises=ValueError,
-                strict=True,
-                reason="qasm3.dumps renames register z to z_0, so its output keyword is lost",
-            ),
         ),
     ],
 )
@@ -163,18 +141,23 @@ def test_backend_run_reports_output_registers(
 
 
 @pytest.mark.parametrize(
-    ("output_registers", "error", "match"),
+    ("register_name", "output_registers", "error", "match"),
     [
-        pytest.param(["nope"], ValueError, r"no classical register named \['nope'\]", id="unknown"),
+        pytest.param(
+            "res", ["nope"], ValueError, r"no classical register named \['nope'\]", id="unknown"
+        ),
         # A single string would be split into characters.
-        pytest.param("res", TypeError, r"not a string\. Use \['res'\]", id="string"),
+        pytest.param("res", "res", TypeError, r"not a string\. Use \['res'\]", id="string"),
+        # The exporter would rename z to z_0 and drop its output declaration.
+        pytest.param("z", ["z"], ValueError, r"\['z'\] clash with", id="gate_name"),
+        pytest.param("measure", ["measure"], ValueError, r"\['measure'\] clash", id="keyword"),
     ],
 )
 def test_output_registers_invalid_input_raises(
-    output_registers: list[str] | str, error: type[Exception], match: str
+    register_name: str, output_registers: list[str] | str, error: type[Exception], match: str
 ) -> None:
-    """Invalid output_registers raise before anything is serialized."""
-    circuit = QuantumCircuit(QuantumRegister(1, "q"), ClassicalRegister(1, "res"))
+    """Invalid output_registers raise instead of producing a wrong program."""
+    circuit = QuantumCircuit(QuantumRegister(1, "q"), ClassicalRegister(1, register_name))
     circuit.measure(0, 0)
 
     with pytest.raises(error, match=match):

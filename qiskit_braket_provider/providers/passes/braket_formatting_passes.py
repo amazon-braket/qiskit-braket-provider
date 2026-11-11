@@ -43,6 +43,7 @@ _GPHASE_PLACEHOLDER_RE = re.compile(rf"^{_GPHASE_PLACEHOLDER}\((.*)\) ;$")
 _PRAGMA_PLACEHOLDER_RE = re.compile(rf"^{_PRAGMA_PLACEHOLDER}(\d+) (.*);$")
 _LOOSE_QUBIT_DECL_RE = re.compile(r"^qubit\s+_qubit\d+;\n?", re.MULTILINE)
 _LOOSE_QUBIT_RE = re.compile(r"\b_qubit(\d+)\b")
+_OUTPUT_DECL_RE = re.compile(r"^output bit\[\d+\] (\w+);$", re.MULTILINE)
 
 _IONQ_GATES = (ionq_gates.GPIGate, ionq_gates.GPI2Gate, ionq_gates.MSGate, ionq_gates.ZZGate)
 
@@ -418,6 +419,10 @@ def _normalize_formatting(
     - Rewrites the ``gphase`` placeholder, ``_braket_gphase(θ) ;``, as ``gphase(θ);``
     - Rewrites each pragma placeholder, ``_braket_pragma<i>``, as ``pragmas[i]``
     - Removes empty lines
+
+    Raises:
+        ValueError: If a register in ``output_names`` clashes with a gate or keyword
+            name. See :func:`_check_output_declarations`.
     """
     output_set = set(output_names)
     lines: list[str] = []
@@ -430,7 +435,26 @@ def _normalize_formatting(
             lines.append(_BRAKET_VERBATIM_PRAGMA_LINE)
             continue
         lines.append(_restore_output_declaration(line, output_set))
-    return "\n".join(line for line in lines if line != "")
+    source = "\n".join(line for line in lines if line != "")
+    _check_output_declarations(source, output_set)
+    return source
+
+
+def _check_output_declarations(source: str, output_names: set[str]) -> None:
+    """Raise if a register in ``output_names`` lost its ``output`` declaration.
+
+    ``qasm3.dumps`` renames a register whose name clashes with a gate or keyword,
+    for example ``z`` to ``z_0``, so the ``output`` keyword is never restored.
+
+    Raises:
+        ValueError: If a register in ``output_names`` has no output declaration in
+            ``source``.
+    """
+    if renamed := sorted(output_names - set(_OUTPUT_DECL_RE.findall(source))):
+        raise ValueError(
+            f"Output registers {renamed} clash with an OpenQASM gate or keyword name. "
+            "Rename the registers."
+        )
 
 
 def _control_modifier(placeholder: re.Match) -> str:
