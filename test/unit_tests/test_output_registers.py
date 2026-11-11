@@ -1,6 +1,7 @@
 """End-to-end tests for declaring OpenQASM output registers and reading them back."""
 
 import uuid
+from collections.abc import Callable
 
 import pytest
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
@@ -94,49 +95,87 @@ def test_result_from_outputs_bit_order_header_and_unwritten_bits() -> None:
     assert result.get_counts() == {"0 01": 1, "1 10": 2}
 
 
-def test_backend_run_reports_output_registers() -> None:
-    """The local simulator returns outputs, which become named registers in the Qiskit result."""
-    result = (
-        BraketLocalBackend()
-        .run(_circuit_with_outputs(), shots=100, output_registers=["res", "flag"])
-        .result()
-    )
-
-    assert result.results[0].header == {
-        "creg_sizes": [["res", 2], ["flag", 1]],
-        "memory_slots": 3,
-    }
-    # Qiskit bit order: last register first, "flag[0] res[1]res[0]".
-    assert result.get_counts() == {"1 01": 100}
-    assert result.get_memory() == ["1 01"] * 100
-
-
-def test_backend_run_unassigned_output_bit_is_zero() -> None:
-    """The simulator reports None for an output bit nothing writes to, which counts as 0."""
+def _circuit_with_unwritten_output() -> QuantumCircuit:
+    """Output register u is never written, so the simulator reports it as None."""
     circuit = QuantumCircuit(
         QuantumRegister(1, "q"), ClassicalRegister(1, "m"), ClassicalRegister(1, "u")
     )
     circuit.x(0)
-    circuit.measure(0, 0)  # u is never written
-
-    result = BraketLocalBackend().run(circuit, shots=10, output_registers=["m", "u"]).result()
-
-    assert result.get_counts() == {"0 1": 10}
-
-
-def test_output_registers_unknown_register_raises() -> None:
-    """Naming a register the circuit does not have raises."""
-    circuit = QuantumCircuit(QuantumRegister(1, "q"), ClassicalRegister(1, "c"))
     circuit.measure(0, 0)
-
-    with pytest.raises(ValueError, match=r"no classical register named \['nope'\]"):
-        compile_to_oq3(circuit, output_registers=["nope"])
+    return circuit
 
 
-def test_output_registers_string_raises() -> None:
-    """A single string would be split into characters, so it is rejected."""
+def _circuit_with_gate_named_output() -> QuantumCircuit:
+    """Output register z shares its name with a gate."""
+    circuit = QuantumCircuit(
+        QuantumRegister(2, "q"), ClassicalRegister(1, "z"), ClassicalRegister(1, "m")
+    )
+    circuit.x(0)
+    circuit.measure([0, 1], [0, 1])
+    return circuit
+
+
+@pytest.mark.parametrize(
+    ("make_circuit", "output_registers", "creg_sizes", "bitstring"),
+    [
+        # Qiskit bit order: last register first, "flag[0] res[1]res[0]". aux is not reported.
+        pytest.param(
+            _circuit_with_outputs, ["res", "flag"], [["res", 2], ["flag", 1]], "1 01", id="named"
+        ),
+        # An output bit nothing writes to counts as 0.
+        pytest.param(
+            _circuit_with_unwritten_output, ["m", "u"], [["m", 1], ["u", 1]], "0 1", id="unwritten"
+        ),
+        pytest.param(
+            _circuit_with_gate_named_output,
+            ["z"],
+            [["z", 1]],
+            "1",
+            id="gate_name",
+            marks=pytest.mark.xfail(
+                raises=ValueError,
+                strict=True,
+                reason="qasm3.dumps renames register z to z_0, so its output keyword is lost",
+            ),
+        ),
+    ],
+)
+def test_backend_run_reports_output_registers(
+    make_circuit: Callable[[], QuantumCircuit],
+    output_registers: list[str],
+    creg_sizes: list[list[str | int]],
+    bitstring: str,
+) -> None:
+    """The local simulator returns outputs, which become named registers in the Qiskit result."""
+    shots = 10
+    result = (
+        BraketLocalBackend()
+        .run(make_circuit(), shots=shots, output_registers=output_registers)
+        .result()
+    )
+
+    assert result.results[0].header == {
+        "creg_sizes": creg_sizes,
+        "memory_slots": sum(size for _, size in creg_sizes),
+    }
+    assert result.get_counts() == {bitstring: shots}
+    assert result.get_memory() == [bitstring] * shots
+
+
+@pytest.mark.parametrize(
+    ("output_registers", "error", "match"),
+    [
+        pytest.param(["nope"], ValueError, r"no classical register named \['nope'\]", id="unknown"),
+        # A single string would be split into characters.
+        pytest.param("res", TypeError, r"not a string\. Use \['res'\]", id="string"),
+    ],
+)
+def test_output_registers_invalid_input_raises(
+    output_registers: list[str] | str, error: type[Exception], match: str
+) -> None:
+    """Invalid output_registers raise before anything is serialized."""
     circuit = QuantumCircuit(QuantumRegister(1, "q"), ClassicalRegister(1, "res"))
     circuit.measure(0, 0)
 
-    with pytest.raises(TypeError, match=r"not a string\. Use \['res'\]"):
-        compile_to_oq3(circuit, output_registers="res")
+    with pytest.raises(error, match=match):
+        compile_to_oq3(circuit, output_registers=output_registers)

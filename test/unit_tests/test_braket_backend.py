@@ -689,21 +689,6 @@ class TestEmulatorBackend(TestCase):
         self.assertEqual(backend.qubit_labels, (1, 2))
         self.assertIn("Emulator for AWS Device", backend.description)
 
-    def test_emulator_backend_rejects_output_registers(self):
-        """Emulators run Braket circuits, which cannot declare OpenQASM outputs."""
-        circuit = QuantumCircuit(QuantumRegister(1, "q"), ClassicalRegister(1, "res"))
-        circuit.measure(0, 0)
-        with self.assertRaisesRegex(ValueError, "not supported on emulators"):
-            self._emulator_backend().run(circuit, shots=10, output_registers=["res"])
-
-    def test_emulator_backend_rejects_outputs_from_to_qiskit(self):
-        """Outputs recorded by to_qiskit are rejected too, without output_registers."""
-        circuit = to_qiskit(
-            "OPENQASM 3.0;\noutput bit[1] res;\nqubit[1] q;\nh q[0];\nres[0] = measure q[0];"
-        )
-        with self.assertRaisesRegex(ValueError, "not supported on emulators"):
-            self._emulator_backend().run(circuit, shots=10)
-
     def test_emulator_backend_program_set_support(self):
         """Tests that program-set support tracks the emulated device."""
         self.assertIsNone(self._emulator_backend()._max_program_set_executables)
@@ -908,7 +893,30 @@ def test_aws_backend_run_on_simulator_submits_unwrapped_program():
     )
 
 
-def test_aws_run_output_registers_uses_batch_not_program_set():
+def _register_output_circuit() -> QuantumCircuit:
+    circuit = QuantumCircuit(QuantumRegister(1, "q"), ClassicalRegister(1, "res"))
+    circuit.h(0)
+    circuit.measure(0, 0)
+    return circuit
+
+
+def _to_qiskit_output_circuit() -> QuantumCircuit:
+    return to_qiskit(
+        "OPENQASM 3.0;\noutput bit[1] res;\nqubit[1] q;\nh q[0];\nres[0] = measure q[0];"
+    )
+
+
+# Outputs requested with output_registers, and outputs recorded by to_qiskit without it.
+_OUTPUT_CIRCUIT_CASES = [
+    pytest.param(_register_output_circuit, {"output_registers": ["res"]}, id="output_registers"),
+    pytest.param(_to_qiskit_output_circuit, {}, id="to_qiskit"),
+]
+
+
+@pytest.mark.parametrize(("make_circuit", "run_kwargs"), _OUTPUT_CIRCUIT_CASES)
+def test_aws_run_outputs_use_batch_not_program_set(
+    make_circuit: Callable[[], QuantumCircuit], run_kwargs: dict[str, list[str]]
+) -> None:
     """Program set results don't report outputs, so output runs are submitted as a batch."""
     device = Mock()
     device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
@@ -918,11 +926,9 @@ def test_aws_run_output_registers_uses_batch_not_program_set():
     device.run_batch.return_value.tasks = [Mock(id="0"), Mock(id="1")]
     backend = BraketAwsBackend(device=device)
     backend._max_program_set_executables = 500
-    circuit = QuantumCircuit(QuantumRegister(1, "q"), ClassicalRegister(1, "res"))
-    circuit.h(0)
-    circuit.measure(0, 0)
+    circuit = make_circuit()
 
-    backend.run([circuit, circuit], shots=5, output_registers=["res"])
+    backend.run([circuit, circuit], shots=5, **run_kwargs)
 
     device.run.assert_not_called()
     (programs,) = device.run_batch.call_args.args
@@ -932,22 +938,12 @@ def test_aws_run_output_registers_uses_batch_not_program_set():
     assert all("output bit[1] res;" in program.source for program in programs)
 
 
-def test_aws_run_outputs_from_to_qiskit_use_batch_not_program_set():
-    """Outputs recorded by to_qiskit also skip program sets, without output_registers."""
-    device = Mock()
-    device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES
-    device.gate_calibrations = None
-    device.type = "QPU"
-    device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
-    device.run_batch.return_value.tasks = [Mock(id="0"), Mock(id="1")]
-    backend = BraketAwsBackend(device=device)
-    backend._max_program_set_executables = 500
-    circuit = to_qiskit(
-        "OPENQASM 3.0;\noutput bit[1] res;\nqubit[1] q;\nh q[0];\nres[0] = measure q[0];"
-    )
+@pytest.mark.parametrize(("make_circuit", "run_kwargs"), _OUTPUT_CIRCUIT_CASES)
+def test_emulator_run_rejects_outputs(
+    make_circuit: Callable[[], QuantumCircuit], run_kwargs: dict[str, list[str]]
+) -> None:
+    """Emulators run Braket circuits, which cannot declare OpenQASM outputs."""
+    backend = BraketAwsBackend(device=_mock_emulator_device()).emulator()
 
-    backend.run([circuit, circuit], shots=5)
-
-    device.run.assert_not_called()
-    (programs,) = device.run_batch.call_args.args
-    assert all("output bit[1] res;" in program.source for program in programs)
+    with pytest.raises(ValueError, match="not supported on emulators"):
+        backend.run(make_circuit(), shots=10, **run_kwargs)
