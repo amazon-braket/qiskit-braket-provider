@@ -364,18 +364,25 @@ def test_to_oq3_auto_basis_gates() -> None:
     _assert_contents(oq3, ["h ", "cnot "], ["gate "])
 
 
-def test_to_oq3_roundtrip_preserves_for_loop_range() -> None:
-    source = """OPENQASM 3.0;
+@pytest.mark.parametrize(
+    ("loop_range", "expected", "unexpected"),
+    [
+        ("[0:2]", "in [0:2] {", "{0, 1, 2}"),
+        ("[3:-1:0]", "in {3, 2, 1, 0} {", "[3:-1:"),
+    ],
+)
+def test_to_oq3_roundtrip_for_loop_range(loop_range: str, expected: str, unexpected: str) -> None:
+    source = f"""OPENQASM 3.0;
 qubit[1] q;
 bit[1] b;
-for int i in [0:2] { rz(0.5 * i) q[0]; }
+for int i in {loop_range} {{ rz(0.5 * i) q[0]; }}
 b[0] = measure q[0];
 """
 
     oq3 = _to_oq3_from_source(source)
 
-    assert "in [0:2] {" in oq3
-    assert "{0, 1, 2}" not in oq3
+    assert expected in oq3
+    assert unexpected not in oq3
 
 
 @pytest.mark.parametrize(
