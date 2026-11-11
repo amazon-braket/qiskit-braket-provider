@@ -387,9 +387,6 @@ class _QiskitProgramContext(AbstractProgramContext):
     def add_reset(self, target: list[int]) -> None:
         """Reset each target qubit to the |0⟩ state.
 
-        Overrides the no-op AbstractProgramContext.add_reset(), which silently
-        dropped OpenQASM ``reset`` statements.
-
         Args:
             target (list[int]): The Qiskit indices of the qubits to reset.
         """
