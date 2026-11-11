@@ -72,18 +72,20 @@ def test_compile_to_oq3_merges_existing_outputs_and_keeps_input_metadata() -> No
 def test_result_from_outputs_bit_order_header_and_unwritten_bits() -> None:
     """Braket outputs map to Qiskit counts, memory and header without a simulator."""
     braket_result = GateModelQuantumTaskResult(
-        task_metadata=TaskMetadata(id=str(uuid.uuid4()), deviceId="device", shots=3),
+        task_metadata=TaskMetadata(id=str(uuid.uuid4()), deviceId="device", shots=4),
         additional_metadata=None,
         outputs=[
             {"res": [1, 0], "flag": [None]},  # flag was never written, so it counts as 0
             {"res": [0, 1], "flag": [True]},
             {"res": [0, 1], "flag": [1]},
+            # Same values in a different key order, read in the header's register order.
+            {"flag": [1], "res": [0, 1]},
         ],
     )
     task = LocalQuantumTask(braket_result)
 
     result = BraketQuantumTask(
-        task_id=task.id, tasks=[task], backend=BraketLocalBackend(), shots=3
+        task_id=task.id, tasks=[task], backend=BraketLocalBackend(), shots=4
     ).result()
 
     assert result.results[0].header == {
@@ -91,8 +93,8 @@ def test_result_from_outputs_bit_order_header_and_unwritten_bits() -> None:
         "memory_slots": 3,
     }
     # Qiskit bit order: last register first, and within a register the highest index first.
-    assert result.get_memory() == ["0 01", "1 10", "1 10"]
-    assert result.get_counts() == {"0 01": 1, "1 10": 2}
+    assert result.get_memory() == ["0 01", "1 10", "1 10", "1 10"]
+    assert result.get_counts() == {"0 01": 1, "1 10": 3}
 
 
 def _circuit_with_unwritten_output() -> QuantumCircuit:
