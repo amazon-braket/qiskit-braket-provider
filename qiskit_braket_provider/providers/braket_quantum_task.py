@@ -1,5 +1,7 @@
 """Amazon Braket task."""
 
+from collections import Counter
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from itertools import starmap
 
@@ -52,13 +54,30 @@ def retry_if_result_none(result: object) -> bool:
     return result is None
 
 
+def _outputs_to_hex(shot: dict[str, list[int | bool | None]], names: Sequence[str]) -> str:
+    """Convert one shot of Braket output variables to a Qiskit memory hex string.
+    An unwritten bit is ``None``, which counts as 0.
+    """
+    bitstring = "".join(
+        "1" if bit else "0" for name in reversed(names) for bit in reversed(shot[name])
+    )
+    return hex(int(bitstring, 2))
+
+
 def _result_from_circuit_task(
     task: QuantumTask, result: GateModelQuantumTaskResult
 ) -> ExperimentResult | None:
     if not result:
         return None
 
-    if result.task_metadata.shots == 0:
+    header = None
+    if outputs := result.outputs:
+        creg_sizes = [[name, len(bits)] for name, bits in outputs[0].items()]
+        header = {"creg_sizes": creg_sizes, "memory_slots": sum(size for _, size in creg_sizes)}
+        names = [name for name, _ in creg_sizes]
+        memory = [_outputs_to_hex(shot, names) for shot in outputs]
+        data = ExperimentResultData(counts=dict(Counter(memory)), memory=memory)
+    elif result.task_metadata.shots == 0:
         braket_statevector = result.values[
             result._result_types_indices["{'type': <Type.statevector: 'statevector'>}"]
         ]
@@ -85,6 +104,7 @@ def _result_from_circuit_task(
             task.state() if isinstance(task, LocalQuantumTask) else result.task_metadata.status
         ),
         data=data,
+        header=header,
     )
 
 

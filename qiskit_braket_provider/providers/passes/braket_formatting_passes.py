@@ -43,6 +43,7 @@ _GPHASE_PLACEHOLDER_RE = re.compile(rf"^{_GPHASE_PLACEHOLDER}\((.*)\) ;$")
 _PRAGMA_PLACEHOLDER_RE = re.compile(rf"^{_PRAGMA_PLACEHOLDER}(\d+) (.*);$")
 _LOOSE_QUBIT_DECL_RE = re.compile(r"^qubit\s+_qubit\d+;\n?", re.MULTILINE)
 _LOOSE_QUBIT_RE = re.compile(r"\b_qubit(\d+)\b")
+_OUTPUT_DECL_RE = re.compile(r"^output bit\[\d+\] (\w+);$", re.MULTILINE)
 
 _IONQ_GATES = (ionq_gates.GPIGate, ionq_gates.GPI2Gate, ionq_gates.MSGate, ionq_gates.ZZGate)
 
@@ -52,6 +53,44 @@ _U_GATE_PARAMS: dict[str, Callable[..., tuple]] = {
     "u2": lambda phi, lam: (pi / 2, phi, lam),
     "u3": lambda theta, phi, lam: (theta, phi, lam),
 }
+
+
+class MarkOutputRegisters(TransformationPass):
+    def __init__(self, output_registers: Sequence[str]) -> None:
+        """Mark classical registers as OpenQASM ``output`` variables.
+
+        Args:
+            output_registers (Sequence[str]): Names of classical registers to mark.
+
+        Raises:
+            TypeError: If ``output_registers`` is a single string instead of a sequence.
+        """
+        super().__init__()
+        if isinstance(output_registers, str):
+            raise TypeError(
+                f"output_registers must be a sequence of register names, not a string. "
+                f"Use [{output_registers!r}]."
+            )
+        self._output_registers = tuple(output_registers)
+
+    def run(self, dag: DAGCircuit) -> DAGCircuit:
+        """Add the output register names to the DAG metadata.
+
+        Raises:
+            ValueError: If the circuit has no classical register with one of the names.
+        """
+        if missing := set(self._output_registers) - set(dag.cregs):
+            raise ValueError(f"Circuit has no classical register named {sorted(missing)}.")
+        metadata = dag.metadata or {}
+
+        dag.metadata = {
+            **metadata,
+            _OUTPUT_VARIABLES_KEY: {
+                **dict.fromkeys(self._output_registers),
+                **metadata.get(_OUTPUT_VARIABLES_KEY, {}),
+            },
+        }
+        return dag
 
 
 class ConsolidateClbits(TransformationPass):
@@ -380,6 +419,10 @@ def _normalize_formatting(
     - Rewrites the ``gphase`` placeholder, ``_braket_gphase(θ) ;``, as ``gphase(θ);``
     - Rewrites each pragma placeholder, ``_braket_pragma<i>``, as ``pragmas[i]``
     - Removes empty lines
+
+    Raises:
+        ValueError: If a register in ``output_names`` clashes with a gate or keyword
+            name. See :func:`_check_output_declarations`.
     """
     output_set = set(output_names)
     lines: list[str] = []
@@ -392,7 +435,26 @@ def _normalize_formatting(
             lines.append(_BRAKET_VERBATIM_PRAGMA_LINE)
             continue
         lines.append(_restore_output_declaration(line, output_set))
-    return "\n".join(line for line in lines if line != "")
+    source = "\n".join(line for line in lines if line != "")
+    _check_output_declarations(source, output_set)
+    return source
+
+
+def _check_output_declarations(source: str, output_names: set[str]) -> None:
+    """Raise if a register in ``output_names`` lost its ``output`` declaration.
+
+    ``qasm3.dumps`` renames a register whose name clashes with a gate or keyword,
+    for example ``z`` to ``z_0``, so the ``output`` keyword is never restored.
+
+    Raises:
+        ValueError: If a register in ``output_names`` has no output declaration in
+            ``source``.
+    """
+    if renamed := sorted(output_names - set(_OUTPUT_DECL_RE.findall(source))):
+        raise ValueError(
+            f"Output registers {renamed} clash with an OpenQASM gate or keyword name. "
+            "Rename the registers."
+        )
 
 
 def _control_modifier(placeholder: re.Match) -> str:

@@ -70,6 +70,7 @@ from qiskit_braket_provider.providers.gate_mappings import (
 )
 from qiskit_braket_provider.providers.passes import (
     ConsolidateClbits,
+    MarkOutputRegisters,
     RenameGates,
     WrapInVerbatimBox,
 )
@@ -812,6 +813,7 @@ def to_oq3(
     qubit_labels: Sequence[int] | None = None,
     should_wrap_verbatim: bool = False,
     include_measurement_in_verbatim: bool = False,
+    output_registers: Sequence[str] = (),
 ) -> str:
     """Convert a compiled Qiskit QuantumCircuit to a Braket-compatible OpenQASM 3 string.
 
@@ -833,6 +835,8 @@ def to_oq3(
         include_measurement_in_verbatim: Whether trailing measurements go inside the
             verbatim box rather than after it. Only used when ``should_wrap_verbatim``
             is ``True``. Default: ``False``.
+        output_registers: Names of classical registers to declare as OpenQASM
+            output variables. Default: ``()``.
 
     Returns:
         An OpenQASM 3 string compatible with Amazon Braket.
@@ -841,6 +845,10 @@ def to_oq3(
         ValueError: If the circuit contains gates outside ``basis_gates``. Such
             gates would otherwise be serialized as ``gate`` definitions that
             Braket cannot run; transpile the circuit to the basis gates first.
+            Also raised if the circuit has no classical register named in
+            ``output_registers``, or if an output register's name clashes with an
+            OpenQASM gate or keyword, such as ``z``.
+        TypeError: If ``output_registers`` is a single string instead of a sequence.
     """
     physical_qubits = _physical_qubits(circuit)
     if qubit_labels is not None and physical_qubits is not None:
@@ -880,6 +888,8 @@ def to_oq3(
         )
 
     pm = PassManager()
+    if output_registers:
+        pm.append(MarkOutputRegisters(output_registers))
     pm.append(ConsolidateClbits())
     if should_wrap_verbatim:
         pm.append(WrapInVerbatimBox(include_measurement=include_measurement_in_verbatim))
@@ -992,6 +1002,7 @@ def _compile_to_oq3(
     layout_method: str | None = None,
     routing_method: str | None = None,
     seed_transpiler: int | None = None,
+    output_registers: Sequence[str] = (),
     angle_restrictions: Mapping[str, Mapping[int, set[float] | tuple[float, float]]] | None = None,
 ) -> str | list[str]:
     """Internal implementation of :func:`compile_to_oq3`. Signature may change.
@@ -1074,6 +1085,7 @@ def _compile_to_oq3(
                 qubit_labels=circ_qubit_labels,
                 should_wrap_verbatim=should_wrap,
                 include_measurement_in_verbatim=is_iqm,
+                output_registers=output_registers,
             )
         )
 
@@ -1110,6 +1122,7 @@ def compile_to_oq3(  # type: ignore[misc]
     layout_method: str | None = None,
     routing_method: str | None = None,
     seed_transpiler: int | None = None,
+    output_registers: Sequence[str] = (),
 ) -> str | list[str]:
     """Compile Qiskit circuits to Braket-compatible OpenQASM 3 strings.
 
@@ -1143,6 +1156,8 @@ def compile_to_oq3(  # type: ignore[misc]
         layout_method: Layout method for the transpiler.
         routing_method: Routing method for the transpiler.
         seed_transpiler: Seed for reproducible transpilation.
+        output_registers: Names of classical registers to declare as OpenQASM
+            output variables. Default: ``()``.
 
     Returns:
         An OpenQASM 3 string (single circuit) or list of strings (multiple circuits).
@@ -1168,4 +1183,5 @@ def compile_to_oq3(  # type: ignore[misc]
         layout_method=layout_method,
         routing_method=routing_method,
         seed_transpiler=seed_transpiler,
+        output_registers=output_registers,
     )
