@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.28.1 (2026-11-12)
+
+### Bug Fixes and Other Changes
+
+ * keep range in for loops
+
 ## v0.28.0 (2026-11-06)
 
 ### Features
