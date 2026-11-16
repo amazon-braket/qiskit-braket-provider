@@ -36,16 +36,18 @@ from .adapter import (
     native_gate_set,
 )
 from .braket_quantum_task import BraketQuantumTask
+from .passes.braket_formatting_passes import _OUTPUT_DECL_RE
 
 if TYPE_CHECKING:
     import datetime as dt
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Sequence
 
     from .braket_provider import BraketProvider
 
 logger = logging.getLogger(__name__)
 
 _TASK_ID_DIVIDER = ";"
+
 
 T = TypeVar("T", bound=Device, covariant=True)  # ruff:ignore[type-name-incorrect-variance]
 
@@ -235,6 +237,7 @@ class BraketLocalBackend(BraketBackend[Device]):
         run_input: QuantumCircuit | list[QuantumCircuit],
         *,
         shots: int = 1024,
+        output_registers: Sequence[str] = (),
         **options,
     ) -> BraketQuantumTask:
         convert_input = [run_input] if isinstance(run_input, QuantumCircuit) else list(run_input)
@@ -244,7 +247,11 @@ class BraketLocalBackend(BraketBackend[Device]):
             target=self._target,
             qubit_labels=self._qubit_labels,
             verbatim=verbatim,
+            output_registers=output_registers,
         )
+
+        if self._is_emulator and any(_OUTPUT_DECL_RE.search(p.source) for p in programs):
+            raise ValueError("OpenQASM output variables are not supported on emulators.")
 
         # Emulators only accept Braket circuits, so they get the programs as circuits.
         specifications: list[Program] | list[Circuit]
@@ -461,6 +468,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         callback: Callable | None = None,
         num_processes: int | None = None,
         pass_manager: PassManager | None = None,
+        output_registers: Sequence[str] = (),
         **options,
     ) -> BraketQuantumTask:
         """Execute ``QuantumCircuit``s on a ``BraketAwsBackend``
@@ -481,6 +489,13 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
             num_processes (int | None): Allow for parallel transpilation. Default: ``None``.
             pass_manager (PassManager | None): User-specified ``PassManager`` for the
                 Qiskit transpiler (creates verbatim circuits). Default: ``None``.
+            output_registers (Sequence[str]): Names of classical registers to declare as
+                OpenQASM output variables. The result counts then report only these
+                registers. Default: ``()``.
+
+        Raises:
+            ValueError: If several circuits with OpenQASM output variables would run as a
+                program set, whose results cannot report outputs.
         """
 
         if isinstance(run_input, QuantumCircuit):
@@ -498,7 +513,11 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         target, basis_gates, qubit_labels = self._resolve_compilation_args(native, pass_manager)
         programs = (
             _compile_programs(
-                circuits, qubit_labels=self._qubit_labels, target=self._target, verbatim=True
+                circuits,
+                qubit_labels=self._qubit_labels,
+                target=self._target,
+                verbatim=True,
+                output_registers=output_registers,
             )
             if verbatim
             else _compile_programs(
@@ -513,13 +532,19 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
                 callback=callback,
                 num_processes=num_processes,
                 pass_manager=pass_manager,
+                output_registers=output_registers,
             )
         )
-        return (
-            self._run_program_set(programs, shots, **options)
-            if self._max_program_set_executables is not None and shots != 0 and len(programs) > 1
-            else self._run_batch(programs, shots, **options)
-        )
+        if self._max_program_set_executables is None or shots == 0 or len(programs) <= 1:
+            return self._run_batch(programs, shots, **options)
+
+        if any(_OUTPUT_DECL_RE.search(program.source) for program in programs):
+            raise ValueError(
+                "OpenQASM output variables are not supported in program sets, which this "
+                "device uses for multiple circuits. Run the circuits one at a time, "
+                "accepting a separate task for each."
+            )
+        return self._run_program_set(programs, shots, **options)
 
     def _resolve_compilation_args(
         self, native: bool, pass_manager: PassManager
