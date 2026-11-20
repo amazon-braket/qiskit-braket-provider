@@ -18,7 +18,9 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     keywords="qiskit braket sdk quantum",
-    packages=setuptools.find_packages(),
+    packages=setuptools.find_packages(
+        include=["qiskit_braket_provider", "qiskit_braket_provider.*"]
+    ),
     install_requires=install_requires,
     extras_require={"test": test_requires},
     python_requires=">=3.11",
