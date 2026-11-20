@@ -384,6 +384,17 @@ class _QiskitProgramContext(AbstractProgramContext):
             )
             active.measure(qubit, offset + local_index)
 
+    def add_reset(self, target: list[int]) -> None:
+        """Reset each target qubit to the |0⟩ state.
+
+        Args:
+            target (list[int]): The Qiskit indices of the qubits to reset.
+        """
+        self._ensure_qubit_capacity(target)
+        active = self._active_circuit
+        for qubit in target:
+            active.reset(qubit)
+
     def add_barrier(self, target: list[int] | None = None) -> None:
         """Emit a barrier. Bare (empty target) barriers late-bind to cover
         the top-level circuit's qubits."""
