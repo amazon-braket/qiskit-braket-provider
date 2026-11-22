@@ -429,7 +429,7 @@ def test_to_qiskit_measure_inside_verbatim_box():
 
 
 @pytest.mark.parametrize("q_index", [0, 1, 2, 3, 10])
-def test_result_type_with_physical_qubits(q_index):
+def test_result_type_with_physical_qubits(q_index: int):
     qasm = f"""
 OPENQASM 3.0;
 #pragma braket verbatim
