@@ -25,6 +25,7 @@ from qiskit.circuit import (
     Qubit,
     WhileLoopOp,
 )
+from qiskit.circuit import Instruction as QiskitInstruction
 from sympy import Add, Expr, Mul, Pow, Symbol
 
 from braket.default_simulator.openqasm._helpers.arrays import convert_range_def_to_range
@@ -59,6 +60,7 @@ from braket.default_simulator.openqasm.program_context import (
 )
 from braket.ir.jaqcd import AdjointGradient
 from braket.ir.jaqcd.program_v1 import Results
+from braket.parametric import FreeParameterExpression
 from qiskit_braket_provider.providers.braket_annotations import BraketVerbatimBox
 from qiskit_braket_provider.providers.gate_mappings import (
     _BRAKET_GATE_NAME_TO_QISKIT_GATE,
@@ -95,6 +97,27 @@ def _sympy_to_qiskit(
             method_name = _SYMPY_FUNCTION_TO_QISKIT_METHOD[obj.func]
             return getattr(_sympy_to_qiskit(obj.args[0], param_map), method_name)()
     raise TypeError(f"unrecognized parameter type in conversion: {type(expr)}")
+
+
+def _create_qiskit_gate(
+    gate_name: str,
+    gate_params: list[float | FreeParameterExpression],
+    param_map: dict[str, Parameter],
+) -> QiskitInstruction:
+    gate_instance = _BRAKET_GATE_NAME_TO_QISKIT_GATE.get(gate_name)
+    if not gate_instance:
+        raise TypeError(f'Braket gate "{gate_name}" not supported in Qiskit')
+    new_gate_params = []
+    for param_expression, value in zip(gate_instance.params, gate_params, strict=True):
+        # extract the coefficient in the templated gate
+        param = next(iter(param_expression.parameters)).sympify()
+        coeff = float(param_expression.sympify().subs(param, 1))
+        new_gate_params.append(
+            _sympy_to_qiskit(coeff * value.expression, param_map)
+            if isinstance(value, FreeParameterExpression)
+            else coeff * value
+        )
+    return gate_instance.__class__(*new_gate_params)
 
 
 class _LabelMappedQubitTable(QubitTable):
@@ -153,6 +176,7 @@ class _QiskitProgramContext(AbstractProgramContext):
         self._verbatim_box_name = verbatim_box_name
         self._clbit_offset: dict[str, int] = {}
         self._result_types: list[Results] = []
+        self._physical_qubit_labels = physical_qubit_labels
         label_to_qiskit_index: dict[int, int] | None = (
             {label: i for i, label in enumerate(physical_qubit_labels)}
             if physical_qubit_labels
@@ -173,6 +197,11 @@ class _QiskitProgramContext(AbstractProgramContext):
                 "Every verbatim box start marker must have a matching end marker."
             )
         top = self._circuit_stack[0]
+        if top.num_qubits and not top.qregs:
+            # Only $N references create qubits outside a register. Record each qubit's
+            # physical label, so that the OpenQASM output can keep them.
+            labels = self._physical_qubit_labels or range(top.num_qubits)
+            top.metadata["braket_physical_qubits"] = list(labels[: top.num_qubits])
         return self._finalize_scoped_bodies(top)
 
     def add_result(self, result: Results) -> None:
@@ -208,11 +237,16 @@ class _QiskitProgramContext(AbstractProgramContext):
         target.add_bits(source.clbits[target.num_clbits :])
 
     def _ensure_qubit_capacity(self, target: Sequence[int]) -> None:
-        """Grow the active circuit so it can address every index in target."""
+        """Grow the active circuit so it can address every index in target.
+
+        New qubits are added to every circuit on the stack, so that sibling branch
+        bodies built later share the same qubit objects as the parent.
+        """
         active = self._active_circuit
         max_qubits = (max(target) + 1) if target else -1
-        num_missing_qubits = max_qubits - active.num_qubits
-        active.add_bits([Qubit() for _ in range(num_missing_qubits)])
+        new_qubits = [Qubit() for _ in range(max_qubits - active.num_qubits)]
+        for circuit in self._circuit_stack:
+            circuit.add_bits(new_qubits)
         self.num_qubits = max(self.num_qubits, active.num_qubits)
 
     def add_qubits(self, name: str, num_qubits: int | None = 1) -> None:
@@ -295,14 +329,12 @@ class _QiskitProgramContext(AbstractProgramContext):
         ctrl_modifiers: list[int],
         power: int,
     ) -> None:
-        gate: Gate = _BRAKET_GATE_NAME_TO_QISKIT_GATE[gate_name].copy()
         params = (
             [float(param) if isinstance(param, Number) else param for param in params]  # type: ignore[arg-type]
             if params is not None
             else []
         )
-        if params:
-            gate.params = params
+        gate: Gate = _create_qiskit_gate(gate_name, params, self._param_map)
         gate = gate.power(float(power)) if power != 1 else gate
         if ctrl_modifiers:
             gate = gate.control(
@@ -325,34 +357,43 @@ class _QiskitProgramContext(AbstractProgramContext):
         classical_destination: Identifier | IndexedIdentifier | None = None,
     ) -> None:
         if classical_destination is None:
-            self._ensure_qubit_capacity(target)
-            self._add_measure_into_loose_clbits(target)
-            return
+            raise ValueError(
+                "Measurements without a classical destination are not supported. "
+                "Assign the result to a bit, as in 'b[0] = measure q[0];'."
+            )
         name = get_identifier_name(classical_destination)
         if name not in self._clbit_offset:
             raise ValueError(f"Classical bit register {name!r} is not declared")
         self._ensure_qubit_capacity(target)
-        self._add_measure_into_register(target, classical_targets, self._clbit_offset[name])
-
-    def _add_measure_into_loose_clbits(self, target: tuple[int, ...]) -> None:
-        """Measure without a classical destination, synthesizing loose clbits to receive the results."""
-        active = self._active_circuit
-        if active.num_clbits < len(target):
-            active.add_bits([Clbit() for _ in range(len(target) - active.num_clbits)])
-        for idx, qubit in enumerate(target):
-            active.measure(qubit, idx)
+        self._add_measure_into_register(target, classical_targets, name)
 
     def _add_measure_into_register(
         self,
         target: tuple[int, ...],
         classical_targets: Sequence[int] | None,
-        offset: int,
+        name: str,
     ) -> None:
-        """Measure into a declared bit register at the given flat-clbit offset."""
+        """Measure into the declared bit register ``name``, bounds-checking explicit indices."""
         active = self._active_circuit
+        offset = self._clbit_offset[name]
         for idx, qubit in enumerate(target):
-            local_index = classical_targets[idx] if classical_targets else idx
+            local_index = (
+                self.resolve_index(name, IntegerLiteral(classical_targets[idx]))
+                if classical_targets
+                else idx
+            )
             active.measure(qubit, offset + local_index)
+
+    def add_reset(self, target: list[int]) -> None:
+        """Reset each target qubit to the |0⟩ state.
+
+        Args:
+            target (list[int]): The Qiskit indices of the qubits to reset.
+        """
+        self._ensure_qubit_capacity(target)
+        active = self._active_circuit
+        for qubit in target:
+            active.reset(qubit)
 
     def add_barrier(self, target: list[int] | None = None) -> None:
         """Emit a barrier. Bare (empty target) barriers late-bind to cover
@@ -515,9 +556,14 @@ class _QiskitProgramContext(AbstractProgramContext):
         """
         index = self._evaluate_expression(set_declaration)
         if isinstance(index, RangeDefinition):
-            index_values = [IntegerLiteral(x) for x in convert_range_def_to_range(index)]
+            index_range = convert_range_def_to_range(index)
+            index_values = [IntegerLiteral(x) for x in index_range]
+            # Qiskit's exporter writes a range's end as stop - 1, which is wrong for negative steps,
+            # so we fall back to a tuple of the iterated values when the step is negative.
+            indexset = index_range if index_range.step > 0 else tuple(index_range)
         else:
             index_values = index.values
+            indexset = tuple(iv.value for iv in index_values)
 
         if not index_values:
             return
@@ -561,7 +607,6 @@ class _QiskitProgramContext(AbstractProgramContext):
             yield
         self._circuit_stack.pop()
 
-        indexset = tuple(iv.value for iv in index_values)
         loop_param = self._param_map.get(loop_var) or Parameter(loop_var)
         for_op = ForLoopOp(indexset, loop_param, body)
         self._extend_bits(main, body)
@@ -665,7 +710,15 @@ class _QiskitProgramContext(AbstractProgramContext):
         """Resolve an identifier or indexed identifier to a classical bit index."""
         if isinstance(node, IndexExpression):
             name = node.collection.name
-            index = node.index[0].value
+            index = self.resolve_index(name, self._evaluate_expression(node.index[0]))
+            if not isinstance(index, int):
+                # Qiskit can only index a condition with a concrete clbit or a Uint expr over a
+                # ClassicalRegister, and a ForLoopOp parameter cannot appear in a classical expr.
+                raise NotImplementedError(
+                    f"Index into '{name}' in a branching condition does not evaluate to an "
+                    "integer when the circuit is built; symbolic indices in branching "
+                    "conditions are not supported yet."
+                )
         elif isinstance(node, Identifier):
             name = node.name
             var_type = self.get_type(name)

@@ -16,7 +16,6 @@ from qiskit import (
     transpile,
 )
 from qiskit.circuit import Gate as QiskitGate
-from qiskit.circuit import Instruction as QiskitInstruction
 from qiskit.circuit import Measure, Parameter, ParameterVector
 from qiskit.circuit.library import CXGate, GlobalPhaseGate, HGate, PauliEvolutionGate
 from qiskit.circuit.library import standard_gates as qiskit_gates
@@ -42,7 +41,6 @@ from braket.pulse import PulseSequence
 from braket.registers import QubitSet
 from qiskit_braket_provider import exception, to_braket, to_qiskit
 from qiskit_braket_provider.providers.adapter import (
-    _BRAKET_GATE_NAME_TO_QISKIT_GATE,
     _BRAKET_SUPPORTED_NOISES,
     _QISKIT_GATE_NAME_TO_BRAKET_GATE,
     _compile,
@@ -56,6 +54,7 @@ from qiskit_braket_provider.providers.adapter import (
     translate_sparse_pauli_op,
 )
 from qiskit_braket_provider.providers.braket_instructions import CCPRx, MeasureFF
+from qiskit_braket_provider.providers.gate_mappings import _BRAKET_GATE_NAME_TO_QISKIT_GATE
 from test.unit_tests.mocks import (
     MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES,
     MOCK_RIGETTI_STANARDIZED_PROPERTIES,
@@ -112,6 +111,14 @@ def check_to_braket_openqasm_unitary_correct(qasm_program: Program | str) -> boo
     return np.allclose(
         to_braket(qasm_program).to_unitary(), Circuit.from_ir(qasm_program).to_unitary()
     )
+
+
+@pytest.fixture
+def bell_circuit() -> QuantumCircuit:
+    circuit = QuantumCircuit(2)
+    circuit.h(0)
+    circuit.cx(0, 1)
+    return circuit
 
 
 class TestAdapter(TestCase):
@@ -1278,9 +1285,10 @@ class TestAdapter(TestCase):
         qasm_string = """
         input float theta;
         qubit q;
+        bit b;
         gphase(pi / 4);
         rx(theta) q;
-        measure q;
+        b = measure q;
         """
         qasm_program = Program(source=qasm_string, inputs={"theta": 1.0})
         self.assertTrue(check_to_braket_openqasm_unitary_correct(qasm_program))
@@ -1327,22 +1335,6 @@ class TestAdapter(TestCase):
         """
         self.assertTrue(check_to_braket_openqasm_unitary_correct(qasm_string))
 
-    def test_conditional_gate_with_condition_attribute(self):
-        """Tests that operations with condition attribute raise NotImplementedError."""
-        qc = QuantumCircuit(2, 2)
-        qc.h(0)
-        qc.measure(0, 0)
-
-        x_instr = QiskitInstruction("x", 1, 0, [])
-        x_instr.condition = (0, 1)
-        qc.append(x_instr, [1])
-
-        with pytest.raises(
-            NotImplementedError,
-            match=r"Conditional operations are not supported.*Only MeasureFF and CCPRx",
-        ):
-            to_braket(qc)
-
     def test_conditional_gate_with_if_test(self):
         """Tests that if_test conditional operations raise NotImplementedError."""
         qr = QuantumRegister(2, "q")
@@ -1357,7 +1349,7 @@ class TestAdapter(TestCase):
 
         with pytest.raises(
             NotImplementedError,
-            match=r"Conditional operations are not supported.*Only MeasureFF and CCPRx",
+            match=r"cannot represent control flow.*compile_to_oq3",
         ):
             to_braket(qc, verbatim=True)
 
@@ -1375,7 +1367,7 @@ class TestAdapter(TestCase):
 
         with pytest.raises(
             NotImplementedError,
-            match=r"Conditional operations are not supported.*Only MeasureFF and CCPRx",
+            match=r"cannot represent control flow.*compile_to_oq3",
         ):
             to_braket(qc, verbatim=True)
 
@@ -1813,7 +1805,7 @@ rx(sin(theta) + 2.0*phi) q[0];"""
         with (
             self.assertRaises(TypeError),
             patch.dict(
-                "qiskit_braket_provider.providers.adapter._BRAKET_GATE_NAME_TO_QISKIT_GATE",
+                "qiskit_braket_provider.providers.qasm_context._BRAKET_GATE_NAME_TO_QISKIT_GATE",
                 {"cnot": None},
             ),
         ):
@@ -2179,6 +2171,26 @@ class TestThereAndBackAgain(TestCase):
         # Verify the target still works with remaining qubits
         self.assertEqual(target.num_qubits, len(MOCK_RIGETTI_TOPOLOGY_GRAPH.nodes))
 
+    def test_calibrated_edge_missing_from_topology_is_skipped(self):
+        """Tests that a calibrated edge missing from the topology does not change the target."""
+        mock_device = Mock()
+        mock_device.properties = MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES.copy()
+        mock_device.gate_calibrations = None
+        mock_device.type = "QPU"
+        mock_device.topology_graph = MOCK_RIGETTI_TOPOLOGY_GRAPH
+
+        mock_device.properties.standardized = copy.deepcopy(MOCK_RIGETTI_STANARDIZED_PROPERTIES)
+        baseline = aws_device_to_target(mock_device)
+
+        # Qubits 2 and 6 are both in the topology, but not connected to each other
+        stale = copy.deepcopy(MOCK_RIGETTI_STANARDIZED_PROPERTIES)
+        stale.twoQubitProperties["2-6"] = copy.deepcopy(stale.twoQubitProperties["2-5"])
+        mock_device.properties.standardized = stale
+        with self.assertWarnsRegex(UserWarning, "Edge 2-6 not found in topology"):
+            target = aws_device_to_target(mock_device)
+
+        self.assertEqual(set(target["cx"]), set(baseline["cx"]))
+
     def test_empty_circuit_with_barrier(self):
         """Test edge case: empty Qiskit circuit with global barrier raises ValueError."""
         circuit = QuantumCircuit(0)
@@ -2224,3 +2236,58 @@ class TestThereAndBackAgain(TestCase):
         result = target._substitute(transpiled)
         assert result.layout is not None
         assert result.layout == transpiled.layout
+
+
+@pytest.mark.parametrize(
+    ("nonstandard_gates", "coupling_map"),
+    [
+        ({"cphaseshift01"}, None),
+        ({"cphaseshift01"}, [[0, 1], [1, 0]]),
+        ({"unitary", "kraus"}, None),
+    ],
+    ids=["cphaseshift01", "coupling_map", "unitary_kraus"],
+)
+def test_to_braket_nonstandard_basis_gate_matches_standard_basis(
+    bell_circuit: QuantumCircuit, nonstandard_gates: set[str], coupling_map: list[list[int]] | None
+):
+    """A non-standard basis gate name compiles exactly as the standard-only basis does."""
+    standard_basis = {"cz", "rx", "rz"}
+
+    assert to_braket(
+        bell_circuit, basis_gates=standard_basis | nonstandard_gates, coupling_map=coupling_map
+    ) == to_braket(bell_circuit, basis_gates=standard_basis, coupling_map=coupling_map)
+
+
+def test_to_braket_ionq_basis_gate_names_emitted(bell_circuit: QuantumCircuit):
+    """IonQ gate names in basis_gates let the transpiler emit those gates."""
+    braket_circuit = to_braket(bell_circuit, basis_gates={"gpi", "gpi2", "ms"})
+
+    assert {instruction.operator.name for instruction in braket_circuit.instructions} == {
+        "GPi",
+        "GPi2",
+        "MS",
+    }
+
+
+def test_to_braket_unknown_basis_gate_name_raises(bell_circuit: QuantumCircuit):
+    with pytest.raises(ValueError, match="Unknown gate 'not_a_gate' in basis_gates"):
+        to_braket(bell_circuit, basis_gates={"cz", "rx", "rz", "cphaseshift01", "not_a_gate"})
+
+
+@pytest.mark.parametrize(
+    ("qasm", "expected_turns"),
+    [
+        ("qubit q; gpi(pi / 2) q;", [0.25]),
+        ("qubit q; gpi2(pi) q;", [0.5]),
+        ("qubit[2] q; ms(pi / 2, pi, pi / 4) q[0], q[1];", [0.25, 0.5, 0.125]),
+    ],
+    ids=["gpi", "gpi2", "ms"],
+)
+def test_to_qiskit_openqasm_ionq_gates(qasm: str, expected_turns: list[float]):
+    """Braket's IonQ gates take angles in radians, and qiskit-ionq gates take turns."""
+    circuit = to_qiskit(qasm, add_measurements=False)
+
+    assert circuit.data[0].operation.params == pytest.approx(expected_turns)
+    assert np.allclose(
+        Operator(circuit).reverse_qargs().to_matrix(), Circuit.from_ir(qasm).to_unitary()
+    )

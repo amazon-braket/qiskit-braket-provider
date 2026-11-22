@@ -5,11 +5,13 @@ from __future__ import annotations
 import copy
 import enum
 import logging
+import re
 import warnings
 from abc import ABC
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from qiskit import QuantumCircuit
+from qiskit.circuit import Parameter
 from qiskit.providers import BackendV2, Options, QubitProperties
 from qiskit.transpiler import PassManager, Target
 
@@ -19,30 +21,33 @@ from braket.circuits import Circuit
 from braket.device_schema import DeviceActionType
 from braket.devices import Device, LocalSimulator
 from braket.emulation.emulator import Emulator
+from braket.ir.openqasm import Program
 from braket.program_sets import ProgramSet
 from braket.tasks.local_quantum_task import LocalQuantumTask
 
 from .._version import __version__
 from ..exception import QiskitBraketException
 from .adapter import (
+    _compile_to_oq3,
     aws_device_to_target,
     gateset_from_properties,
     local_simulator_to_target,
     native_angle_restrictions,
     native_gate_set,
-    to_braket,
 )
 from .braket_quantum_task import BraketQuantumTask
+from .passes.braket_formatting_passes import _OUTPUT_DECL_RE
 
 if TYPE_CHECKING:
-    import datetime
-    from collections.abc import Callable, Iterable
+    import datetime as dt
+    from collections.abc import Callable, Iterable, Sequence
 
     from .braket_provider import BraketProvider
 
 logger = logging.getLogger(__name__)
 
 _TASK_ID_DIVIDER = ";"
+
 
 T = TypeVar("T", bound=Device, covariant=True)  # ruff:ignore[type-name-incorrect-variance]
 
@@ -54,6 +59,31 @@ def _device_max_program_set_executables(device: Device) -> int | None:
         if DeviceActionType.OPENQASM_PROGRAM_SET in action
         else None
     )
+
+
+_MEASURE_RE = re.compile(r"\bmeasure\b")
+
+
+def _compile_programs(circuits: list[QuantumCircuit], **compile_kwargs) -> list[Program]:
+    """Compile Qiskit circuits to the OpenQASM programs a run endpoint submits."""
+    sources = _compile_to_oq3(circuits, **compile_kwargs)
+    return [Program(source=source) for source in sources]
+
+
+def _with_input_names(circuit: QuantumCircuit) -> tuple[QuantumCircuit, dict[str, str]]:
+    """Rename each parameter to an input name the exporter keeps unchanged."""
+    renamed = {p: Parameter(f"_qbp_in_{i}") for i, p in enumerate(circuit.parameters)}
+    input_names = {p.name: new.name for p, new in renamed.items()}
+    return circuit.assign_parameters(renamed), input_names
+
+
+def _with_state_vector_result(program: Program) -> Program:
+    """Request the state vector, as a run with ``shots=0`` returns it instead of counts."""
+    if _MEASURE_RE.search(program.source):
+        raise ValueError(
+            "A circuit with measurements can't return a state vector, so it can't run with shots=0."
+        )
+    return Program(source=f"{program.source}\n#pragma braket result state_vector")
 
 
 class BraketBackend(BackendV2, ABC, Generic[T]):
@@ -102,11 +132,11 @@ class BraketBackend(BackendV2, ABC, Generic[T]):
 
     def _run_program_set(
         self,
-        braket_circuits: list[Circuit],
+        programs: list[Program],
         shots: int | None,
         **options,
     ) -> BraketQuantumTask:
-        program_set = ProgramSet(braket_circuits, shots_per_executable=shots)
+        program_set = ProgramSet(programs, shots_per_executable=shots)
         task = self._device.run(program_set, **options)
         return BraketQuantumTask(
             task_id=task.id, tasks=task, backend=self, shots=program_set.total_shots
@@ -207,29 +237,39 @@ class BraketLocalBackend(BraketBackend[Device]):
         run_input: QuantumCircuit | list[QuantumCircuit],
         *,
         shots: int = 1024,
+        output_registers: Sequence[str] = (),
         **options,
     ) -> BraketQuantumTask:
         convert_input = [run_input] if isinstance(run_input, QuantumCircuit) else list(run_input)
         verbatim = options.pop("verbatim", False)
-        circuits: list[Circuit] = [
-            to_braket(
-                circ,
-                target=self._target if not verbatim else None,
-                qubit_labels=self._qubit_labels,
-                verbatim=verbatim,
-            )
-            for circ in convert_input
-        ]
+        programs = _compile_programs(
+            convert_input,
+            target=self._target,
+            qubit_labels=self._qubit_labels,
+            verbatim=verbatim,
+            output_registers=output_registers,
+        )
 
-        if shots == 0 and not self._is_emulator:
-            circuits = [x.state_vector() for x in circuits]
+        if self._is_emulator and any(_OUTPUT_DECL_RE.search(p.source) for p in programs):
+            raise ValueError("OpenQASM output variables are not supported on emulators.")
+
+        # Emulators only accept Braket circuits, so they get the programs as circuits.
+        specifications: list[Program] | list[Circuit]
+        if self._is_emulator:
+            specifications = [Circuit.from_ir(program) for program in programs]
+        elif shots == 0:
+            specifications = [_with_state_vector_result(program) for program in programs]
+        else:
+            specifications = programs
         if "meas_level" in options:
             self._validate_meas_level(options["meas_level"])
             del options["meas_level"]
         tasks = []
         try:
-            for circuit in circuits:
-                task: LocalQuantumTask = self._device.run(task_specification=circuit, shots=shots)
+            for specification in specifications:
+                task: LocalQuantumTask = self._device.run(
+                    task_specification=specification, shots=shots
+                )
                 tasks.append(task)
 
         except Exception as ex:
@@ -260,7 +300,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         provider: BraketProvider | None = None,
         name: str | None = None,
         description: str | None = None,
-        online_date: datetime.datetime | None = None,
+        online_date: dt.datetime | None = None,
         backend_version: str | None = None,
         *,
         device: AwsDevice | None = None,
@@ -434,6 +474,7 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
         callback: Callable | None = None,
         num_processes: int | None = None,
         pass_manager: PassManager | None = None,
+        output_registers: Sequence[str] = (),
         **options,
     ) -> BraketQuantumTask:
         """Execute ``QuantumCircuit``s on a ``BraketAwsBackend``
@@ -454,6 +495,13 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
             num_processes (int | None): Allow for parallel transpilation. Default: ``None``.
             pass_manager (PassManager | None): User-specified ``PassManager`` for the
                 Qiskit transpiler (creates verbatim circuits). Default: ``None``.
+            output_registers (Sequence[str]): Names of classical registers to declare as
+                OpenQASM output variables. The result counts then report only these
+                registers. Default: ``()``.
+
+        Raises:
+            ValueError: If several circuits with OpenQASM output variables would run as a
+                program set, whose results cannot report outputs.
         """
 
         if isinstance(run_input, QuantumCircuit):
@@ -469,10 +517,16 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
 
         # Always use target for simulator
         target, basis_gates, qubit_labels = self._resolve_compilation_args(native, pass_manager)
-        braket_circuits = (
-            to_braket(circuits, qubit_labels=self._qubit_labels, verbatim=True)
+        programs = (
+            _compile_programs(
+                circuits,
+                qubit_labels=self._qubit_labels,
+                target=self._target,
+                verbatim=True,
+                output_registers=output_registers,
+            )
             if verbatim
-            else to_braket(
+            else _compile_programs(
                 circuits,
                 qubit_labels=qubit_labels,
                 target=target,
@@ -484,15 +538,19 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
                 callback=callback,
                 num_processes=num_processes,
                 pass_manager=pass_manager,
+                output_registers=output_registers,
             )
         )
-        return (
-            self._run_program_set(braket_circuits, shots, **options)
-            if self._max_program_set_executables is not None
-            and shots != 0
-            and len(braket_circuits) > 1
-            else self._run_batch(braket_circuits, shots, **options)
-        )
+        if self._max_program_set_executables is None or shots == 0 or len(programs) <= 1:
+            return self._run_batch(programs, shots, **options)
+
+        if any(_OUTPUT_DECL_RE.search(program.source) for program in programs):
+            raise ValueError(
+                "OpenQASM output variables are not supported in program sets, which this "
+                "device uses for multiple circuits. Run the circuits one at a time, "
+                "accepting a separate task for each."
+            )
+        return self._run_program_set(programs, shots, **options)
 
     def _resolve_compilation_args(
         self, native: bool, pass_manager: PassManager
@@ -507,11 +565,11 @@ class BraketAwsBackend(BraketBackend[AwsDevice]):
 
     def _run_batch(
         self,
-        braket_circuits: list[Circuit],
+        programs: list[Program],
         shots: int,
         **options,
     ) -> BraketQuantumTask:
-        batch_task = self._device.run_batch(braket_circuits, shots=shots, **options)
+        batch_task = self._device.run_batch(programs, shots=shots, **options)
         tasks: list[AwsQuantumTask] = batch_task.tasks
         task_id = _TASK_ID_DIVIDER.join(task.id for task in tasks)
         return BraketQuantumTask(task_id=task_id, tasks=tasks, backend=self, shots=shots)
@@ -544,7 +602,7 @@ class AWSBraketBackend(BraketAwsBackend):
         provider: BraketProvider | None = None,
         name: str | None = None,
         description: str | None = None,
-        online_date: datetime.datetime | None = None,
+        online_date: dt.datetime | None = None,
         backend_version: str | None = None,
         **fields,
     ) -> None:

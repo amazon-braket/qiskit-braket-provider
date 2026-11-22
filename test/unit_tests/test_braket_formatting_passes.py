@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 import pytest
 from qiskit import QuantumCircuit, qasm3
-from qiskit.circuit import BoxOp, ClassicalRegister, Clbit, IfElseOp, QuantumRegister
+from qiskit.circuit import BoxOp, ClassicalRegister, Clbit, IfElseOp, QuantumRegister, Qubit
 from qiskit.circuit.library import CXGate, GlobalPhaseGate, PhaseGate, RGate, RXXGate
 from qiskit.transpiler import PassManager
 
@@ -20,7 +20,6 @@ from qiskit_braket_provider.providers.gate_mappings import (
 )
 from qiskit_braket_provider.providers.passes import (
     ConsolidateClbits,
-    MoveMeasurementsToEnd,
     RenameGates,
     WrapInVerbatimBox,
 )
@@ -29,6 +28,8 @@ from qiskit_braket_provider.providers.passes.braket_formatting_passes import (
     _remap_qubits,
     _shim_class_for,
 )
+
+_LOOSE_QUBIT_SOURCE = "OPENQASM 3.0;\nbit _bit0;\nqubit _qubit0;\nqubit _qubit1;\nh _qubit1;\n"
 
 
 def _bell_circuit() -> QuantumCircuit:
@@ -119,6 +120,12 @@ def _shadow_b_and_b0_circuit() -> QuantumCircuit:
     return qc
 
 
+def _quantum_register_named_b_circuit() -> QuantumCircuit:
+    qc = QuantumCircuit(QuantumRegister(1, "b"), ClassicalRegister(1, "c"))
+    qc.measure(0, 0)
+    return qc
+
+
 def _all_output_registers_circuit() -> QuantumCircuit:
     """Every clbit lives in an output-declared register; ``plain`` is empty."""
     a = ClassicalRegister(1, "a")
@@ -139,6 +146,15 @@ def _mid_measure_circuit() -> QuantumCircuit:
     qc.measure(0, 0)
     qc.cx(0, 1)
     qc.measure(1, 1)
+    return qc
+
+
+def _measure_then_condition_other_qubit_circuit() -> QuantumCircuit:
+    """A measurement whose clbit, but not qubit, is used by a later op."""
+    qc = QuantumCircuit(2, 1)
+    qc.measure(0, 0)
+    with qc.if_test((qc.clbits[0], 1)):
+        qc.x(1)
     return qc
 
 
@@ -277,7 +293,6 @@ def _dumps_with_passes(circuit: QuantumCircuit, *, basis_gates: list[str], verba
     """Run the passes and dump to OQ3"""
     pm = PassManager()
     pm.append(ConsolidateClbits())
-    pm.append(MoveMeasurementsToEnd())
     if verbatim:
         pm.append(WrapInVerbatimBox())
     pm.append(RenameGates())
@@ -302,6 +317,7 @@ def _dumps_with_passes(circuit: QuantumCircuit, *, basis_gates: list[str], verba
         (_shadow_b_circuit, ["b", "b0"], 2),
         (_shadow_b_and_b0_circuit, ["b", "b0", "b1"], 3),
         (_all_output_registers_circuit, ["a", "b"], 2),
+        (_quantum_register_named_b_circuit, ["b0"], 1),
     ],
     ids=[
         "two_regs",
@@ -312,6 +328,7 @@ def _dumps_with_passes(circuit: QuantumCircuit, *, basis_gates: list[str], verba
         "shadow_b_falls_back_to_b0",
         "shadow_b_and_b0_falls_back_to_b1",
         "no_plain_register_when_all_outputs",
+        "quantum_register_named_b_falls_back_to_b0",
     ],
 )
 def test_consolidate_clbits(
@@ -339,24 +356,7 @@ def test_consolidate_clbits_preserves_if_else_condition(build_circuit: Callable)
 
 
 @pytest.mark.parametrize(
-    "build_circuit,dynamic_circuits_supported,expected_op_order",
-    [
-        (_mid_measure_circuit, False, ["h", "cx", "measure", "measure"]),
-        (_mid_measure_circuit, True, ["h", "measure", "cx", "measure"]),
-        (_bell_circuit, False, ["h", "cx", "measure", "measure"]),
-    ],
-    ids=["reorders_mid_measure", "dynamic_circuits_noop", "already_at_end_noop"],
-)
-def test_move_measurements_to_end(
-    build_circuit: Callable, dynamic_circuits_supported: bool, expected_op_order: list[str]
-) -> None:
-    result = PassManager([MoveMeasurementsToEnd(dynamic_circuits_supported)]).run(build_circuit())
-    assert [instr.operation.name for instr in result.data] == expected_op_order
-
-
-@pytest.mark.parametrize(
-    "build_circuit,dynamic_circuits_supported,expected_inner_ops,expected_trailing_ops,"
-    "expected_metadata",
+    "build_circuit,include_measurement,expected_inner_ops,expected_trailing_ops,expected_metadata",
     [
         (
             _bell_circuit,
@@ -379,23 +379,39 @@ def test_move_measurements_to_end(
             ["measure", "measure"],
             {"braket_output_variables": {"c": None}},
         ),
+        (
+            _mid_measure_circuit,
+            False,
+            ["h", "measure", "cx"],
+            ["measure"],
+            {},
+        ),
+        (
+            _measure_then_condition_other_qubit_circuit,
+            False,
+            ["measure", "if_else"],
+            [],
+            {},
+        ),
     ],
     ids=[
         "measurements_outside_by_default",
-        "everything_inside_when_dynamic",
+        "everything_inside_when_included",
         "preserves_metadata",
+        "mid_circuit_measure_stays_inside",
+        "measure_with_later_clbit_use_stays_inside",
     ],
 )
 def test_wrap_in_verbatim_box(
     build_circuit: Callable,
-    dynamic_circuits_supported: bool,
+    include_measurement: bool,
     expected_inner_ops: list[str],
     expected_trailing_ops: list[str],
     expected_metadata: dict,
 ) -> None:
-    result = PassManager([
-        WrapInVerbatimBox(dynamic_circuits_supported=dynamic_circuits_supported)
-    ]).run(build_circuit())
+    result = PassManager([WrapInVerbatimBox(include_measurement=include_measurement)]).run(
+        build_circuit()
+    )
 
     top_level_boxes = [instr for instr in result.data if isinstance(instr.operation, BoxOp)]
     assert len(top_level_boxes) == 1
@@ -412,9 +428,9 @@ def test_wrap_in_verbatim_box(
     assert result.metadata == expected_metadata
 
 
-def test_wrap_in_verbatim_box_preserves_if_else_body_when_dynamic() -> None:
-    """When dynamic_circuits_supported=True, an IfElseOp is placed inside the verbatim box."""
-    result = PassManager([WrapInVerbatimBox(dynamic_circuits_supported=True)]).run(
+def test_wrap_in_verbatim_box_preserves_if_else_body_when_including_measurement() -> None:
+    """When include_measurement=True, an IfElseOp is placed inside the verbatim box."""
+    result = PassManager([WrapInVerbatimBox(include_measurement=True)]).run(
         _if_else_circuit_for_verbatim()
     )
 
@@ -426,8 +442,8 @@ def test_wrap_in_verbatim_box_preserves_if_else_body_when_dynamic() -> None:
 
 @pytest.mark.parametrize(
     "circuit",
-    [QuantumCircuit(2, 2), QuantumCircuit()],
-    ids=["wires_only", "nothing_at_all"],
+    [QuantumCircuit(2, 2), QuantumCircuit(), QuantumCircuit([Qubit(), Qubit()], [Clbit()])],
+    ids=["wires_only", "nothing_at_all", "bits_without_registers"],
 )
 def test_wrap_in_verbatim_box_empty_circuit(circuit: QuantumCircuit) -> None:
     """An empty circuit yields a single empty verbatim box spanning its wires."""
@@ -533,6 +549,28 @@ def test_rename_gates_preserves_label() -> None:
     assert isinstance(shimmed, _QISKIT_TO_BRAKET_SHIM[CXGate])
     assert isinstance(shimmed, CXGate)  # narrow for type-checker attribute access below
     assert shimmed.label == "my_cx"
+
+
+@pytest.mark.parametrize(
+    ("add_gate", "expected_name"),
+    [
+        (lambda qc: qc.cx(0, 1, ctrl_state=0), "cx_o0"),
+        (lambda qc: qc.ch(0, 1, ctrl_state=0), "ch_o0"),
+        (lambda qc: qc.cp(0.5, 0, 1, ctrl_state=0), "cp_o0"),
+        (lambda qc: qc.ccx(0, 1, 2, ctrl_state=1), "ccx_o1"),
+    ],
+    ids=["cx", "ch", "cp", "ccx"],
+)
+def test_rename_gates_leaves_open_controlled_gates(
+    add_gate: Callable[[QuantumCircuit], object], expected_name: str
+) -> None:
+    """A gate with an open control keeps its name, as no shim writes its control state."""
+    circuit = QuantumCircuit(3)
+    add_gate(circuit)
+
+    result = PassManager([RenameGates()]).run(circuit)
+
+    assert [instr.operation.name for instr in result.data] == [expected_name]
 
 
 def test_shim_class_for_returns_none_for_already_shimmed_op() -> None:
@@ -651,6 +689,23 @@ def test_remap_qubits(
     if expect_unchanged:
         assert result == source
     _assert_contents(result, expected_present, expected_absent)
+
+
+@pytest.mark.parametrize(
+    ("physical_qubits", "qubit_labels", "expected"),
+    [
+        ([0, 1], None, "OPENQASM 3.0;\nbit _bit0;\nh $1;\n"),
+        ([0, 1], [3, 7], "OPENQASM 3.0;\nbit _bit0;\nh $1;\n"),
+        ([4, 9], None, "OPENQASM 3.0;\nbit _bit0;\nh $9;\n"),
+        (None, None, _LOOSE_QUBIT_SOURCE),
+    ],
+    ids=["physical_qubits", "ignores_qubit_labels", "noncontiguous_labels", "not_physical"],
+)
+def test_remap_qubits_physical_qubit_form(
+    physical_qubits: list[int] | None, qubit_labels: list[int] | None, expected: str
+) -> None:
+    """Loose qubits become their physical labels only when physical_qubits is given."""
+    assert _remap_qubits(_LOOSE_QUBIT_SOURCE, qubit_labels, physical_qubits) == expected
 
 
 def test_remap_qubits_raises_on_label_length_mismatch() -> None:

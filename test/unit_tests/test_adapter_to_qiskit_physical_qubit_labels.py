@@ -218,3 +218,21 @@ def test_pragma_targets_legacy_no_labels():
     qc = to_qiskit(Program(source=source))
     pragmas = qc.metadata["braket_result_pragmas"]
     assert pragmas[0].targets == [0]
+
+
+@pytest.mark.parametrize(
+    "op_line, labels, expected",
+    [
+        ("x $2;", None, [0, 1, 2]),
+        ("x $9;", NONCONTIGUOUS_LABELS, list(NONCONTIGUOUS_LABELS[:9])),
+        ("qubit[2] q;\nx q[1];", None, None),
+    ],
+    ids=["physical_qubits", "device_labels", "declared_register"],
+)
+def test_physical_qubit_labels_recorded_in_metadata(
+    op_line: str, labels: tuple[int, ...] | None, expected: list[int] | None
+):
+    """to_qiskit records the physical label of each qubit for programs on physical qubits."""
+    qc = to_qiskit(f"OPENQASM 3.0;\n{op_line}", physical_qubit_labels=labels)
+
+    assert qc.metadata.get("braket_physical_qubits") == expected
