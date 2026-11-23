@@ -13,6 +13,7 @@ from typing import Self, TypeAlias
 from qiskit import QuantumCircuit
 from qiskit.circuit import (
     Barrier,
+    IfElseOp,
     Measure,
     Parameter,
 )
@@ -66,6 +67,9 @@ class _SubstitutedTarget(Target):
     certain gates must be replaced with hardware-specific equivalents on particular qubits
     (e.g. IonQ's GPi/GPi2/MS gate decompositions). The substitutions are applied as a
     post-transpilation pass.
+
+    ``device_arn`` records the ARN of the Braket device the target was built from, or
+    ``None`` if it was not built from a device.
     """
 
     def __new__(cls, *args, **kwargs) -> Self:
@@ -73,6 +77,7 @@ class _SubstitutedTarget(Target):
         gate_substitutes: dict[str, dict[tuple[int, ...], QiskitInstruction]] = {}
         out._gate_substitutes = gate_substitutes
         out._pass_manager = PassManager([_SubstituteGates(gate_substitutes)])
+        out.device_arn = None
         return out
 
     def _substitute(
@@ -85,6 +90,14 @@ class _SubstitutedTarget(Target):
             if original._layout is not None:
                 result._layout = original._layout
         return results[0] if single else results
+
+    def substituted_gate_names(self) -> set[str]:
+        """Return the names of the gates that substitutions replace target gates with."""
+        return {
+            instruction.name
+            for substitutes in self._gate_substitutes.values()
+            for instruction in substitutes.values()
+        }
 
 
 class _SubstituteGates(TransformationPass):
@@ -99,10 +112,9 @@ class _SubstituteGates(TransformationPass):
             return dag
         qubits = {q: i for i, q in enumerate(dag.qubits)}
         for node in dag.op_nodes():
-            if (op_name := node.op.name) in self._gate_substitutes:
-                dag.substitute_node(
-                    node, self._gate_substitutes[op_name][tuple(qubits[q] for q in node.qargs)]
-                )
+            substitutes = self._gate_substitutes.get(node.op.name, {})
+            if substitute := substitutes.get(tuple(qubits[q] for q in node.qargs)):
+                dag.substitute_node(node, substitute)
         return dag
 
 
@@ -270,9 +282,16 @@ def _simulator_target(device: Device, description: str) -> Target:
         for gate in _get_controlled_gateset(target.keys(), max_control):
             if gate in _STANDARD_GATE_NAME_MAPPING:
                 target.add_instruction(_STANDARD_GATE_NAME_MAPPING[gate])
+        _add_if_else(target, action)
     target.add_instruction(Measure())
     target.add_instruction(Barrier(1))
     return target
+
+
+def _add_if_else(target: Target, action: OpenQASMDeviceActionProperties) -> None:
+    """Register IfElseOp if the device advertises OpenQASM ``if`` support."""
+    if "if" in {op.lower() for op in action.supportedOperations}:
+        target.add_instruction(IfElseOp, name="if_else")
 
 
 def _qpu_target(device: AwsDevice, description: str) -> Target:
@@ -321,7 +340,12 @@ def _qpu_target(device: AwsDevice, description: str) -> Target:
                         )
             qubit_properties.append(QubitProperties(t1=props.T1.value, t2=props.T2.value))
         instruction_props_2q.update(
-            _build_instruction_props_2q(standardized, indices, default_instruction_props)
+            _build_instruction_props_2q(
+                standardized,
+                {edge for u, v in topology.edges for edge in ((u, v), (v, u))},
+                indices,
+                default_instruction_props,
+            )
         )
 
     default_props_1q: dict[tuple[int, ...], None] = {(i,): None for i in indices.values()}
@@ -339,6 +363,7 @@ def _qpu_target(device: AwsDevice, description: str) -> Target:
         num_qubits=len(qubit_properties or indices),
         qubit_properties=qubit_properties or None,
     )
+    target.device_arn = device.arn
     if parameter_restrictions:
         _add_instructions_parameter_restrictions(
             target,
@@ -359,6 +384,8 @@ def _qpu_target(device: AwsDevice, description: str) -> Target:
     if "barrier" in properties.paradigm.nativeGateSet:
         target.add_instruction(Barrier(1))
 
+    _add_if_else(target, properties.action[DeviceActionType.OPENQASM])
+
     # Add measurement if not already added
     if "measure" not in target:
         target.add_instruction(Measure(), instruction_props_measurement)
@@ -367,6 +394,7 @@ def _qpu_target(device: AwsDevice, description: str) -> Target:
 
 def _build_instruction_props_2q(
     standardized: StandardizedPropertiesV1 | StandardizedPropertiesV2,
+    topology_edges: set[tuple[int, int]],
     indices: Mapping[int, int],
     default_properties: InstructionProperties,
 ) -> dict[str, dict[tuple[int, ...], InstructionProperties]]:
@@ -381,6 +409,16 @@ def _build_instruction_props_2q(
             warnings.warn(
                 f"Edge {k} contains qubits {missing_qubits} not found in topology. "
                 f"Skipping edge {k} and its associated properties.",
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+        # Standardized properties can be calibrated for an edge the topology no longer has.
+        # qbp ignores the 2q `direction` field and treats edges as bidirectional,
+        # so topology_edges holds both orientations.
+        if tuple(qubits) not in topology_edges:
+            warnings.warn(
+                f"Edge {k} not found in topology. Skipping edge {k} and its associated properties.",
                 UserWarning,
                 stacklevel=2,
             )

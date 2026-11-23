@@ -6,7 +6,6 @@ from qiskit.circuit import Barrier, BoxOp, Parameter
 from qiskit.circuit.library import CXGate, CZGate, HGate, Measure, RXGate, XGate
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.transpiler import InstructionProperties, PassManager, Target
-from qiskit.transpiler.exceptions import TranspilerError
 from qiskit.transpiler.passes import Optimize1qGates
 
 from braket.circuits import Circuit
@@ -781,8 +780,22 @@ def test_verbatim_with_if_else_on_unsupported_backend_raises_clean_error():
     }
     """)
 
-    with pytest.raises(TranspilerError, match="control-flow"):
+    with pytest.raises(NotImplementedError, match="cannot represent control flow"):
         to_braket(qc, target=target)
+
+
+def test_to_braket_rejects_if_else_inside_verbatim_box():
+    """An if_else nested in a verbatim box is rejected like a top-level one."""
+    body = QuantumCircuit(2, 1)
+    body.h(0)
+    body.measure(0, 0)
+    with body.if_test((body.clbits[0], 1)):
+        body.x(1)
+    qc = QuantumCircuit(2, 1)
+    qc.append(BoxOp(body, label=VERBATIM_LABEL), [0, 1], [0])
+
+    with pytest.raises(NotImplementedError, match="cannot represent control flow"):
+        to_braket(qc)
 
 
 def test_verbatim_box_preserves_reversed_qubit_order():

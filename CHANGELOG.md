@@ -1,5 +1,99 @@
 # Changelog
 
+## v0.30.0 (2026-11-23)
+
+### Features
+
+ * Accept an `AwsSession` in `BraketProvider` and `BraketAwsBackend`
+
+### Bug Fixes and Other Changes
+
+ * Keep physical qubits that appear in result types in `to_qiskit`
+ * translate OpenQASM reset in to_qiskit
+
+### Documentation Changes
+
+ * Python 3.14
+
+## v0.29.0 (2026-11-16)
+
+### Features
+
+ * support output registers in to_oq3 and device.run
+
+## v0.28.1 (2026-11-12)
+
+### Bug Fixes and Other Changes
+
+ * keep range in for loops
+
+## v0.28.0 (2026-11-06)
+
+### Features
+
+ * run via oq3
+
+### Bug Fixes and Other Changes
+
+ * Require numpy 1.23.2, the first release with Python 3.11 wheels
+
+## v0.27.4 (2026-11-02)
+
+### Bug Fixes and Other Changes
+
+ * convert IonQ angles to radians in OpenQASM output
+ * compile_to_oq3 writes controlled gates, U and global phase as Braket defines them
+ * Support negative bit indices in branching conditions
+
+## v0.27.3 (2026-10-29)
+
+### Bug Fixes and Other Changes
+
+ * drop calibrated edges missing from device topology
+
+## v0.27.2 (2026-10-27)
+
+### Bug Fixes and Other Changes
+
+ * fix(qasm): Share new physical qubits across if/else branches
+ * fix(qasm): Reject measurements without a classical destination
+
+## v0.27.1 (2026-10-26)
+
+### Bug Fixes and Other Changes
+
+ * scale IonQ angles from OpenQASM input in to_qiskit
+ * Keep physical qubits in OpenQASM output
+
+### Documentation Changes
+
+ * fix typo in docs/tutorials/5_tutorial_transpilation.ipynb.
+
+## v0.27.0 (2026-10-20)
+
+### Features
+
+ * dynamic circuit support
+
+## v0.26.2 (2026-10-19)
+
+### Bug Fixes and Other Changes
+
+ * nonstandard basis gates
+
+## v0.26.1 (2026-10-15)
+
+### Bug Fixes and Other Changes
+
+ * verbatim rigetti native gates
+ * compile to oq3 rigetti rx
+
+## v0.26.0 (2026-10-13)
+
+### Features
+
+ * add compile_to_oq3() public API
+
 ## v0.25.0 (2026-09-10)
 
 ### Features
