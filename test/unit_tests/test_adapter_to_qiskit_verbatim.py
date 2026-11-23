@@ -426,3 +426,31 @@ def test_to_qiskit_measure_inside_verbatim_box():
     measure = body.data[0]
     assert body.find_bit(measure.qubits[0]).index == 1
     assert body.find_bit(measure.clbits[0]).index == 0
+
+
+@pytest.mark.parametrize("q_index", [0, 1, 2, 3, 10])
+def test_result_type_with_physical_qubits(q_index: int):
+    qasm = f"""
+OPENQASM 3.0;
+#pragma braket verbatim
+box{{
+    rx(1.57) $1;
+}}
+#pragma braket result probability ${q_index}
+"""
+    qc = to_qiskit(qasm)
+    assert qc.num_qubits == max(2, q_index + 1)  # 2 comes from RX on $1
+
+
+def test_result_type_virtual_qubits():
+    qasm_template = """
+OPENQASM 3.0;
+qubit[3] q;
+h q[0];
+#pragma braket result probability {arg}
+"""
+    with pytest.raises(IndexError):
+        to_qiskit(qasm_template.format(arg="q[3]"))
+
+    qc = to_qiskit(qasm_template.format(arg="q[1]"))
+    assert qc.num_qubits == 3

@@ -221,6 +221,9 @@ class _QiskitProgramContext(AbstractProgramContext):
             raise NotImplementedError(
                 "AdjointGradient result type is not supported in the Qiskit compilation pipeline."
             )
+        if targets := getattr(result, "targets", None):
+            # Add physical qubits referenced only in a result type
+            self._ensure_qubit_capacity(targets)
         self._result_types.append(result)
         qc = self._circuit_stack[0]
         qc.metadata["braket_result_pragmas"] = self._result_types

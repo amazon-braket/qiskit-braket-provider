@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.30.0 (2026-11-23)
+
+### Features
+
+ * Accept an `AwsSession` in `BraketProvider` and `BraketAwsBackend`
+
+### Bug Fixes and Other Changes
+
+ * Keep physical qubits that appear in result types in `to_qiskit`
+ * translate OpenQASM reset in to_qiskit
+
+### Documentation Changes
+
+ * Python 3.14
+
 ## v0.29.0 (2026-11-16)
 
 ### Features
