@@ -51,7 +51,7 @@ from qiskit_braket_provider import (
 from qiskit_braket_provider.providers.adapter import native_gate_connectivity
 from qiskit_braket_provider.providers.braket_sampler import BraketSampler
 from qiskit_braket_provider.providers.target import aws_device_to_target
-from test.unit_tests.mocks import (
+from .mocks import (
     MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES,
     MOCK_RIGETTI_M_3_QPU_CAPABILITIES,
     MOCK_RIGETTI_STANARDIZED_PROPERTIES,

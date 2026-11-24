@@ -24,7 +24,7 @@ from qiskit_braket_provider import (
     to_qiskit,
 )
 from qiskit_braket_provider.providers.braket_backend import BraketBackend
-from test.unit_tests.mocks import (
+from .mocks import (
     MOCK_GATE_MODEL_SIMULATOR_DM,
     MOCK_GATE_MODEL_SIMULATOR_SV,
     MOCK_RIGETTI_GATE_MODEL_M_3_QPU,

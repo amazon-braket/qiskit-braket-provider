@@ -55,7 +55,7 @@ from qiskit_braket_provider.providers.adapter import (
 )
 from qiskit_braket_provider.providers.braket_instructions import CCPRx, MeasureFF
 from qiskit_braket_provider.providers.gate_mappings import _BRAKET_GATE_NAME_TO_QISKIT_GATE
-from test.unit_tests.mocks import (
+from .mocks import (
     MOCK_RIGETTI_GATE_MODEL_QPU_CAPABILITIES,
     MOCK_RIGETTI_STANARDIZED_PROPERTIES,
     MOCK_RIGETTI_TOPOLOGY_GRAPH,
